@@ -68,6 +68,9 @@ Emails go through a Postgres outbox and a background worker started by `main.ts`
 put files with the same names in `templates/<client_id>/` to override them for one app. The build copies the
 templates into `dist/`.
 
+TODO(U5/U6): pass the token TTL to the templates as a variable. The default confirmation and password-reset
+templates hard-code "24 hours" and "1 hour" while the real TTLs live in U5/U6.
+
 ## Run locally without Docker
 
 Requires Node 24 (see `.nvmrc`).
