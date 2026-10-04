@@ -14,6 +14,10 @@ export class InMemoryAppRepository implements AppRepository {
     return this.apps.get(clientId) ?? null;
   }
 
+  async findById(id: string): Promise<App | null> {
+    return [...this.apps.values()].find((app) => app.id === id) ?? null;
+  }
+
   async isOriginAllowed(origin: string): Promise<boolean> {
     return [...this.apps.values()].some((app) => app.isActive() && app.allowedOrigins.includes(origin));
   }
