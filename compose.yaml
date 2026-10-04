@@ -1,7 +1,23 @@
 # Local development stack. Credentials below are for local use only.
 services:
+  # One-shot: applies pending migrations and exits. The runtime image is distroless
+  # (no npm, no shell), so the TypeORM CLI runs with the image's own node. The app
+  # itself never migrates on startup (migrationsRun: false).
+  migrate:
+    # Reuses the image built for the api service (single build, same tag).
+    image: hypot-api:dev
+    pull_policy: never
+    command: ["node_modules/typeorm/cli.js", "migration:run", "-d", "dist/platform/persistence/data-source.js"]
+    environment:
+      DATABASE_URL: postgres://hypot:hypot_dev_only@postgres:5432/hypot
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   api:
     build: .
+    image: hypot-api:dev
     ports:
       - "3000:3000"
     environment:
@@ -13,6 +29,8 @@ services:
       SMTP_SECURE: "false"
       MAIL_FROM: no-reply@hypot.local
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       mailpit:
