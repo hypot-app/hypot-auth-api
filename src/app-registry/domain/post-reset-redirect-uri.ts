@@ -1,11 +1,8 @@
 import { DomainError } from '../../shared-kernel/domain-error';
 import { err, ok, type Result } from '../../shared-kernel/result';
+import { LOCAL_HOSTS, type UrlRuleOptions } from './local-hosts';
 
-const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1']);
-
-export interface PostResetRedirectUriOptions {
-  isProduction: boolean;
-}
+export type PostResetRedirectUriOptions = UrlRuleOptions;
 
 /**
  * Fixed URL where Auth sends the user after a successful password reset (ADR 27).

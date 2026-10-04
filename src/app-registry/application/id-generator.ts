@@ -2,7 +2,7 @@
 export interface IdGenerator {
   /** Internal primary key (UUID). */
   appId(): string;
-  /** Public OAuth `client_id`. Not a secret, but unguessable. */
+  /** Public OAuth `client_id`. Format `app_` + 32 hex chars; never starts with "-". Not a secret, but unguessable. */
   clientId(): string;
 }
 
