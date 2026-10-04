@@ -1,0 +1,37 @@
+schema: spec-driven
+
+context: |
+  Project: hypot - centralized, multi-app authentication service (greenfield).
+  Source PRD: PRD-AUTH.md (Spanish). The PRD is NOT edited; SDD artifacts normalize it.
+  Tech stack (from PRD): Node.js 24 LTS, NestJS (TypeScript), PostgreSQL 14+, RS256 JWT, bcrypt, Nodemailer over generic SMTP (provider-agnostic).
+  Architecture: to be defined in sdd-design.
+  Testing: Jest + @swc/jest, supertest, Testcontainers (strict_tdd: true from U1 onward).
+  Style: artifacts in English, professional tone.
+
+strict_tdd: true
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+    - Respect binding decisions in engram sdd/auth-service/decisions
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Include sequence diagrams for complex flows
+    - Document architecture decisions with rationale
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    guidelines:
+      - Follow existing code patterns
+      - Strict TDD (RED, GREEN, REFACTOR) for every task after U1
+    tdd: true
+    test_command: "npm test"
+  verify:
+    test_command: "npm test"
+    build_command: "npm run build"
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas
