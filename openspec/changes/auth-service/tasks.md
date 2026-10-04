@@ -70,7 +70,7 @@ Steps 1.1-1.3 run directly on `main` and `develop` (no PR). Steps 1.4-1.9 run on
 - [x] 1.1 `git init -b main`; add `.gitignore` (`node_modules`, `dist`, `.env`, `coverage`), `.nvmrc` (24), `.editorconfig`
 - [x] 1.2 Welcome commit on `main`: minimal NestJS 11 app (`package.json` engines `>=24 <25`, `tsconfig.json`, `src/main.ts`, `src/app.module.ts`, `src/platform/welcome.controller.ts` with `GET /` returning `{ "message": "Welcome to the API" }`). Verify with a manual `curl`. Commit: `feat: add welcome endpoint`
 - [x] 1.3 `git switch -c develop` from the welcome commit; then `git switch -c feat/u1-bootstrap` from `develop`
-- [x] 1.4 Add `typeorm`, `@nestjs/typeorm`, `pg`, `@nestjs/config`, `zod`. Create `src/platform/persistence/typeorm.options.ts` (shared options, `synchronize: false`, `migrationsRun: false`, migrations glob) and `data-source.ts` (standalone `DataSource` for the CLI). Create an empty `migrations/` folder.
+- [x] 1.4 Add `typeorm`, `@nestjs/typeorm`, `pg`, `zod` (`@nestjs/config` was dropped in U2 review; see ADR 20). Create `src/platform/persistence/typeorm.options.ts` (shared options, `synchronize: false`, `migrationsRun: false`, migrations glob) and `data-source.ts` (standalone `DataSource` for the CLI). Create an empty `migrations/` folder.
 - [x] 1.5 npm scripts: `migration:generate`, `migration:create`, `migration:run`, `migration:revert` (all `-d` the CLI DataSource), `build`, `start`, `test`
 - [x] 1.6 Add Jest with `@swc/jest` (decorator metadata enabled), `supertest`, and `@testcontainers/postgresql`. Create `jest.config.ts` and `test/support/postgres.ts`, which starts a container, initializes a TypeORM `DataSource`, runs `runMigrations()`, and exposes truncate and teardown helpers.
 - [x] 1.7 Smoke tests: e2e `GET /` returns the welcome message (supertest), and an integration test boots Postgres and runs migrations (`SELECT 1`)
@@ -81,19 +81,19 @@ Steps 1.1-1.3 run directly on `main` and `develop` (no PR). Steps 1.4-1.9 run on
 
 Branch `feat/u1b-docker` was branched from 047fff7, which is also the tip of `develop`, so no rebase is needed. The PR targets `develop` (never `main`). Merge order: U1b merges into `develop` first; then `develop` is merged into `feat/u1-bootstrap` with a merge commit, not a rebase, because that branch is already published; then PR U1 merges. Forecast: about 80-120 changed lines.
 
-- [ ] 1b.1 `Dockerfile`, multi-stage: build stage `node:24-alpine` (`npm ci`, `npm run build`); runtime stage `node:24-alpine` (`npm ci --omit=dev`, copy `dist/` only, `NODE_ENV=production`, non-root `node` user, `EXPOSE 3000`, `HEALTHCHECK` on `GET /` using node, `CMD ["node","dist/main.js"]`)
-- [ ] 1b.2 `.dockerignore`: `node_modules`, `dist`, `.git`, `openspec`, `.atl`, `coverage`, `test`, markdown docs, `.env*`
-- [ ] 1b.3 `compose.yaml` with `api` (built from the Dockerfile, port 3000, `PORT` and `DATABASE_URL`, `depends_on` postgres `service_healthy`), `postgres` (`postgres:17-alpine`, dev-only credentials, named volume, `pg_isready` healthcheck, port 5432), and `mailpit` (`axllent/mailpit`, ports 8025 UI and 1025 SMTP). The app does not connect to the DB yet; U2 wires it.
-- [ ] 1b.4 README: "Run locally with Docker" section (`docker compose up --build`, URLs, Node 24 + npm alternative)
-- [ ] 1b.5 Verify: `docker build`, `docker compose up -d --build`, `curl http://localhost:3000/` returns the welcome message, Mailpit UI answers on :8025, then `docker compose down -v`. Commit: `build: add dockerfile and compose for local development`.
+- [x] 1b.1 `Dockerfile`, multi-stage: build stage `node:24-alpine` (`npm ci`, `npm run build`); runtime stage `node:24-alpine` (`npm ci --omit=dev`, copy `dist/` only, `NODE_ENV=production`, non-root `node` user, `EXPOSE 3000`, `HEALTHCHECK` on `GET /` using node, `CMD ["node","dist/main.js"]`)
+- [x] 1b.2 `.dockerignore`: `node_modules`, `dist`, `.git`, `openspec`, `.atl`, `coverage`, `test`, markdown docs, `.env*`
+- [x] 1b.3 `compose.yaml` with `api` (built from the Dockerfile, port 3000, `PORT` and `DATABASE_URL`, `depends_on` postgres `service_healthy`), `postgres` (`postgres:17-alpine`, dev-only credentials, named volume, `pg_isready` healthcheck, port 5432), and `mailpit` (`axllent/mailpit`, ports 8025 UI and 1025 SMTP). The app does not connect to the DB yet; U2 wires it.
+- [x] 1b.4 README: "Run locally with Docker" section (`docker compose up --build`, URLs, Node 24 + npm alternative)
+- [x] 1b.5 Verify: `docker build`, `docker compose up -d --build`, `curl http://localhost:3000/` returns the welcome message, Mailpit UI answers on :8025, then `docker compose down -v`. Commit: `build: add dockerfile and compose for local development`.
 
 ## U2 Platform (RED -> GREEN -> REFACTOR per item)
 
-- [ ] 2.1 RED/GREEN: `src/shared-kernel/` Clock, TokenGenerator (>=32 bytes, SHA-256 hash), Result/DomainError, UnitOfWork port; tests
-- [ ] 2.2 RED/GREEN: `src/platform/config` zod schema (DB settings consumed by `typeorm.options.ts`, plus `AUTH_PUBLIC_BASE_URL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`; `SMTP_USER`/`SMTP_PASS` both or neither), fail fast on invalid env; test
-- [ ] 2.3 RED/GREEN: `TypeOrmModule.forRootAsync` wiring plus the `TypeOrmUnitOfWork` adapter (`DataSource.transaction()` + AsyncLocalStorage `EntityManager`, plus a `currentManager()` helper for repositories); integration test for commit and rollback (Testcontainers)
-- [ ] 2.4 RED/GREEN: `GET /health` with a DB ping, e2e; REFACTOR module wiring. Commit: `feat(platform): add config, typeorm, uow, health`
-- [ ] 2.5 RED/GREEN/REFACTOR: API prefix (ADR 28). RED: an e2e test built on the shared factory asserting that `/api/v1/...` business routes resolve (for example `GET /api/v1/me` answers 401, not 404), that `GET /`, `GET /health`, and `GET /.well-known/jwks.json` stay at the root, and that the unprefixed business path (for example `GET /me`) returns 404. GREEN: `src/platform/configure-app.ts` exporting `configureApp(app)`, which calls `app.setGlobalPrefix('api/v1', { exclude: ['/', 'health', '.well-known/jwks.json'] })`; call it from `main.ts` and from the e2e factory `test/support/create-test-app.ts`. REFACTOR: update the existing welcome e2e test from U1 to build its app through the shared factory. Commit: `feat(platform): add api v1 global prefix`
+- [x] 2.1 RED/GREEN: `src/shared-kernel/` Clock, TokenGenerator (>=32 bytes, SHA-256 hash), Result/DomainError, UnitOfWork port; tests
+- [x] 2.2 RED/GREEN: `src/platform/config` zod schema (DB settings consumed by `typeorm.options.ts`, plus `AUTH_PUBLIC_BASE_URL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`; `SMTP_USER`/`SMTP_PASS` both or neither), fail fast on invalid env; test
+- [x] 2.3 RED/GREEN: `TypeOrmModule.forRootAsync` wiring plus the `TypeOrmUnitOfWork` adapter (`DataSource.transaction()` + AsyncLocalStorage `EntityManager`, plus a `currentManager()` helper for repositories); integration test for commit and rollback (Testcontainers)
+- [x] 2.4 RED/GREEN: `GET /health` with a DB ping, e2e; REFACTOR module wiring. Commit: `feat(platform): add config, typeorm, uow, health`
+- [x] 2.5 RED/GREEN/REFACTOR: API prefix (ADR 28). RED: an e2e test built on the shared factory asserting that `/api/v1/...` business routes resolve (for example `GET /api/v1/me` answers 401, not 404), that `GET /`, `GET /health`, and `GET /.well-known/jwks.json` stay at the root, and that the unprefixed business path (for example `GET /me`) returns 404. GREEN: `src/platform/configure-app.ts` exporting `configureApp(app)`, which calls `app.setGlobalPrefix('api/v1', { exclude: ['/', 'health', '.well-known/jwks.json'] })`; call it from `main.ts` and from the e2e factory `test/support/create-test-app.ts`. REFACTOR: update the existing welcome e2e test from U1 to build its app through the shared factory. Commit: `feat(platform): add api v1 global prefix`
 
 ## U3 app-registry
 
@@ -104,6 +104,14 @@ Branch `feat/u1b-docker` was branched from 047fff7, which is also the tip of `de
 - [ ] 3.4 RED/GREEN: `src/cli.ts` nest-commander create/update/deactivate; e2e: app routes return 404
 - [ ] 3.4a RED/GREEN/REFACTOR: CLI `--post-reset-redirect-uri <url>` on create and update, plus `--clear-post-reset-redirect-uri` on update. Use cases validate through `PostResetRedirectUri` (`isProduction` from validated config) before persisting. Tests: valid value stored, omitted gives null, update and clear, invalid value rejected with nothing persisted, `NODE_ENV=production` rejects http localhost. REFACTOR: share the option parsing between create and update
 - [ ] 3.5 RED/GREEN: per-app CORS middleware from `allowed_origins`. Commit: `feat(app-registry): add apps, cli, origin checks`
+- [ ] 3.6 Container migrations: the distroless image has no npm or shell, so `npm run migration:run` cannot run inside it. Run the TypeORM CLI with the image's own node: `node_modules/typeorm/cli.js migration:run -d dist/platform/persistence/data-source.js`. Steps:
+  - Confirm `typeorm` is a production dependency and that compiled migrations land in `dist/`.
+  - Add a one-shot `migrate` service to `compose.yaml` that uses the same image, overrides the command to run the migrations, and depends on `postgres` being healthy.
+  - Make `api` depend on `migrate` with `condition: service_completed_successfully`.
+  - Keep `migrationsRun: false`, so the app never migrates on startup.
+  - Document the `docker compose run --rm migrate` and revert commands in the README. The CLI (`node dist/cli.js`) runs the same way.
+  - Verify: `docker compose up -d --build` creates the `apps` table (check it with `psql` in the postgres container), the api becomes healthy, and a second `up` is a no-op.
+  - Commit: `build: run migrations in a one-shot compose service`
 
 ## U4 transactional-email
 
@@ -162,3 +170,8 @@ Branch `feat/u1b-docker` was branched from 047fff7, which is also the tip of `de
 - [ ] 10.3 Full migration chain test: run all migrations, revert all of them to an empty schema, then run them again
 - [ ] 10.4 OpenAPI setup, `README` (including the migration runbook: `migration:run` / `migration:revert`), `.env.example` (with `AUTH_PUBLIC_BASE_URL` and all `SMTP_*` / `MAIL_FROM`, pointing at a local Mailpit), `ops:revoke-all` CLI command, login P95 load-test script
 - [ ] 10.5 Verify the route table matches the design exactly (16 routes: 13 under `/api/v1`, 3 at the root) and no Phase 2-4 endpoints exist. Commit: `docs: add openapi, runbook, e2e coverage`
+
+## Follow-ups (from U2 review, not scheduled in any unit above)
+
+- [ ] F.1 Split liveness (`/live`) from readiness (`/health`) before any orchestrator deployment. Today the container HEALTHCHECK and `/health` conflate the two: a DB outage marks the container unhealthy, which would trigger restarts instead of just removing it from rotation.
+- [ ] F.2 Support `_FILE`-suffixed env vars (e.g. `DATABASE_URL_FILE`, `SMTP_PASS_FILE`) so secrets can be loaded from mounted files, as ADR 20 states. Today config reads plain env vars only.

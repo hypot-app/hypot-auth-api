@@ -1,0 +1,45 @@
+import type { INestApplication, Type } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import { AppModule } from '../../src/app.module';
+import { APP_CONFIG, type AppConfig } from '../../src/platform/config/app-config';
+import { configureApp } from '../../src/platform/configure-app';
+
+export interface TestAppOptions {
+  /** Connection URL of the Testcontainers database the app must use. */
+  databaseUrl: string;
+  /** Extra controllers to register, for probing routing before a real route exists. */
+  controllers?: Type<unknown>[];
+  config?: Partial<AppConfig>;
+}
+
+export function buildTestConfig(options: Pick<TestAppOptions, 'databaseUrl' | 'config'>): AppConfig {
+  return {
+    nodeEnv: 'test',
+    isProduction: false,
+    port: 0,
+    databaseUrl: options.databaseUrl,
+    authPublicBaseUrl: 'http://localhost:3000',
+    smtp: { host: 'localhost', port: 1025, secure: false, auth: undefined },
+    mailFrom: 'no-reply@example.test',
+    ...options.config,
+  };
+}
+
+/**
+ * Builds the app exactly like main.ts does: same module, same configureApp.
+ * Tests therefore hit the production route layout (ADR 28).
+ */
+export async function createTestApp(options: TestAppOptions): Promise<INestApplication> {
+  const moduleRef = await Test.createTestingModule({
+    imports: [AppModule],
+    controllers: options.controllers ?? [],
+  })
+    .overrideProvider(APP_CONFIG)
+    .useValue(buildTestConfig(options))
+    .compile();
+
+  const app = moduleRef.createNestApplication();
+  configureApp(app);
+  await app.init();
+  return app;
+}
