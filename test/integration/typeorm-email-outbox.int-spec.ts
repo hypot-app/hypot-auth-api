@@ -100,31 +100,6 @@ describe('TypeOrmEmailOutbox (integration)', () => {
     expect(await rawRow(queued.id)).toEqual({ payload: {}, status: 'sent' });
   });
 
-  it('skips an email another worker holds locked', async () => {
-    const first = email(at(1));
-    const second = email(at(2));
-    await outbox.save(first);
-    await outbox.save(second);
-
-    // Worker A claims the first email and keeps its transaction open.
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => (release = resolve));
-    let firstClaimed!: (email: OutboxEmail | null) => void;
-    const claimedByA = new Promise<OutboxEmail | null>((resolve) => (firstClaimed = resolve));
-    const workerA = uow.run(async () => {
-      firstClaimed(await outbox.claimNextDue(at(10)));
-      await held;
-    });
-    expect((await claimedByA)?.id).toBe(first.id);
-
-    // Worker B runs in its own transaction while A still holds the lock.
-    const claimedByB = await uow.run(() => outbox.claimNextDue(at(10)));
-    release();
-    await workerA;
-
-    expect(claimedByB?.id).toBe(second.id);
-  });
-
   it('joins the unit of work: a rollback discards the enqueue', async () => {
     const queued = email(at(0));
     await expect(

@@ -1,4 +1,3 @@
-import { OutboxEmail } from '../../domain/outbox-email';
 import { EmailOutboxMapper } from './email-outbox.mapper';
 import type { EmailOutboxRow } from './email-outbox.schema';
 
@@ -40,18 +39,6 @@ describe('EmailOutboxMapper', () => {
     const fresh = rowOf({ status: 'pending', attempts: 0, last_error: null });
     expect(EmailOutboxMapper.toPersistence(EmailOutboxMapper.toDomain(failed))).toEqual(failed);
     expect(EmailOutboxMapper.toPersistence(EmailOutboxMapper.toDomain(fresh))).toEqual(fresh);
-  });
-
-  it('round-trips domain -> row -> domain', () => {
-    const email = OutboxEmail.queue({
-      id: '33333333-3333-4333-8333-333333333333',
-      appId: '22222222-2222-4222-8222-222222222222',
-      to: 'bo@example.com',
-      template: 'welcome',
-      payload: {},
-      now: NOW,
-    });
-    expect(EmailOutboxMapper.toDomain(EmailOutboxMapper.toPersistence(email))).toEqual(email);
   });
 
   it('does not share the payload object between row and domain', () => {

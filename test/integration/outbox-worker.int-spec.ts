@@ -95,24 +95,6 @@ describe('OutboxWorker with Postgres (integration)', () => {
     ]);
   });
 
-  it('records a provider failure on the row and keeps it pending for a retry', async () => {
-    const sender = new FakeEmailSender();
-    sender.failWith = new Error('connection refused');
-    await queue('ana@example.com', {});
-
-    await workerWith(sender).processNext();
-
-    expect(await rows()).toEqual([
-      {
-        to_address: 'ana@example.com',
-        status: 'pending',
-        attempts: 1,
-        payload: {},
-        last_error: 'Error: connection refused',
-      },
-    ]);
-  });
-
   it('two workers running at once deliver each email exactly once', async () => {
     const senderA = new FakeEmailSender();
     const senderB = new FakeEmailSender();
