@@ -96,13 +96,59 @@ describe('app CLI (integration)', () => {
 
     it('rejects an unknown --type without persisting', async () => {
       const run = await cli(['app', 'create', '--name', 'X', '--type', 'weird']);
-      expect(run.errors.length + run.err.length).toBeGreaterThan(0);
+      expect(run.errors.map((e) => e.message)).toEqual(['--type must be "public" or "confidential", got "weird"']);
       expect(await rows()).toHaveLength(0);
     });
 
     it('requires --name', async () => {
       const run = await cli(['app', 'create']);
-      expect(run.errors.length + run.err.length).toBeGreaterThan(0);
+      expect(run.errors.map((e) => e.message)).toEqual(['--name is required']);
+      expect(await rows()).toHaveLength(0);
+    });
+  });
+
+  describe('app create client_id', () => {
+    it('prints a client_id shaped app_<32 hex>, safe to pass as a CLI argument', async () => {
+      const run = await cli(['app', 'create', '--name', 'Shop']);
+      expect(clientIdFrom(run.out)).toMatch(/^app_[0-9a-f]{32}$/);
+    });
+  });
+
+  describe('app create origin and redirect uri validation', () => {
+    it('stores origins normalized (lower-case, de-duplicated)', async () => {
+      const run = await cli(['app', 'create', '--name', 'Shop', '--origin', 'HTTPS://A.example', '--origin', 'https://a.example']);
+      expect(run.errors).toEqual([]);
+      expect((await rows())[0].allowed_origins).toEqual(['https://a.example']);
+    });
+
+    it.each(['https://a.example/', 'https://a.example/app', 'null', '*', 'http://a.example'])(
+      'rejects the origin %s with a clear error and persists nothing',
+      async (origin) => {
+        const run = await cli(['app', 'create', '--name', 'Shop', '--type', 'confidential', '--origin', origin]);
+
+        expect(run.errors).toHaveLength(1);
+        expect(run.errors[0].message).toContain(`Invalid allowed origin "${origin}"`);
+        expect(run.out.join('\n')).not.toMatch(/client_(id|secret)/);
+        expect(await rows()).toHaveLength(0);
+      },
+    );
+
+    it.each(['/cb', 'https://a.example/cb#x', 'http://a.example/cb', 'myapp://cb'])(
+      'rejects the redirect uri %s with a clear error and persists nothing',
+      async (uri) => {
+        const run = await cli(['app', 'create', '--name', 'Shop', '--redirect-uri', uri]);
+
+        expect(run.errors).toHaveLength(1);
+        expect(run.errors[0].message).toContain(`Invalid redirect URI "${uri}"`);
+        expect(await rows()).toHaveLength(0);
+      },
+    );
+
+    it('rejects an http localhost origin in production', async () => {
+      const run = await cli(['app', 'create', '--name', 'Dev', '--origin', 'http://localhost:5173'], {
+        isProduction: true,
+      });
+      expect(run.errors).toHaveLength(1);
       expect(await rows()).toHaveLength(0);
     });
   });
@@ -228,6 +274,22 @@ describe('app CLI (integration)', () => {
 
       expect(run.errors).toHaveLength(1);
       expect((await rows())[0]).toMatchObject({ name: 'Shop', post_reset_redirect_uri: 'https://a.example/login' });
+    });
+
+    it('rejects an invalid origin or redirect uri and persists no change', async () => {
+      const clientId = await createApp(['--origin', 'https://a.example']);
+
+      const badOrigin = await cli(['app', 'update', clientId, '--name', 'Changed', '--origin', 'https://b.example/']);
+      expect(badOrigin.errors.map((e) => e.message)).toEqual([expect.stringContaining('Invalid allowed origin')]);
+
+      const badUri = await cli(['app', 'update', clientId, '--name', 'Changed', '--redirect-uri', '/cb']);
+      expect(badUri.errors.map((e) => e.message)).toEqual([expect.stringContaining('Invalid redirect URI')]);
+
+      expect((await rows())[0]).toMatchObject({
+        name: 'Shop',
+        allowed_origins: ['https://a.example'],
+        redirect_uris: ['https://a.example/cb'],
+      });
     });
 
     it('rejects http://localhost in production', async () => {

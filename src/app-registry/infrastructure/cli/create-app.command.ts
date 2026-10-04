@@ -26,6 +26,7 @@ export class CreateAppCommand extends AppOptionsCommand {
   }
 
   async run(_args: string[], options: CreateOptions = {}): Promise<void> {
+    // Validated by hand, not with commander `required`/`choices`: commander calls process.exit on sub-commands.
     if (!options.name) throw new CliError('--name is required');
     const clientType = options.type ?? 'public';
     if (clientType !== 'public' && clientType !== 'confidential') {
