@@ -104,6 +104,14 @@ Branch `feat/u1b-docker` was branched from 047fff7, which is also the tip of `de
 - [ ] 3.4 RED/GREEN: `src/cli.ts` nest-commander create/update/deactivate; e2e: app routes return 404
 - [ ] 3.4a RED/GREEN/REFACTOR: CLI `--post-reset-redirect-uri <url>` on create and update, plus `--clear-post-reset-redirect-uri` on update. Use cases validate through `PostResetRedirectUri` (`isProduction` from validated config) before persisting. Tests: valid value stored, omitted gives null, update and clear, invalid value rejected with nothing persisted, `NODE_ENV=production` rejects http localhost. REFACTOR: share the option parsing between create and update
 - [ ] 3.5 RED/GREEN: per-app CORS middleware from `allowed_origins`. Commit: `feat(app-registry): add apps, cli, origin checks`
+- [ ] 3.6 Container migrations: the distroless image has no npm or shell, so `npm run migration:run` cannot run inside it. Run the TypeORM CLI with the image's own node: `node_modules/typeorm/cli.js migration:run -d dist/platform/persistence/data-source.js`. Steps:
+  - Confirm `typeorm` is a production dependency and that compiled migrations land in `dist/`.
+  - Add a one-shot `migrate` service to `compose.yaml` that uses the same image, overrides the command to run the migrations, and depends on `postgres` being healthy.
+  - Make `api` depend on `migrate` with `condition: service_completed_successfully`.
+  - Keep `migrationsRun: false`, so the app never migrates on startup.
+  - Document the `docker compose run --rm migrate` and revert commands in the README. The CLI (`node dist/cli.js`) runs the same way.
+  - Verify: `docker compose up -d --build` creates the `apps` table (check it with `psql` in the postgres container), the api becomes healthy, and a second `up` is a no-op.
+  - Commit: `build: run migrations in a one-shot compose service`
 
 ## U4 transactional-email
 
