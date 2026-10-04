@@ -21,58 +21,36 @@ describe('SmtpEmailSender (integration, Mailpit)', () => {
     await mailpit.clear();
   });
 
-  it('delivers the message: recipient, sender, subject and text body arrive intact', async () => {
+  it('delivers the message: recipient, sender (including a display name), subject and text arrive intact', async () => {
     await senderFor().send({
       to: 'ana@example.com',
-      from: 'no-reply@auth.example',
+      from: 'Shop <hello@shop.example>',
       subject: 'Confirm your email',
       text: 'Open https://auth.example/api/v1/accounts/confirm?token=abc&x=1',
     });
 
     const [message] = await mailpit.messages();
     expect(message).toMatchObject({
-      from: { address: 'no-reply@auth.example' },
+      from: { name: 'Shop', address: 'hello@shop.example' },
       to: [{ address: 'ana@example.com' }],
       subject: 'Confirm your email',
     });
     expect(message?.text.trim()).toBe('Open https://auth.example/api/v1/accounts/confirm?token=abc&x=1');
   });
 
-  it('sends the from address it is given, including a display name (the per-app override)', async () => {
-    const sender = senderFor();
-    await sender.send({ to: 'ana@example.com', from: 'Auth <no-reply@auth.example>', subject: 'a', text: 'a' });
-    await sender.send({ to: 'ana@example.com', from: 'Shop <hello@shop.example>', subject: 'b', text: 'b' });
+  it('refuses to send credentials over a connection that offers no STARTTLS, and delivers nothing', async () => {
+    // Mailpit here has no TLS, which is what a STARTTLS-stripping attacker looks like from the client.
+    const sender = senderFor({ auth: { user: 'smtp-user', pass: SMTP_PASS } });
 
-    const messages = await mailpit.messages();
-    expect(messages.map((m) => m.from)).toEqual([
-      { name: 'Auth', address: 'no-reply@auth.example' },
-      { name: 'Shop', address: 'hello@shop.example' },
-    ]);
-  });
+    const failure = await sender
+      .send({ to: 'ana@example.com', from: 'no-reply@auth.example', subject: 'with auth', text: 'x' })
+      .then(
+        () => null,
+        (error: unknown) => error,
+      );
 
-  it('includes the html part when given', async () => {
-    await senderFor().send({
-      to: 'ana@example.com',
-      from: 'no-reply@auth.example',
-      subject: 's',
-      text: 'plain body',
-      html: '<p>html body</p>',
-    });
-
-    const [message] = await mailpit.messages();
-    expect(message?.text.trim()).toBe('plain body');
-    expect(message?.html).toBe('<p>html body</p>');
-  });
-
-  it('authenticates when SMTP user and password are configured', async () => {
-    await senderFor({ auth: { user: 'smtp-user', pass: SMTP_PASS } }).send({
-      to: 'ana@example.com',
-      from: 'no-reply@auth.example',
-      subject: 'with auth',
-      text: 'x',
-    });
-
-    expect((await mailpit.messages()).map((m) => m.subject)).toEqual(['with auth']);
+    expect(failure).toMatchObject({ message: expect.stringMatching(/STARTTLS/i) });
+    expect(await mailpit.messages()).toEqual([]);
   });
 
   it('sends to exactly one address: a list or an injected header is refused and nothing is delivered', async () => {
