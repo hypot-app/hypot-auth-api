@@ -5,7 +5,6 @@ import { AppRegistryModule } from '../app-registry/app-registry.module';
 import { APP_REPOSITORY, type AppRepository } from '../app-registry/domain/app.repository';
 import { APP_CONFIG, type AppConfig } from '../platform/config/app-config';
 import { CLOCK, type Clock } from '../shared-kernel/clock';
-import { UNIT_OF_WORK, type UnitOfWork } from '../shared-kernel/unit-of-work';
 import { EmailLinks } from './application/email-links';
 import { OutboxWorker } from './application/outbox-worker';
 import { EMAIL_OUTBOX, type EmailOutbox } from './domain/email-outbox';
@@ -39,13 +38,12 @@ const MAX_DELIVERY_ATTEMPTS = 8;
     { provide: TEMPLATE_RENDERER, useValue: new HandlebarsTemplateRenderer(join(__dirname, 'templates')) },
     {
       provide: OutboxWorker,
-      inject: [EMAIL_OUTBOX, APP_REPOSITORY, EMAIL_SENDER, TEMPLATE_RENDERER, UNIT_OF_WORK, CLOCK, APP_CONFIG],
+      inject: [EMAIL_OUTBOX, APP_REPOSITORY, EMAIL_SENDER, TEMPLATE_RENDERER, CLOCK, APP_CONFIG],
       useFactory: (
         outbox: EmailOutbox,
         apps: AppRepository,
         sender: EmailSender,
         renderer: TemplateRenderer,
-        uow: UnitOfWork,
         clock: Clock,
         config: AppConfig,
       ) =>
@@ -54,7 +52,6 @@ const MAX_DELIVERY_ATTEMPTS = 8;
           apps,
           sender,
           renderer,
-          uow,
           clock,
           links: new EmailLinks(config.authPublicBaseUrl),
           defaultFrom: config.mailFrom,
