@@ -97,10 +97,10 @@ Branch `feat/u1b-docker` was branched from 047fff7, which is also the tip of `de
 
 ## U3 app-registry
 
-- [ ] 3.1 RED: `AppSchema` (`EntitySchema<AppRow>`, including nullable `post_reset_redirect_uri text`) plus migration `CreateApps` with `down()` (the column is part of this create migration, since `apps` does not exist yet); integration test for unique `client_id`, for a null and a stored `post_reset_redirect_uri`, and for migration reversibility (up -> down -> up)
-- [ ] 3.2 GREEN: domain `App`, `AppRepository` port, `AppMapper` (round-trip unit test, including the null case), `TypeOrmAppRepository` implementing the port; register use case (public: no secret; confidential: secret shown once, hashed)
-- [ ] 3.2a RED/GREEN/REFACTOR: `PostResetRedirectUri` value object. Unit tests first: accepts `https://a.example/login`; rejects relative, `javascript:`, `ftp:`, userinfo, fragment, and `http://a.example`; accepts `http://localhost` and `http://127.0.0.1` only when `isProduction` is false and rejects them when true; null is allowed. REFACTOR: table-driven cases
-- [ ] 3.3 RED/GREEN: exact redirect URI match; unknown/inactive `client_id` generic invalid-client
+- [x] 3.1 RED: `AppSchema` (`EntitySchema<AppRow>`, including nullable `post_reset_redirect_uri text`) plus migration `CreateApps` with `down()` (the column is part of this create migration, since `apps` does not exist yet); integration test for unique `client_id`, for a null and a stored `post_reset_redirect_uri`, and for migration reversibility (up -> down -> up)
+- [x] 3.2 GREEN: domain `App`, `AppRepository` port, `AppMapper` (round-trip unit test, including the null case), `TypeOrmAppRepository` implementing the port; register use case (public: no secret; confidential: secret shown once, hashed)
+- [x] 3.2a RED/GREEN/REFACTOR: `PostResetRedirectUri` value object. Unit tests first: accepts `https://a.example/login`; rejects relative, `javascript:`, `ftp:`, userinfo, fragment, and `http://a.example`; accepts `http://localhost` and `http://127.0.0.1` only when `isProduction` is false and rejects them when true; null is allowed. REFACTOR: table-driven cases
+- [x] 3.3 RED/GREEN: exact redirect URI match; unknown/inactive `client_id` generic invalid-client
 - [ ] 3.4 RED/GREEN: `src/cli.ts` nest-commander create/update/deactivate; e2e: app routes return 404
 - [ ] 3.4a RED/GREEN/REFACTOR: CLI `--post-reset-redirect-uri <url>` on create and update, plus `--clear-post-reset-redirect-uri` on update. Use cases validate through `PostResetRedirectUri` (`isProduction` from validated config) before persisting. Tests: valid value stored, omitted gives null, update and clear, invalid value rejected with nothing persisted, `NODE_ENV=production` rejects http localhost. REFACTOR: share the option parsing between create and update
 - [ ] 3.5 RED/GREEN: per-app CORS middleware from `allowed_origins`. Commit: `feat(app-registry): add apps, cli, origin checks`
