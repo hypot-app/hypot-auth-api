@@ -1,5 +1,5 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { DataSource } from 'typeorm';
+import { DataSource, type EntitySchema } from 'typeorm';
 import { buildTypeOrmOptions } from '../../src/platform/persistence/typeorm.options';
 
 export interface TestDatabase {
@@ -16,10 +16,10 @@ export interface TestDatabase {
  * Starts a throwaway Postgres container, initializes a TypeORM DataSource
  * against it and runs all migrations. Requires a running Docker daemon.
  */
-export async function startTestDatabase(): Promise<TestDatabase> {
+export async function startTestDatabase(options: { entities?: EntitySchema[] } = {}): Promise<TestDatabase> {
   const container: StartedPostgreSqlContainer = await new PostgreSqlContainer('postgres:17-alpine').start();
   const url = container.getConnectionUri();
-  const dataSource = new DataSource(buildTypeOrmOptions({ url }));
+  const dataSource = new DataSource({ ...buildTypeOrmOptions({ url }), entities: options.entities ?? [] });
   await dataSource.initialize();
   await dataSource.runMigrations();
 

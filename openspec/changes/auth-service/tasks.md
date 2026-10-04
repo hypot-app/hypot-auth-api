@@ -97,7 +97,7 @@ Branch `feat/u1b-docker` was branched from 047fff7, which is also the tip of `de
 
 ## U3 app-registry
 
-- [ ] 3.1 RED: `AppSchema` (`EntitySchema<AppRow>`, including nullable `post_reset_redirect_uri text`) plus migration `CreateApps` with `down()` (the column is part of this create migration, since `apps` does not exist yet); integration test for unique `client_id`, for a null and a stored `post_reset_redirect_uri`, and for migration reversibility (up -> down -> up)
+- [x] 3.1 RED: `AppSchema` (`EntitySchema<AppRow>`, including nullable `post_reset_redirect_uri text`) plus migration `CreateApps` with `down()` (the column is part of this create migration, since `apps` does not exist yet); integration test for unique `client_id`, for a null and a stored `post_reset_redirect_uri`, and for migration reversibility (up -> down -> up)
 - [ ] 3.2 GREEN: domain `App`, `AppRepository` port, `AppMapper` (round-trip unit test, including the null case), `TypeOrmAppRepository` implementing the port; register use case (public: no secret; confidential: secret shown once, hashed)
 - [ ] 3.2a RED/GREEN/REFACTOR: `PostResetRedirectUri` value object. Unit tests first: accepts `https://a.example/login`; rejects relative, `javascript:`, `ftp:`, userinfo, fragment, and `http://a.example`; accepts `http://localhost` and `http://127.0.0.1` only when `isProduction` is false and rejects them when true; null is allowed. REFACTOR: table-driven cases
 - [ ] 3.3 RED/GREEN: exact redirect URI match; unknown/inactive `client_id` generic invalid-client
