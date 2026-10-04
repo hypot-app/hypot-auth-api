@@ -3,8 +3,13 @@
 ## Run locally with Docker
 
 ```bash
-docker compose up --build
+docker compose up -d --build
 ```
+
+Always pass `--build` (or run `docker compose build` first). `migrate` and `api` share the local
+`hypot-api:dev` image, and `up` without `--build` reuses a stale one, which runs OLD migrations and
+OLD code. `docker compose run --rm migrate` fails if the image was never built, so build first:
+`docker compose build && docker compose run --rm migrate`.
 
 - API: http://localhost:3000
 - Mailpit UI: http://localhost:8025 (SMTP on port 1025)
@@ -42,8 +47,17 @@ A confidential app's `client_secret` is printed once, at creation; only its hash
 Repeated `--redirect-uri` / `--origin` options on `update` replace the stored list.
 Without Docker, use `node dist/cli.js app ...` after `npm run build`.
 
-CORS for the API is decided per app from `--origin`: send `client_id` in the URL query string
-(preflight requests carry no body) on cross-origin calls.
+`client_id` has the form `app_` followed by 32 lowercase hex characters (it never starts with `-`).
+
+Registration validates app fields and rejects bad input with a non-zero exit and nothing stored:
+
+- `--origin` must be an origin only: `https://host[:port]` (or `http://localhost` / `http://127.0.0.1` outside
+  production). No path, query, fragment, trailing slash, `null` or wildcard. Scheme and host are lower-cased.
+- `--redirect-uri` must be an absolute `https` URL (or `http` on localhost outside production) without a fragment.
+
+CORS for the API allows a request's `Origin` when it exactly matches `--origin` of any active app. No
+`client_id` is needed, so preflights and bearer-only calls such as `/api/v1/me` work. Answers are cached
+for 30 seconds, so deactivating an app or changing its origins can take that long to apply.
 
 ## Run locally without Docker
 

@@ -113,6 +113,10 @@ Branch `feat/u1b-docker` was branched from 047fff7, which is also the tip of `de
   - Verify: `docker compose up -d --build` creates the `apps` table (check it with `psql` in the postgres container), the api becomes healthy, and a second `up` is a no-op.
   - Commit: `build: run migrations in a one-shot compose service`
 
+### U3 review fixes (after verify)
+
+- [x] 3.7 Review fixes. Client ids are now `app_` + 32 hex chars (never start with `-`; W1). Origins and redirect URIs are validated and normalized at registration and update through `AllowedOrigin` and `AppRedirectUri` (W5). CORS is now an origin allowlist from all active apps via `AppRepository.isOriginAllowed` plus a 30 s TTL cache; `client_id` extraction and `App.allowsOrigin` removed (W2, S6). CLI tests assert the specific `CliError` messages (W4), `create-app.command.ts` explains why validation is manual (S5), and the README documents `--build` (W3). Spec, ADR 29 and README updated.
+
 ## U4 transactional-email
 
 - [ ] 4.1 RED: `EmailOutboxSchema` plus migration `CreateEmailOutbox` with `down()`; `SKIP LOCKED` integration test (`setLock('pessimistic_write')` + `setOnLocked('skip_locked')`)
