@@ -5,6 +5,8 @@ import type { TokenGenerator } from '../../shared-kernel/token-generator';
 import type { UnitOfWork } from '../../shared-kernel/unit-of-work';
 import { App, type ClientType } from '../domain/app';
 import type { AppRepository } from '../domain/app.repository';
+import { AllowedOrigin } from '../domain/allowed-origin';
+import { AppRedirectUri } from '../domain/app-redirect-uri';
 import { PostResetRedirectUri } from '../domain/post-reset-redirect-uri';
 import type { IdGenerator } from './id-generator';
 
@@ -37,10 +39,13 @@ export class RegisterAppUseCase {
   constructor(private readonly deps: RegisterAppDeps) {}
 
   async execute(input: RegisterAppInput): Promise<Result<RegisteredApp, DomainError>> {
-    const postReset = PostResetRedirectUri.optional(input.postResetRedirectUri, {
-      isProduction: input.isProduction,
-    });
+    const rules = { isProduction: input.isProduction };
+    const postReset = PostResetRedirectUri.optional(input.postResetRedirectUri, rules);
     if (!postReset.ok) return err(postReset.error);
+    const redirectUris = AppRedirectUri.createAll(input.redirectUris, rules);
+    if (!redirectUris.ok) return err(redirectUris.error);
+    const allowedOrigins = AllowedOrigin.createAll(input.allowedOrigins, rules);
+    if (!allowedOrigins.ok) return err(allowedOrigins.error);
 
     const secret = input.clientType === 'confidential' ? this.deps.tokens.generate() : null;
     const now = this.deps.clock.now();
@@ -50,8 +55,8 @@ export class RegisterAppUseCase {
       name: input.name,
       clientType: input.clientType,
       clientSecretHash: secret?.hash ?? null,
-      redirectUris: input.redirectUris,
-      allowedOrigins: input.allowedOrigins,
+      redirectUris: redirectUris.value.map((uri) => uri.value),
+      allowedOrigins: allowedOrigins.value.map((origin) => origin.value),
       emailFrom: input.emailFrom ?? null,
       postResetRedirectUri: postReset.value?.value ?? null,
       status: 'active',

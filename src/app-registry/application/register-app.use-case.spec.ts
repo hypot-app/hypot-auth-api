@@ -113,6 +113,55 @@ describe('RegisterAppUseCase', () => {
     expect(apps.apps.size).toBe(1);
   });
 
+  it('normalizes allowed origins (lower-case, de-duplicated) before storing them', async () => {
+    const result = await useCase.execute(
+      input({ allowedOrigins: ['HTTPS://Shop.Example', 'https://shop.example', 'http://localhost:5173'] }),
+    );
+    expect(result.ok && result.value.app.allowedOrigins).toEqual(['https://shop.example', 'http://localhost:5173']);
+  });
+
+  it.each([
+    ['a trailing slash', 'https://a.example/'],
+    ['a path', 'https://a.example/app'],
+    ['the null origin', 'null'],
+    ['a wildcard', '*'],
+    ['plain http on a public host', 'http://a.example'],
+  ])('rejects an invalid allowed origin (%s) and persists nothing', async (_label, origin) => {
+    const result = await useCase.execute(
+      input({ allowedOrigins: ['https://ok.example', origin], clientType: 'confidential' }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('invalid_allowed_origin');
+    expect(apps.apps.size).toBe(0);
+  });
+
+  it('rejects http localhost origins in production', async () => {
+    const result = await useCase.execute(input({ allowedOrigins: ['http://localhost:3000'], isProduction: true }));
+    expect(result.ok).toBe(false);
+    expect(apps.apps.size).toBe(0);
+  });
+
+  it.each([
+    ['relative', '/cb'],
+    ['a fragment', 'https://a.example/cb#x'],
+    ['plain http on a public host', 'http://a.example/cb'],
+    ['a custom scheme', 'myapp://cb'],
+  ])('rejects an invalid redirect uri (%s) and persists nothing', async (_label, uri) => {
+    const result = await useCase.execute(input({ redirectUris: ['https://a.example/cb', uri] }));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('invalid_redirect_uri');
+    expect(apps.apps.size).toBe(0);
+  });
+
+  it('accepts http localhost redirect uris outside production only', async () => {
+    const dev = await useCase.execute(input({ redirectUris: ['http://localhost:3000/cb'] }));
+    expect(dev.ok).toBe(true);
+    const prod = await useCase.execute(input({ redirectUris: ['http://localhost:3000/cb'], isProduction: true }));
+    expect(prod.ok).toBe(false);
+  });
+
   it('rejects a blank name and persists nothing', async () => {
     const result = await useCase.execute(input({ name: ' ' }));
     expect(result.ok).toBe(false);
