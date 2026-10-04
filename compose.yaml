@@ -1,5 +1,4 @@
 # Local development stack. Credentials below are for local use only.
-# NOTE: the app does not connect to the database yet; U2 wires DATABASE_URL.
 services:
   api:
     build: .
@@ -8,9 +7,16 @@ services:
     environment:
       PORT: "3000"
       DATABASE_URL: postgres://hypot:hypot_dev_only@postgres:5432/hypot
+      AUTH_PUBLIC_BASE_URL: http://localhost:3000
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_SECURE: "false"
+      MAIL_FROM: no-reply@hypot.local
     depends_on:
       postgres:
         condition: service_healthy
+      mailpit:
+        condition: service_started
 
   postgres:
     image: postgres:17-alpine
