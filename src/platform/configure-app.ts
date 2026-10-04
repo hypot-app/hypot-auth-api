@@ -1,6 +1,5 @@
 import type { INestApplication } from '@nestjs/common';
-
-export const API_PREFIX = 'api/v1';
+import { API_PREFIX } from '../shared-kernel/api-prefix';
 
 /** Routes that stay at the root: liveness, welcome, and RFC 8615 discovery. */
 export const UNPREFIXED_ROUTES = ['/', 'health', '.well-known/jwks.json'];
