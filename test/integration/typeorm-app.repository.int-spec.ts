@@ -94,4 +94,39 @@ describe('TypeOrmAppRepository (integration)', () => {
     });
     expect(await repository.findByClientId('committed')).not.toBeNull();
   });
+
+  describe('isOriginAllowed', () => {
+    it('is true when an active app lists the origin', async () => {
+      await repository.save(App.restore(props({ allowedOrigins: ['https://a.example', 'https://b.example'] })));
+      await repository.save(App.restore(props({ allowedOrigins: ['https://c.example'] })));
+
+      expect(await repository.isOriginAllowed('https://b.example')).toBe(true);
+      expect(await repository.isOriginAllowed('https://c.example')).toBe(true);
+    });
+
+    it('is false for an origin no app lists, matching exactly', async () => {
+      await repository.save(App.restore(props({ allowedOrigins: ['https://a.example'] })));
+
+      expect(await repository.isOriginAllowed('https://other.example')).toBe(false);
+      expect(await repository.isOriginAllowed('https://a.example/')).toBe(false);
+      expect(await repository.isOriginAllowed('HTTPS://A.EXAMPLE')).toBe(false);
+      expect(await repository.isOriginAllowed('https://sub.a.example')).toBe(false);
+      expect(await repository.isOriginAllowed('null')).toBe(false);
+      expect(await repository.isOriginAllowed('*')).toBe(false);
+      expect(await repository.isOriginAllowed('')).toBe(false);
+    });
+
+    it('is false when only an inactive app lists the origin', async () => {
+      await repository.save(App.restore(props({ allowedOrigins: ['https://off.example'], status: 'inactive' })));
+
+      expect(await repository.isOriginAllowed('https://off.example')).toBe(false);
+    });
+
+    it('is true when one app is inactive but another active app lists the same origin', async () => {
+      await repository.save(App.restore(props({ allowedOrigins: ['https://x.example'], status: 'inactive' })));
+      await repository.save(App.restore(props({ allowedOrigins: ['https://x.example'] })));
+
+      expect(await repository.isOriginAllowed('https://x.example')).toBe(true);
+    });
+  });
 });

@@ -81,11 +81,46 @@ The system MUST reject any request carrying an unknown or deactivated `client_id
 - WHEN a request references `zzz`
 - THEN the service returns a generic invalid-client error
 
-### Requirement: Allowed origins
+### Requirement: Origin allowlist
 
-The system MUST apply CORS only for origins registered on the app identified by the request's `client_id`.
+The system MUST apply CORS only to a request whose `Origin` header exactly matches (string equality) an entry in `allowed_origins` of ANY active app. The decision MUST NOT depend on a `client_id` in the query string or body, so preflight (`OPTIONS`) requests, which carry no body, and bearer-only requests such as `/api/v1/me` work. Origins of inactive apps MUST NOT be allowed. The service MUST NOT answer with a wildcard origin. The decision MAY be cached for a short TTL (30 seconds), so a deactivated app or removed origin can stay allowed for up to that long.
 
 #### Scenario: Origin not registered
-- GIVEN app A allows `https://a.example`
-- WHEN a browser request for app A comes from `https://other.example`
+- GIVEN no active app allows `https://other.example`
+- WHEN a browser request comes from `https://other.example`
 - THEN no CORS allow header is returned
+
+#### Scenario: Origin of any active app
+- GIVEN app B (active) allows `https://b.example`
+- WHEN a browser sends a preflight `OPTIONS /api/v1/me` from `https://b.example` with no body and no `client_id`
+- THEN the response is `204` with `Access-Control-Allow-Origin: https://b.example`
+
+#### Scenario: Origin of an inactive app
+- GIVEN app C is inactive and allows `https://c.example`
+- WHEN a browser request comes from `https://c.example`
+- THEN no CORS allow header is returned
+
+### Requirement: Origin and redirect URI validation at registration
+
+The system MUST validate app fields when an app is registered or updated, and MUST reject invalid input without persisting anything.
+
+- Each allowed origin MUST be an origin only: scheme `https` (or `http` for `localhost` and `127.0.0.1` outside production), host, and an optional port. Path, query, fragment, userinfo, trailing slash, the literal `null`, and wildcards MUST be rejected. Scheme and host MUST be stored lower-cased (default port dropped), and duplicates removed.
+- Each redirect URI MUST be an absolute URL with scheme `https` (or `http` for `localhost` and `127.0.0.1` outside production), with no fragment and no userinfo. It is stored as given, because matching is exact.
+- Generated `client_id` values MUST never start with `-` (format `app_` followed by 32 lowercase hex characters), so they are safe as CLI arguments.
+
+#### Scenario: Trailing slash origin
+- GIVEN an operator registers an app with `--origin https://a.example/`
+- WHEN the app is created
+- THEN the CLI exits non-zero with a clear error
+- AND nothing is persisted
+
+#### Scenario: Origin is normalized
+- GIVEN an operator registers `--origin HTTPS://A.Example`
+- WHEN the app is created
+- THEN the stored origin is `https://a.example`
+
+#### Scenario: Invalid redirect URI
+- GIVEN an operator registers an app with `--redirect-uri https://a.example/cb#x`
+- WHEN the app is created
+- THEN the CLI exits non-zero with a clear error
+- AND nothing is persisted

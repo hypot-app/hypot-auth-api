@@ -101,10 +101,10 @@ Branch `feat/u1b-docker` was branched from 047fff7, which is also the tip of `de
 - [x] 3.2 GREEN: domain `App`, `AppRepository` port, `AppMapper` (round-trip unit test, including the null case), `TypeOrmAppRepository` implementing the port; register use case (public: no secret; confidential: secret shown once, hashed)
 - [x] 3.2a RED/GREEN/REFACTOR: `PostResetRedirectUri` value object. Unit tests first: accepts `https://a.example/login`; rejects relative, `javascript:`, `ftp:`, userinfo, fragment, and `http://a.example`; accepts `http://localhost` and `http://127.0.0.1` only when `isProduction` is false and rejects them when true; null is allowed. REFACTOR: table-driven cases
 - [x] 3.3 RED/GREEN: exact redirect URI match; unknown/inactive `client_id` generic invalid-client
-- [ ] 3.4 RED/GREEN: `src/cli.ts` nest-commander create/update/deactivate; e2e: app routes return 404
-- [ ] 3.4a RED/GREEN/REFACTOR: CLI `--post-reset-redirect-uri <url>` on create and update, plus `--clear-post-reset-redirect-uri` on update. Use cases validate through `PostResetRedirectUri` (`isProduction` from validated config) before persisting. Tests: valid value stored, omitted gives null, update and clear, invalid value rejected with nothing persisted, `NODE_ENV=production` rejects http localhost. REFACTOR: share the option parsing between create and update
-- [ ] 3.5 RED/GREEN: per-app CORS middleware from `allowed_origins`. Commit: `feat(app-registry): add apps, cli, origin checks`
-- [ ] 3.6 Container migrations: the distroless image has no npm or shell, so `npm run migration:run` cannot run inside it. Run the TypeORM CLI with the image's own node: `node_modules/typeorm/cli.js migration:run -d dist/platform/persistence/data-source.js`. Steps:
+- [x] 3.4 RED/GREEN: `src/cli.ts` nest-commander create/update/deactivate; e2e: app routes return 404
+- [x] 3.4a RED/GREEN/REFACTOR: CLI `--post-reset-redirect-uri <url>` on create and update, plus `--clear-post-reset-redirect-uri` on update. Use cases validate through `PostResetRedirectUri` (`isProduction` from validated config) before persisting. Tests: valid value stored, omitted gives null, update and clear, invalid value rejected with nothing persisted, `NODE_ENV=production` rejects http localhost. REFACTOR: share the option parsing between create and update
+- [x] 3.5 RED/GREEN: per-app CORS middleware from `allowed_origins`. Commit: `feat(app-registry): add apps, cli, origin checks`
+- [x] 3.6 Container migrations: the distroless image has no npm or shell, so `npm run migration:run` cannot run inside it. Run the TypeORM CLI with the image's own node: `node_modules/typeorm/cli.js migration:run -d dist/platform/persistence/data-source.js`. Steps:
   - Confirm `typeorm` is a production dependency and that compiled migrations land in `dist/`.
   - Add a one-shot `migrate` service to `compose.yaml` that uses the same image, overrides the command to run the migrations, and depends on `postgres` being healthy.
   - Make `api` depend on `migrate` with `condition: service_completed_successfully`.
@@ -112,6 +112,10 @@ Branch `feat/u1b-docker` was branched from 047fff7, which is also the tip of `de
   - Document the `docker compose run --rm migrate` and revert commands in the README. The CLI (`node dist/cli.js`) runs the same way.
   - Verify: `docker compose up -d --build` creates the `apps` table (check it with `psql` in the postgres container), the api becomes healthy, and a second `up` is a no-op.
   - Commit: `build: run migrations in a one-shot compose service`
+
+### U3 review fixes (after verify)
+
+- [x] 3.7 Review fixes. Client ids are now `app_` + 32 hex chars (never start with `-`; W1). Origins and redirect URIs are validated and normalized at registration and update through `AllowedOrigin` and `AppRedirectUri` (W5). CORS is now an origin allowlist from all active apps via `AppRepository.isOriginAllowed` plus a 30 s TTL cache; `client_id` extraction and `App.allowsOrigin` removed (W2, S6). CLI tests assert the specific `CliError` messages (W4), `create-app.command.ts` explains why validation is manual (S5), and the README documents `--build` (W3). Spec, ADR 29 and README updated.
 
 ## U4 transactional-email
 
