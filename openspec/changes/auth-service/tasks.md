@@ -70,7 +70,7 @@ Steps 1.1-1.3 run directly on `main` and `develop` (no PR). Steps 1.4-1.9 run on
 - [x] 1.1 `git init -b main`; add `.gitignore` (`node_modules`, `dist`, `.env`, `coverage`), `.nvmrc` (24), `.editorconfig`
 - [x] 1.2 Welcome commit on `main`: minimal NestJS 11 app (`package.json` engines `>=24 <25`, `tsconfig.json`, `src/main.ts`, `src/app.module.ts`, `src/platform/welcome.controller.ts` with `GET /` returning `{ "message": "Welcome to the API" }`). Verify with a manual `curl`. Commit: `feat: add welcome endpoint`
 - [x] 1.3 `git switch -c develop` from the welcome commit; then `git switch -c feat/u1-bootstrap` from `develop`
-- [x] 1.4 Add `typeorm`, `@nestjs/typeorm`, `pg`, `@nestjs/config`, `zod`. Create `src/platform/persistence/typeorm.options.ts` (shared options, `synchronize: false`, `migrationsRun: false`, migrations glob) and `data-source.ts` (standalone `DataSource` for the CLI). Create an empty `migrations/` folder.
+- [x] 1.4 Add `typeorm`, `@nestjs/typeorm`, `pg`, `zod` (`@nestjs/config` was dropped in U2 review; see ADR 20). Create `src/platform/persistence/typeorm.options.ts` (shared options, `synchronize: false`, `migrationsRun: false`, migrations glob) and `data-source.ts` (standalone `DataSource` for the CLI). Create an empty `migrations/` folder.
 - [x] 1.5 npm scripts: `migration:generate`, `migration:create`, `migration:run`, `migration:revert` (all `-d` the CLI DataSource), `build`, `start`, `test`
 - [x] 1.6 Add Jest with `@swc/jest` (decorator metadata enabled), `supertest`, and `@testcontainers/postgresql`. Create `jest.config.ts` and `test/support/postgres.ts`, which starts a container, initializes a TypeORM `DataSource`, runs `runMigrations()`, and exposes truncate and teardown helpers.
 - [x] 1.7 Smoke tests: e2e `GET /` returns the welcome message (supertest), and an integration test boots Postgres and runs migrations (`SELECT 1`)
@@ -162,3 +162,8 @@ Branch `feat/u1b-docker` was branched from 047fff7, which is also the tip of `de
 - [ ] 10.3 Full migration chain test: run all migrations, revert all of them to an empty schema, then run them again
 - [ ] 10.4 OpenAPI setup, `README` (including the migration runbook: `migration:run` / `migration:revert`), `.env.example` (with `AUTH_PUBLIC_BASE_URL` and all `SMTP_*` / `MAIL_FROM`, pointing at a local Mailpit), `ops:revoke-all` CLI command, login P95 load-test script
 - [ ] 10.5 Verify the route table matches the design exactly (16 routes: 13 under `/api/v1`, 3 at the root) and no Phase 2-4 endpoints exist. Commit: `docs: add openapi, runbook, e2e coverage`
+
+## Follow-ups (from U2 review, not scheduled in any unit above)
+
+- [ ] F.1 Split liveness (`/live`) from readiness (`/health`) before any orchestrator deployment. Today the container HEALTHCHECK and `/health` conflate the two: a DB outage marks the container unhealthy, which would trigger restarts instead of just removing it from rotation.
+- [ ] F.2 Support `_FILE`-suffixed env vars (e.g. `DATABASE_URL_FILE`, `SMTP_PASS_FILE`) so secrets can be loaded from mounted files, as ADR 20 states. Today config reads plain env vars only.
