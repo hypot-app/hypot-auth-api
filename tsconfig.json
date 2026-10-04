@@ -4,10 +4,8 @@
     "moduleResolution": "nodenext",
     "target": "ES2023",
     "lib": ["ES2023"],
-    "types": ["node"],
+    "types": ["node", "jest"],
     "outDir": "./dist",
-    "rootDir": "./src",
-    "declaration": false,
     "sourceMap": true,
     "strict": true,
     "esModuleInterop": true,
@@ -18,5 +16,5 @@
     "incremental": true,
     "tsBuildInfoFile": "./dist/.tsbuildinfo"
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*", "test/**/*", "jest.config.ts"]
 }
