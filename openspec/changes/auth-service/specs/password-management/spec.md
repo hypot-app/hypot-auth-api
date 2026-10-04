@@ -51,6 +51,32 @@ The system MUST expose `GET /password/forgot` (hosted forgot-password form, `cli
 - THEN the link carries app A's `client_id` and the success page is rendered for app A
 - AND a link whose `client_id` does not match the token's app fails with the generic error
 
+### Requirement: Post-reset redirect
+
+After a successful password reset, the system MUST redirect the user (HTTP 302) to the app's stored `post_reset_redirect_uri` when it is set. When it is null, the system MUST render the existing app-scoped confirmation page and MUST NOT redirect. The redirect target MUST come only from the app record. The system MUST NOT accept a redirect URL from any query parameter, form field, or header (no open redirect). The redirect URL MUST NOT carry tokens, the `client_id`-bound reset token, the email, or any other PII. A failed reset (invalid, expired, used, superseded, mismatched `client_id`, or weak password) MUST NOT redirect.
+
+#### Scenario: Redirect when the app has a URL
+- GIVEN app A has `post_reset_redirect_uri=https://a.example/login`
+- WHEN a valid reset is submitted for app A
+- THEN the password is replaced and the response is a 302 to exactly `https://a.example/login`
+- AND the URL has no query string added by Auth
+
+#### Scenario: Confirmation page when the URL is null
+- GIVEN app A has a null `post_reset_redirect_uri`
+- WHEN a valid reset is submitted for app A
+- THEN the response is the app-scoped confirmation page (200) and there is no redirect
+
+#### Scenario: Redirect input is ignored
+- GIVEN a reset submit that includes `redirect_uri`, `next`, or `return_to` in the query or the form body
+- WHEN the reset succeeds
+- THEN the supplied value is ignored
+- AND the user is sent only to the app's stored URL, or sees the confirmation page when it is null
+
+#### Scenario: No redirect on failure
+- GIVEN an invalid, expired, reused, or superseded token, a `client_id` mismatch, or a weak password
+- WHEN the reset is submitted
+- THEN the generic error or validation response is returned with no redirect
+
 ### Requirement: Forgot password
 
 `POST /password/forgot` MUST accept a forgot-password request for `(client_id, email)` and ALWAYS respond with the same generic success message and status, regardless of whether the account exists. A reset email MUST be sent only when a confirmed account exists.

@@ -4,7 +4,7 @@
 
 | Field | Value |
 |-------|-------|
-| Estimated changed lines | 4,750-6,520 (excludes `package-lock.json`). There is no generated client. TypeORM adds about 500 lines of schemas, mappers, mapper tests, and `up`/`down` migrations. Round 3 adds about 150 lines: SMTP and URL config (+30 in U2), the Nodemailer adapter and its Mailpit test (+100 in U4), and the extra routes (+20). Round 4 adds about 100 lines for the hosted forgot-password page: view, controller, and e2e (+90 in U9), the login link and its test (+10 in U7). |
+| Estimated changed lines | 4,790-6,600 (excludes `package-lock.json`). There is no generated client. TypeORM adds about 500 lines of schemas, mappers, mapper tests, and `up`/`down` migrations. Round 3 adds about 150 lines: SMTP and URL config (+30 in U2), the Nodemailer adapter and its Mailpit test (+100 in U4), and the extra routes (+20). Round 4 adds about 100 lines for the hosted forgot-password page: view, controller, and e2e (+90 in U9), the login link and its test (+10 in U7). Round 5 adds about 40-80 lines for the post-reset redirect URI: column, migration, value object, CLI flag, and tests (+30-55 in U3), redirect branch and e2e for both cases (+10-25 in U9). Totals are now 4,790-6,600. |
 | 400-line budget risk | High |
 | Chained PRs recommended | Yes |
 | Suggested split | Welcome commit on `main` (no PR) -> PR U1 -> PR U2 -> ... -> PR U10, each targeting <=400 lines. Units forecast above 400 have pre-planned a/b split points. |
@@ -34,13 +34,13 @@ Every PR targets `develop`. The next unit branches from the updated `develop` on
 |------|------|-----------:|------------|-------------------------|
 | U1 | Bootstrap: TypeORM + pg scaffold, DataSource, test stack, config.yaml | 300 | welcome commit | - |
 | U2 | shared-kernel + platform (config incl. SMTP and base URL, TypeORM module, UoW, health) | 480 | U1 | U2a kernel + config / U2b persistence + UoW + health |
-| U3 | app-registry + CLI | 500 | U2 | U3a apps persistence + use cases / U3b CLI + CORS |
+| U3 | app-registry + CLI (incl. post-reset redirect URI) | 550 | U2 | U3a apps persistence + use cases / U3b CLI + CORS |
 | U4 | transactional-email (outbox, worker, Nodemailer SMTP adapter, templates) | 650 | U2 | U4a outbox + worker / U4b SMTP adapter + renderer + templates |
 | U5 | user-accounts (signup, confirm, resend) | 600 | U3, U4 | U5a persistence + hasher / U5b endpoints |
 | U6 | token-lifecycle A: KeyStore, JWT issuer, JWKS | 350 | U2 | - |
 | U7 | authorization-flow: authorize, login (with forgot-password link), code issue | 660 | U3, U5, U6 | U7a codes persistence + GET validation / U7b views + POST login |
 | U8 | token-lifecycle B: code exchange, refresh, revoke | 600 | U7 | U8a code exchange / U8b refresh + revoke |
-| U9 | GET /me + password-management (incl. hosted forgot page) | 590 | U5, U8 | U9a /me + forgot (API + page) / U9b reset + change |
+| U9 | GET /me + password-management (incl. hosted forgot page, post-reset redirect) | 610 | U5, U8 | U9a /me + forgot (API + page) / U9b reset + change |
 | U10 | E2E suite, OpenAPI, perf gate, docs | 600 | all | U10a e2e / U10b OpenAPI + docs + perf |
 
 The units run sequentially because there is a single writer. Sub-PRs (for example U5a and U5b) also target `develop` in order. Measure `additions + deletions` before you open each PR.
@@ -85,10 +85,12 @@ Steps 1.1-1.3 run directly on `main` and `develop` (no PR). Steps 1.4-1.9 run on
 
 ## U3 app-registry
 
-- [ ] 3.1 RED: `AppSchema` (`EntitySchema<AppRow>`) plus migration `CreateApps` with `down()`; integration test for unique `client_id` and for migration reversibility (up -> down -> up)
-- [ ] 3.2 GREEN: domain `App`, `AppRepository` port, `AppMapper` (round-trip unit test), `TypeOrmAppRepository` implementing the port; register use case (public: no secret; confidential: secret shown once, hashed)
+- [ ] 3.1 RED: `AppSchema` (`EntitySchema<AppRow>`, including nullable `post_reset_redirect_uri text`) plus migration `CreateApps` with `down()` (the column is part of this create migration, since `apps` does not exist yet); integration test for unique `client_id`, for a null and a stored `post_reset_redirect_uri`, and for migration reversibility (up -> down -> up)
+- [ ] 3.2 GREEN: domain `App`, `AppRepository` port, `AppMapper` (round-trip unit test, including the null case), `TypeOrmAppRepository` implementing the port; register use case (public: no secret; confidential: secret shown once, hashed)
+- [ ] 3.2a RED/GREEN/REFACTOR: `PostResetRedirectUri` value object. Unit tests first: accepts `https://a.example/login`; rejects relative, `javascript:`, `ftp:`, userinfo, fragment, and `http://a.example`; accepts `http://localhost` and `http://127.0.0.1` only when `isProduction` is false and rejects them when true; null is allowed. REFACTOR: table-driven cases
 - [ ] 3.3 RED/GREEN: exact redirect URI match; unknown/inactive `client_id` generic invalid-client
 - [ ] 3.4 RED/GREEN: `src/cli.ts` nest-commander create/update/deactivate; e2e: app routes return 404
+- [ ] 3.4a RED/GREEN/REFACTOR: CLI `--post-reset-redirect-uri <url>` on create and update, plus `--clear-post-reset-redirect-uri` on update. Use cases validate through `PostResetRedirectUri` (`isProduction` from validated config) before persisting. Tests: valid value stored, omitted gives null, update and clear, invalid value rejected with nothing persisted, `NODE_ENV=production` rejects http localhost. REFACTOR: share the option parsing between create and update
 - [ ] 3.5 RED/GREEN: per-app CORS middleware from `allowed_origins`. Commit: `feat(app-registry): add apps, cli, origin checks`
 
 ## U4 transactional-email
@@ -137,6 +139,8 @@ Steps 1.1-1.3 run directly on `main` and `develop` (no PR). Steps 1.4-1.9 run on
 - [ ] 9.4 GREEN: `forgot.hbs` view and `GET /password/forgot` controller (validates `client_id` through the app registry, reuses the CSP/CSRF middleware from U7); `POST /password/forgot` renders the generic result page. REFACTOR: share layout and CSRF helper with the login and reset views
 - [ ] 9.5 RED/GREEN e2e: submit for confirmed, unknown, and other-app-only emails gives identical status and body; missing CSRF is rejected with no email; the reset email link carries `client_id`
 - [ ] 9.6 RED/GREEN: `GET /password/reset?token=&client_id=` renders the hosted reset form (strict CSP, CSRF) without revealing token validity; `POST /password/reset` (1h, single-use, superseded) revokes all app refresh tokens; a `client_id` that does not match the token's app gives the generic error; the success page is app-scoped
+- [ ] 9.6a RED: e2e for the post-reset redirect. Case 1: app with `post_reset_redirect_uri` set; a valid reset returns 302 with `Location` exactly equal to the stored value (no added query, no token or email). Case 2: app with null; a valid reset returns 200 with the app-scoped confirmation page and no `Location`. Also: `redirect_uri`, `next`, and `return_to` in query or form are ignored; failed resets (invalid, expired, reused, `client_id` mismatch, weak password) never redirect
+- [ ] 9.6b GREEN/REFACTOR: after a successful `POST /password/reset`, read the app through `AppRepository` and answer 302 to `post_reset_redirect_uri`, or render the confirmation page when null; read no request input for the target. REFACTOR: extract the success-response choice into a small helper
 - [ ] 9.7 RED/GREEN: `POST /password/change` plus notice email. Commit: `feat(password): add forgot, reset, change`
 
 ## U10 Verification and docs
