@@ -17,7 +17,7 @@ export interface TestDatabase {
  * against it and runs all migrations. Requires a running Docker daemon.
  */
 export async function startTestDatabase(): Promise<TestDatabase> {
-  const container: StartedPostgreSqlContainer = await new PostgreSqlContainer('postgres:16-alpine').start();
+  const container: StartedPostgreSqlContainer = await new PostgreSqlContainer('postgres:17-alpine').start();
   const url = container.getConnectionUri();
   const dataSource = new DataSource(buildTypeOrmOptions({ url }));
   await dataSource.initialize();
