@@ -90,4 +90,33 @@ describe('loadConfig', () => {
     expect(message).toContain('PORT');
     expect(message).not.toContain('super-secret-value');
   });
+
+  it('never leaks DATABASE_URL credentials when the config is invalid', () => {
+    const url = 'postgres://admin:db-secret-pw@db.internal:5432/auth';
+    const messages = [{ PORT: 'abc' }, { DATABASE_URL: '' }].map((override) => {
+      try {
+        loadConfig({ ...validEnv, DATABASE_URL: url, ...override });
+      } catch (error) {
+        return (error as Error).message;
+      }
+      return '';
+    });
+    expect(messages[0]).toContain('PORT');
+    expect(messages[1]).toContain('DATABASE_URL');
+    for (const message of messages) {
+      expect(message).not.toContain('db-secret-pw');
+      expect(message).not.toContain('admin');
+    }
+  });
+
+  it('never leaks the SMTP_USER value when SMTP_PASS is missing', () => {
+    let message = '';
+    try {
+      loadConfig({ ...validEnv, SMTP_USER: 'mailer-secret-user' });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('SMTP_USER and SMTP_PASS');
+    expect(message).not.toContain('mailer-secret-user');
+  });
 });
