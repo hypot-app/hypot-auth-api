@@ -3,6 +3,8 @@ import { DataSource } from 'typeorm';
 import { buildTypeOrmOptions } from '../../src/platform/persistence/typeorm.options';
 
 export interface TestDatabase {
+  /** Connection URI of the container, for apps under test. */
+  url: string;
   dataSource: DataSource;
   /** Empties every table except the migrations ledger. */
   truncate(): Promise<void>;
@@ -16,11 +18,13 @@ export interface TestDatabase {
  */
 export async function startTestDatabase(): Promise<TestDatabase> {
   const container: StartedPostgreSqlContainer = await new PostgreSqlContainer('postgres:16-alpine').start();
-  const dataSource = new DataSource(buildTypeOrmOptions({ url: container.getConnectionUri() }));
+  const url = container.getConnectionUri();
+  const dataSource = new DataSource(buildTypeOrmOptions({ url }));
   await dataSource.initialize();
   await dataSource.runMigrations();
 
   return {
+    url,
     dataSource,
     async truncate() {
       const rows: { tablename: string }[] = await dataSource.query(

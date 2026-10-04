@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
-import { WelcomeController } from './platform/welcome.controller';
+import { PlatformModule } from './platform/platform.module';
 
 @Module({
-  controllers: [WelcomeController],
+  imports: [PlatformModule],
 })
 export class AppModule {}
