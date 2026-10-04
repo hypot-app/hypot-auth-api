@@ -1,0 +1,9 @@
+node_modules
+dist
+.git
+.atl
+openspec
+coverage
+test
+*.md
+.env*
