@@ -59,6 +59,15 @@ CORS for the API allows a request's `Origin` when it exactly matches `--origin` 
 `client_id` is needed, so preflights and bearer-only calls such as `/api/v1/me` work. Answers are cached
 for 30 seconds, so deactivating an app or changing its origins can take that long to apply.
 
+### Transactional email
+
+Emails go through a Postgres outbox and a background worker started by `main.ts`. Delivery uses plain SMTP
+(`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`/`SMTP_PASS`, `MAIL_FROM`); an app's `--email-from` overrides
+`MAIL_FROM`. In the Compose stack mail is caught by Mailpit: open http://localhost:8025. Every link is
+`AUTH_PUBLIC_BASE_URL` + `/api/v1/...`. Default templates live in `src/transactional-email/templates/default/`;
+put files with the same names in `templates/<client_id>/` to override them for one app. The build copies the
+templates into `dist/`.
+
 ## Run locally without Docker
 
 Requires Node 24 (see `.nvmrc`).
