@@ -74,7 +74,7 @@ Steps 1.1-1.3 run directly on `main` and `develop` (no PR). Steps 1.4-1.9 run on
 - [x] 1.6 Add Jest with `@swc/jest` (decorator metadata enabled), `supertest`, and `@testcontainers/postgresql`. Create `jest.config.ts` and `test/support/postgres.ts`, which starts a container, initializes a TypeORM `DataSource`, runs `runMigrations()`, and exposes truncate and teardown helpers.
 - [x] 1.7 Smoke tests: e2e `GET /` returns the welcome message (supertest), and an integration test boots Postgres and runs migrations (`SELECT 1`)
 - [x] 1.8 Fix the `openspec/config.yaml` `apply:` block (it mixes a list item and mapping keys). Set `apply.tdd: true`, `apply.test_command: "npm test"`, `verify.test_command: "npm test"`, `verify.build_command: "npm run build"`, `strict_tdd: true`. Commit `openspec/` and `PRD-AUTH.md` in this PR.
-- [ ] 1.9 (PENDING: integration test needs the Docker daemon, which was not running; `npm run build` and unit/e2e tests are green) Verify: `npm test` and `npm run build` are green. Commit: `chore: bootstrap typeorm, migrations cli and test stack`. Open PR U1 with base `develop`.
+- [x] 1.9 (Done: integration suite green with Docker running (2/2); build and unit/e2e green. No git remote yet, so PR U1 is pending a remote) Verify: `npm test` and `npm run build` are green. Commit: `chore: bootstrap typeorm, migrations cli and test stack`. Open PR U1 with base `develop`.
 
 ## U2 Platform (RED -> GREEN -> REFACTOR per item)
 
