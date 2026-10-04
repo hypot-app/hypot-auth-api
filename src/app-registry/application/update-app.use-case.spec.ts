@@ -1,0 +1,91 @@
+import { InMemoryAppRepository, PassThroughUnitOfWork } from '../../../test/support/in-memory-app.repository';
+import { FixedClock } from '../../shared-kernel/clock';
+import { App } from '../domain/app';
+import { DeactivateAppUseCase } from './deactivate-app.use-case';
+import { UpdateAppUseCase } from './update-app.use-case';
+
+const CREATED = new Date('2026-01-01T00:00:00.000Z');
+const NOW = new Date('2026-03-03T10:00:00.000Z');
+
+describe('UpdateAppUseCase / DeactivateAppUseCase', () => {
+  let apps: InMemoryAppRepository;
+  let update: UpdateAppUseCase;
+  let deactivate: DeactivateAppUseCase;
+
+  beforeEach(async () => {
+    apps = new InMemoryAppRepository();
+    const deps = { apps, clock: new FixedClock(NOW), uow: new PassThroughUnitOfWork() };
+    update = new UpdateAppUseCase(deps);
+    deactivate = new DeactivateAppUseCase(deps);
+    await apps.save(
+      App.restore({
+        id: '11111111-1111-4111-8111-111111111111',
+        clientId: 'abc',
+        name: 'Shop',
+        clientType: 'public',
+        clientSecretHash: null,
+        redirectUris: ['https://a.example/cb'],
+        allowedOrigins: ['https://a.example'],
+        emailFrom: null,
+        postResetRedirectUri: 'https://a.example/login',
+        status: 'active',
+        createdAt: CREATED,
+        updatedAt: CREATED,
+      }),
+    );
+  });
+
+  it('updates the given fields and persists them', async () => {
+    const result = await update.execute({ clientId: 'abc', name: 'Renamed', isProduction: false });
+    expect(result.ok).toBe(true);
+    const stored = await apps.findByClientId('abc');
+    expect(stored?.name).toBe('Renamed');
+    expect(stored?.updatedAt).toEqual(NOW);
+    expect(stored?.postResetRedirectUri).toBe('https://a.example/login');
+  });
+
+  it('replaces the post-reset URI with a valid new one', async () => {
+    await update.execute({ clientId: 'abc', postResetRedirectUri: 'https://a.example/new', isProduction: true });
+    expect((await apps.findByClientId('abc'))?.postResetRedirectUri).toBe('https://a.example/new');
+  });
+
+  it('clears the post-reset URI with null', async () => {
+    await update.execute({ clientId: 'abc', postResetRedirectUri: null, isProduction: true });
+    expect((await apps.findByClientId('abc'))?.postResetRedirectUri).toBeNull();
+  });
+
+  it.each(['/login', 'ftp://a.example/x', 'http://a.example/login', 'https://u:p@a.example/x', 'https://a.example/x#f'])(
+    'rejects the invalid post-reset URI %s and keeps the stored value',
+    async (uri) => {
+      const result = await update.execute({ clientId: 'abc', postResetRedirectUri: uri, name: 'Changed', isProduction: false });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('invalid_post_reset_redirect_uri');
+      const stored = await apps.findByClientId('abc');
+      expect(stored?.postResetRedirectUri).toBe('https://a.example/login');
+      expect(stored?.name).toBe('Shop');
+    },
+  );
+
+  it('rejects http localhost in production and accepts it otherwise', async () => {
+    const prod = await update.execute({ clientId: 'abc', postResetRedirectUri: 'http://localhost:3000/l', isProduction: true });
+    expect(prod.ok).toBe(false);
+    const dev = await update.execute({ clientId: 'abc', postResetRedirectUri: 'http://localhost:3000/l', isProduction: false });
+    expect(dev.ok).toBe(true);
+  });
+
+  it('reports app_not_found for an unknown client_id', async () => {
+    const result = await update.execute({ clientId: 'zzz', name: 'x', isProduction: false });
+    expect(!result.ok && result.error.code).toBe('app_not_found');
+  });
+
+  it('deactivates an app', async () => {
+    const result = await deactivate.execute({ clientId: 'abc' });
+    expect(result.ok).toBe(true);
+    expect((await apps.findByClientId('abc'))?.isActive()).toBe(false);
+  });
+
+  it('reports app_not_found when deactivating an unknown client_id', async () => {
+    const result = await deactivate.execute({ clientId: 'zzz' });
+    expect(!result.ok && result.error.code).toBe('app_not_found');
+  });
+});

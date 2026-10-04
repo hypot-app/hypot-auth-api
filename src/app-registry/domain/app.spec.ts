@@ -74,3 +74,65 @@ describe('App', () => {
     expect(App.restore(props({ status: 'inactive' })).isActive()).toBe(false);
   });
 });
+
+describe('App changes', () => {
+  const later = new Date('2026-02-02T00:00:00.000Z');
+
+  it('update returns a new App with the changes and a bumped updatedAt, leaving the original intact', () => {
+    const app = App.restore(props());
+    const result = app.update({ name: 'Renamed', redirectUris: ['https://b.example/cb'] }, later);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.name).toBe('Renamed');
+    expect(result.value.redirectUris).toEqual(['https://b.example/cb']);
+    expect(result.value.allowedOrigins).toEqual(['https://a.example']);
+    expect(result.value.updatedAt).toEqual(later);
+    expect(result.value.createdAt).toEqual(NOW);
+    expect(app.name).toBe('Shop');
+  });
+
+  it('update can set and clear nullable fields', () => {
+    const app = App.restore(props({ postResetRedirectUri: 'https://a.example/login', emailFrom: 'x@a.example' }));
+    const cleared = app.update({ postResetRedirectUri: null, emailFrom: null }, later);
+    expect(cleared.ok && cleared.value.postResetRedirectUri).toBeNull();
+    expect(cleared.ok && cleared.value.emailFrom).toBeNull();
+
+    const unchanged = app.update({}, later);
+    expect(unchanged.ok && unchanged.value.postResetRedirectUri).toBe('https://a.example/login');
+  });
+
+  it('update rejects a blank name', () => {
+    const result = App.restore(props()).update({ name: ' ' }, later);
+    expect(result.ok).toBe(false);
+  });
+
+  it('deactivate marks the app inactive and is idempotent', () => {
+    const app = App.restore(props());
+    const off = app.deactivate(later);
+    expect(off.isActive()).toBe(false);
+    expect(off.updatedAt).toEqual(later);
+    expect(off.deactivate(later).isActive()).toBe(false);
+    expect(app.isActive()).toBe(true);
+  });
+});
+
+describe('App.allowsOrigin', () => {
+  const app = App.restore(props({ allowedOrigins: ['https://a.example', 'http://localhost:5173'] }));
+
+  it('matches a registered origin exactly', () => {
+    expect(app.allowsOrigin('https://a.example')).toBe(true);
+    expect(app.allowsOrigin('http://localhost:5173')).toBe(true);
+  });
+
+  it.each(['https://other.example', 'https://a.example/', 'HTTPS://A.EXAMPLE', 'https://sub.a.example', 'null', '*', ''])(
+    'rejects %p',
+    (origin) => {
+      expect(app.allowsOrigin(origin)).toBe(false);
+    },
+  );
+
+  it('rejects everything when no origin is registered', () => {
+    expect(App.restore(props({ allowedOrigins: [] })).allowsOrigin('https://a.example')).toBe(false);
+  });
+});

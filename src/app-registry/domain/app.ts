@@ -21,6 +21,15 @@ export interface AppProps {
   updatedAt: Date;
 }
 
+/** Fields an operator may change. `undefined` leaves a field as is; `null` clears a nullable one. */
+export interface AppChanges {
+  name?: string;
+  redirectUris?: string[];
+  allowedOrigins?: string[];
+  emailFrom?: string | null;
+  postResetRedirectUri?: string | null;
+}
+
 /** A client application served by Auth. Plain TypeScript: no framework or persistence imports. */
 export class App implements AppProps {
   readonly id: string;
@@ -68,8 +77,35 @@ export class App implements AppProps {
     return new App(props);
   }
 
+  /** Returns a changed copy; the client type and secret never change here. */
+  update(changes: AppChanges, now: Date): Result<App, DomainError> {
+    return App.create({
+      ...this.snapshot(),
+      name: changes.name ?? this.name,
+      redirectUris: changes.redirectUris ?? this.redirectUris,
+      allowedOrigins: changes.allowedOrigins ?? this.allowedOrigins,
+      emailFrom: changes.emailFrom === undefined ? this.emailFrom : changes.emailFrom,
+      postResetRedirectUri:
+        changes.postResetRedirectUri === undefined ? this.postResetRedirectUri : changes.postResetRedirectUri,
+      updatedAt: now,
+    });
+  }
+
+  deactivate(now: Date): App {
+    return App.restore({ ...this.snapshot(), status: 'inactive', updatedAt: now });
+  }
+
   isActive(): boolean {
     return this.status === 'active';
+  }
+
+  /** Exact string equality against the registered origins; never a wildcard. */
+  allowsOrigin(origin: string): boolean {
+    return this.allowedOrigins.includes(origin);
+  }
+
+  private snapshot(): AppProps {
+    return { ...this };
   }
 
   /** Exact string equality, no wildcards (spec: redirect URI validation). */
