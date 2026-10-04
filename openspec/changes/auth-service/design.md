@@ -32,28 +32,34 @@ The service is one NestJS 11 app on Node 24 (`engines: ">=24 <25"`, `.nvmrc: 24`
 | 20 | Config | `@nestjs/config` with a **zod** schema, validated at boot (fail fast). Secrets come only from env or mounted files. `.env.example` is for dev. | Hardcoded defaults; a direct Vault client | Twelve-factor, and portable across hosts. |
 | 21 | Testing | Jest with `@swc/jest`, supertest e2e, and **Testcontainers** (`@testcontainers/postgresql`) with a TypeORM `DataSource`. Test setup runs all migrations. | `pg-mem` (partial Postgres: no `citext`, no `SKIP LOCKED` semantics); a shared docker-compose DB | Tests run against real Postgres semantics (row locks, `citext`) in isolated, reproducible runs, and migrations are exercised on every run. Cost: Docker is required locally and in CI. |
 | 22 | Persistence models | `EntitySchema<XRow>` with plain `XRow` interfaces, plus an `XMapper` (`toDomain`, `toPersistence`) per aggregate. All of them live in `<module>/infrastructure/persistence/`. Repositories implement domain ports and return domain models only. | Decorated `@Entity` classes in infrastructure; decorating domain entities | No class anywhere carries ORM decorators, so a persistence class can never be mistaken for a domain one. Cost: mapper boilerplate, covered by round-trip unit tests. |
-| 23 | Branching | `main` holds only the welcome commit. `develop` is branched from it. U1..U10 are **stacked-to-develop** chained PRs: each one targets `develop` and merges before the next one is rebased and opened. | Stacked to `main`; feature-branch chain with a tracker | User decision (round 2). `develop` integrates the feature, and `main` stays deployable. Promotion to `main` is out of scope. |
-| 24 | Email link base | One global env var `AUTH_PUBLIC_BASE_URL` (the public URL of the Auth host, validated as an absolute http(s) URL without trailing slash). Links are `${AUTH_PUBLIC_BASE_URL}/accounts/confirm?token=...`, `${AUTH_PUBLIC_BASE_URL}/password/reset?token=...`, and (for the `account-exists` notice) `${AUTH_PUBLIC_BASE_URL}/password/forgot?client_id=...`. Nothing is stored per app. | Per-app link base column | User decision (round 3). Links must always target the Auth host, so a per-app value adds config risk (phishing via a misconfigured base) for no benefit. Resolves conflict 5. |
-| 26 | Hosted forgot-password page | `GET /password/forgot?client_id=` renders a Handlebars form. `client_id` is validated against the app registry (unknown or inactive gives the same generic error page as `/oauth/authorize`, with no form). The form carries `client_id` as a hidden field plus the double-submit CSRF cookie token (same CSP and CSRF middleware as login and reset) and posts to the existing `POST /password/forgot`. The response is always the same generic page. The reset email link is `${AUTH_PUBLIC_BASE_URL}/password/reset?token=...&client_id=...`; the reset use case checks that `client_id` matches the token's app (mismatch gives the generic invalid-or-expired page). The post-reset success page is rendered for that app (per-`client_id` view override, else default). | A new `forgot_requests` table; carrying the signed authorize params; a per-app reset URL column | `client_id` is public and already the app key everywhere, so it needs no signing and no storage. Binding it into the reset link keeps both emails and the success page app-scoped while the token stays the only secret. The post-reset destination is covered by ADR 27. `POST` still returns the generic response for any syntactically valid body for a valid app, so no email enumeration is added. |
+| 23 | Branching | `main` holds only the welcome commit. `develop` is branched from it. U1b and U1..U10 are **stacked-to-develop** chained PRs: every feature or work-unit PR targets `develop`, never `main`, and merges before the next one is opened. Branches that are already published receive `develop` by merge, not rebase. | Stacked to `main`; feature-branch chain with a tracker | User decision (round 2, reaffirmed round 6). `develop` integrates the feature, and `main` stays deployable. `main` only receives promotions from `develop`, which is out of scope. U1b merges into `develop` first, then `develop` is merged into `feat/u1-bootstrap`. |
+| 24 | Email link base | One global env var `AUTH_PUBLIC_BASE_URL` (the public URL of the Auth host, validated as an absolute http(s) URL without trailing slash). Links are `${AUTH_PUBLIC_BASE_URL}/api/v1/accounts/confirm?token=...`, `${AUTH_PUBLIC_BASE_URL}/api/v1/password/reset?token=...&client_id=...`, and (for the `account-exists` notice) `${AUTH_PUBLIC_BASE_URL}/api/v1/password/forgot?client_id=...`. Nothing is stored per app. | Per-app link base column | User decision (round 3). Links must always target the Auth host, so a per-app value adds config risk (phishing via a misconfigured base) for no benefit. Resolves conflict 5. |
+| 26 | Hosted forgot-password page | `GET /api/v1/password/forgot?client_id=` renders a Handlebars form. `client_id` is validated against the app registry (unknown or inactive gives the same generic error page as `/api/v1/oauth/authorize`, with no form). The form carries `client_id` as a hidden field plus the double-submit CSRF cookie token (same CSP and CSRF middleware as login and reset) and posts to the existing `POST /api/v1/password/forgot`. The response is always the same generic page. The reset email link is `${AUTH_PUBLIC_BASE_URL}/api/v1/password/reset?token=...&client_id=...`; the reset use case checks that `client_id` matches the token's app (mismatch gives the generic invalid-or-expired page). The post-reset success page is rendered for that app (per-`client_id` view override, else default). | A new `forgot_requests` table; carrying the signed authorize params; a per-app reset URL column | `client_id` is public and already the app key everywhere, so it needs no signing and no storage. Binding it into the reset link keeps both emails and the success page app-scoped while the token stays the only secret. The post-reset destination is covered by ADR 27. `POST` still returns the generic response for any syntactically valid body for a valid app, so no email enumeration is added. |
 | 25 | Email test setup | **Mailpit via Testcontainers** for `SmtpEmailSender` integration tests (one container, asserts the real SMTP path through Mailpit's HTTP API). Unit and e2e tests use an in-memory fake `EmailSender` that captures messages. | Fake only; a shared docker-compose Mailpit | A fake cannot prove the SMTP wiring (TLS flags, auth, from override), and Testcontainers is already required for Postgres (ADR 21), so Mailpit adds no new tooling. Keeping e2e on the fake keeps those tests fast. Cost: one more container, used by a single integration file. |
-| 27 | Post-reset redirect | Nullable column `apps.post_reset_redirect_uri text`. After a successful `POST /password/reset`, the controller answers `302` to that stored value; when null it renders the existing app-scoped confirmation page. The value is validated by a pure `PostResetRedirectUri` value object in `app-registry/domain` (absolute URL; `https`, or `http` only for `localhost`/`127.0.0.1` when `NODE_ENV !== 'production'`; no userinfo, no fragment). The CLI create and update commands call it through the use cases (`--post-reset-redirect-uri`, and `--clear-post-reset-redirect-uri` on update). The reset flow reads the target only from the app record, never from query or form input, and appends nothing to it. | Reusing `redirect_uris` (OAuth list); accepting a `redirect_to` parameter checked against an allowlist; signing a redirect parameter; a global env var | User decision (round 5). The name states the purpose and keeps it apart from the OAuth `redirect_uris`, which must never double as a post-reset target. A fixed, operator-set target removes the open-redirect class entirely: there is no request input to validate or sign. Validation at write time (CLI) means the runtime path stays a plain read. The `NODE_ENV` rule lives in the app-registry use case, which receives `isProduction` as an input, so the domain stays pure and config stays in the platform module. Tradeoffs: one URL per app (no per-flow targets), and no `state` or `login_hint` is passed, so the SPA starts its normal login. No tokens or PII are carried, so nothing leaks through logs or referrers. |
+| 27 | Post-reset redirect | Nullable column `apps.post_reset_redirect_uri text`. After a successful `POST /api/v1/password/reset`, the controller answers `302` to that stored value; when null it renders the existing app-scoped confirmation page. The value is validated by a pure `PostResetRedirectUri` value object in `app-registry/domain` (absolute URL; `https`, or `http` only for `localhost`/`127.0.0.1` when `NODE_ENV !== 'production'`; no userinfo, no fragment). The CLI create and update commands call it through the use cases (`--post-reset-redirect-uri`, and `--clear-post-reset-redirect-uri` on update). The reset flow reads the target only from the app record, never from query or form input, and appends nothing to it. | Reusing `redirect_uris` (OAuth list); accepting a `redirect_to` parameter checked against an allowlist; signing a redirect parameter; a global env var | User decision (round 5). The name states the purpose and keeps it apart from the OAuth `redirect_uris`, which must never double as a post-reset target. A fixed, operator-set target removes the open-redirect class entirely: there is no request input to validate or sign. Validation at write time (CLI) means the runtime path stays a plain read. The `NODE_ENV` rule lives in the app-registry use case, which receives `isProduction` as an input, so the domain stays pure and config stays in the platform module. Tradeoffs: one URL per app (no per-flow targets), and no `state` or `login_hint` is passed, so the SPA starts its normal login. No tokens or PII are carried, so nothing leaks through logs or referrers. |
+| 28 | API versioning | **Global prefix `api/v1`**, set in U2 through `app.setGlobalPrefix('api/v1', { exclude: ['/', 'health', '.well-known/jwks.json'] })` inside a shared `configureApp(app)` function used by both `main.ts` and the e2e test app factory. Prefixed: `/me`, `/accounts/*`, `/password/*`, `/oauth/*` (including the hosted pages `GET /oauth/authorize`, `GET /password/forgot`, `GET /password/reset` and their form posts). Root, unprefixed: `GET /`, `GET /health`, `GET /.well-known/jwks.json` (RFC 8615 requires `.well-known` at the root). Email links: `${AUTH_PUBLIC_BASE_URL}/api/v1/accounts/confirm?token=...`, `/api/v1/password/reset?token=...&client_id=...`, `/api/v1/password/forgot?client_id=...`. | No versioning; NestJS URI versioning (`VersioningType.URI`, `@Controller({ version: '1' })`) per controller | User decision (round 6). A single prefix is one line of config, applies uniformly to every business route and view, and leaves a clear place for a future `/api/v2`. **No versioning, rejected**: the first breaking change would force a path migration for every pilot client with no escape hatch. **URI versioning per controller, rejected**: it adds a version decorator to every controller, makes it easy to forget one, and offers per-route versions that Phase 1 does not need. Sharing `configureApp` between `main.ts` and the e2e factory keeps tests on production routes. **Tradeoff**: if a v2 ever ships, the v1 hosted pages and email links must stay alive for as long as outstanding tokens are valid (confirmation 24h, reset 1h, refresh 30d for login redirects), because links already sent to users embed `/api/v1`. Root routes are version-agnostic by design, so health checks and JWKS discovery never change. |
 
 ## Module Structure
+
+Paths below are shown with the `/api/v1` prefix except the three root routes (ADR 28).
 
 ```
 src/
   app-registry/        domain/ application/ infrastructure/{persistence,cli} http/ app-registry.module.ts
-  user-accounts/       (POST /accounts/signup, GET /accounts/confirm, POST /accounts/resend-confirmation, GET /me)
-  authorization-flow/  (GET /oauth/authorize, POST /oauth/login, hosted login view)
-  token-lifecycle/     (POST /oauth/token, POST /oauth/revoke, GET /.well-known/jwks.json)
-  password-management/ (GET+POST /password/forgot, GET+POST /password/reset, POST /password/change, hosted forgot and reset views)
+  user-accounts/       (POST /api/v1/accounts/signup, GET /api/v1/accounts/confirm, POST /api/v1/accounts/resend-confirmation, GET /api/v1/me)
+  authorization-flow/  (GET /api/v1/oauth/authorize, POST /api/v1/oauth/login, hosted login view)
+  token-lifecycle/     (POST /api/v1/oauth/token, POST /api/v1/oauth/revoke, GET /.well-known/jwks.json at the root)
+  password-management/ (GET+POST /api/v1/password/forgot, GET+POST /api/v1/password/reset, POST /api/v1/password/change, hosted forgot and reset views)
   transactional-email/ (outbox, worker, renderer, SmtpEmailSender, templates/{default,<client_id>}/)
   shared-kernel/       (Clock, RandomToken, Result/DomainError, UnitOfWork port)
   platform/            welcome.controller.ts (GET /), config, health, csrf, cors, openapi,
+                       configure-app.ts (global prefix, shared by main.ts and the e2e factory),
                        persistence/{typeorm.options.ts, data-source.ts, typeorm-unit-of-work.ts, migrations/}
   main.ts  cli.ts
-test/e2e/  test/support/ (testcontainers + migrated DataSource, fakes, fixed RSA key)
+test/e2e/  test/support/ (testcontainers + migrated DataSource, fakes, fixed RSA key, createTestApp factory)
 ```
+
+**Bootstrap note (ADR 28):** the prefix lives in one shared function, `configureApp(app)` in `platform/configure-app.ts`. Both `main.ts` and the e2e test app factory (`test/support/create-test-app.ts`) call it right after `NestFactory.create` / `Test.createTestingModule(...).createNestApplication()`. E2E tests therefore hit the production route layout, and no test can pass on a path that production does not serve.
 
 `typeorm.options.ts` builds one options object from validated config. Both `TypeOrmModule.forRootAsync` and the CLI `data-source.ts` use it, so the app and the migrations never drift. Each module registers its own schemas with `TypeOrmModule.forFeature`.
 
@@ -80,20 +86,20 @@ Each table is defined by an `EntitySchema` and created by a migration with `down
 
 ```
 SPA            Auth (hosted UI)                 DB
- |-- GET /oauth/authorize?client_id,redirect_uri,
+ |-- GET /api/v1/oauth/authorize?client_id,redirect_uri,
  |   code_challenge(S256),state ------------>| validate app + exact redirect_uri
  |<-- login form (signed params + CSRF) -----|
- |-- POST /oauth/login (credentials) -------->| user by (app_id,email); bcrypt verify
+ |-- POST /api/v1/oauth/login (credentials) ->| user by (app_id,email); bcrypt verify
  |                                           |-- insert code_hash (60s) -->|
  |<-- 302 redirect_uri?code&state -----------|
- |-- POST /oauth/token code+verifier ------->| consume code, check S256(verifier)
+ |-- POST /api/v1/oauth/token code+verifier ->| consume code, check S256(verifier)
  |<-- access JWT (1h) + refresh (30d) -------|-- insert refresh(family) -->|
 ```
 
 **Refresh rotation**
 
 ```
-client -- POST /oauth/token grant=refresh_token --> lock row by hash (pessimistic_write)
+client -- POST /api/v1/oauth/token grant=refresh_token --> lock row by hash (pessimistic_write)
   active   -> mark replaced, insert new (same family) -> new pair
   rotated/revoked -> revoke family -> 400 invalid_grant (generic)
 ```
@@ -101,7 +107,7 @@ client -- POST /oauth/token grant=refresh_token --> lock row by hash (pessimisti
 **Post-reset redirect (ADR 27)**
 
 ```
-user -- POST /password/reset (token, client_id, new password, CSRF) --> Auth
+user -- POST /api/v1/password/reset (token, client_id, new password, CSRF) --> Auth
   invalid/expired/mismatch/weak -> generic error or validation page (no redirect)
   success -> app = registry.get(token.app) ; revoke refresh families
      app.post_reset_redirect_uri set  -> 302 Location: <stored value, unchanged>
@@ -110,7 +116,7 @@ user -- POST /password/reset (token, client_id, new password, CSRF) --> Auth
 
 **Persistence path:** use case → port → TypeORM repository (manager from ALS) → `EntitySchema` row → mapper → domain model.
 
-Logout calls `/oauth/revoke`, which revokes the family. A password change or reset revokes every family the user has in that app.
+Logout calls `/api/v1/oauth/revoke`, which revokes the family. A password change or reset revokes every family the user has in that app.
 
 ## Interfaces / Contracts
 
@@ -133,21 +139,21 @@ const AppMapper = { toDomain(row: AppRow): App { /* ... */ }, toPersistence(app:
 | `GET /` | platform | Welcome message |
 | `GET /health` | platform | Liveness plus DB ping |
 | `GET /.well-known/jwks.json` | token-lifecycle | Public keys |
-| `GET /oauth/authorize` | authorization-flow | Validates the request and renders the hosted login |
-| `POST /oauth/login` | authorization-flow | Form submit; on success `302` to `redirect_uri?code&state` |
-| `POST /oauth/token` | token-lifecycle | `grant_type=authorization_code` or `refresh_token`; others get `unsupported_grant_type` |
-| `POST /oauth/revoke` | token-lifecycle | Revokes the refresh token family |
-| `GET /me` | user-accounts | Profile for the access token |
-| `POST /accounts/signup` | user-accounts | Registration |
-| `GET /accounts/confirm?token=` | user-accounts | Email confirmation |
-| `POST /accounts/resend-confirmation` | user-accounts | New confirmation token |
-| `GET /password/forgot?client_id=` | password-management | Hosted forgot-password form (validated `client_id`, CSRF, strict CSP) |
-| `POST /password/forgot` | password-management | Generic response, reset email if confirmed |
-| `GET /password/reset?token=` | password-management | Hosted reset form |
-| `POST /password/reset` | password-management | Sets the new password; `302` to the app's `post_reset_redirect_uri`, or the confirmation page when null (ADR 27) |
-| `POST /password/change` | password-management | Authenticated change |
+| `GET /api/v1/oauth/authorize` | authorization-flow | Validates the request and renders the hosted login |
+| `POST /api/v1/oauth/login` | authorization-flow | Form submit; on success `302` to `redirect_uri?code&state` |
+| `POST /api/v1/oauth/token` | token-lifecycle | `grant_type=authorization_code` or `refresh_token`; others get `unsupported_grant_type` |
+| `POST /api/v1/oauth/revoke` | token-lifecycle | Revokes the refresh token family |
+| `GET /api/v1/me` | user-accounts | Profile for the access token |
+| `POST /api/v1/accounts/signup` | user-accounts | Registration |
+| `GET /api/v1/accounts/confirm?token=` | user-accounts | Email confirmation |
+| `POST /api/v1/accounts/resend-confirmation` | user-accounts | New confirmation token |
+| `GET /api/v1/password/forgot?client_id=` | password-management | Hosted forgot-password form (validated `client_id`, CSRF, strict CSP) |
+| `POST /api/v1/password/forgot` | password-management | Generic response, reset email if confirmed |
+| `GET /api/v1/password/reset?token=&client_id=` | password-management | Hosted reset form |
+| `POST /api/v1/password/reset` | password-management | Sets the new password; `302` to the app's `post_reset_redirect_uri`, or the confirmation page when null (ADR 27) |
+| `POST /api/v1/password/change` | password-management | Authenticated change |
 
-The route table has 16 routes. The hosted login form posts to `/oauth/login` carrying the HMAC-signed authorize params and the CSRF token, and links to `GET /password/forgot?client_id=...`. The earlier `POST /oauth/authorize` path is dropped.
+The route table has 16 routes: 13 under `/api/v1` and 3 at the root (`GET /`, `GET /health`, `GET /.well-known/jwks.json`, per ADR 28). The hosted login form posts to `/api/v1/oauth/login` carrying the HMAC-signed authorize params and the CSRF token, and links to `GET /api/v1/password/forgot?client_id=...`. The earlier `POST /oauth/authorize` path is dropped.
 
 **Config schema (zod)** adds: `AUTH_PUBLIC_BASE_URL` (required, absolute URL), `SMTP_HOST` (required), `SMTP_PORT` (number, default 587), `SMTP_SECURE` (boolean, default false; true means implicit TLS, usually port 465), `SMTP_USER` and `SMTP_PASS` (optional pair, both or neither, so a local catcher needs no auth), and `MAIL_FROM` (required default sender). `SMTP_PASS` is never logged.
 
@@ -158,7 +164,7 @@ interface EmailSender { send(message: EmailMessage): Promise<void>; } // SmtpEma
 
 The outbox worker resolves `from` as `app.email_from ?? MAIL_FROM` and builds links from `AUTH_PUBLIC_BASE_URL`.
 
-`GET /` returns `200 { "message": "Welcome to the API" }`. `GET /.well-known/jwks.json` returns `Cache-Control: public, max-age=300`. Confidential clients authenticate with `client_secret_basic`. Every client must use PKCE. CORS on `/oauth/token`, `/oauth/revoke`, and `/me` checks each app's `allowed_origins`.
+`GET /` returns `200 { "message": "Welcome to the API" }`. `GET /.well-known/jwks.json` returns `Cache-Control: public, max-age=300`. Confidential clients authenticate with `client_secret_basic`. Every client must use PKCE. CORS on `/api/v1/oauth/token`, `/api/v1/oauth/revoke`, and `/api/v1/me` checks each app's `allowed_origins`.
 
 ## Testing Strategy
 
@@ -166,7 +172,7 @@ The outbox worker resolves `from` as `app.email_from ?? MAIL_FROM` and builds li
 |-------|------|-----|
 | Unit | Entities, PKCE verification, rotation and reuse rules, use cases, mapper round-trips | Jest with in-memory port fakes and a fixed `Clock` |
 | Integration | TypeORM repositories, UnitOfWork, row locks, outbox `SKIP LOCKED`, migration reversibility (up → down → up), `SmtpEmailSender` (ADR 25) | Testcontainers Postgres, `DataSource.runMigrations()` in setup, truncation between tests; Testcontainers Mailpit (`axllent/mailpit`, SMTP 1025, HTTP API 8025) for the SMTP adapter |
-| E2E | Full PKCE flow, refresh and reuse, verify, reset, anti-enumeration, `GET /` | supertest on the Nest app, a fake `EmailSender` that captures links, a fixed test RSA key |
+| E2E | Full PKCE flow, refresh and reuse, verify, reset, anti-enumeration, `GET /`, prefix layout (ADR 28) | supertest on the Nest app built by the shared `configureApp` factory, a fake `EmailSender` that captures links, a fixed test RSA key |
 
 U1 installs the runner (`npm test`). Then `openspec/config.yaml` is updated to `tdd: true` with `test_command`, and **strict TDD applies to every later task**.
 
@@ -174,7 +180,7 @@ U1 installs the runner (`npm test`). Then `openspec/config.yaml` is updated to `
 
 TypeORM migrations create the schema (`npm run migration:run`), and the deploy pipeline runs them before the app starts. Rollback is `npm run migration:revert`, which reverts one migration per run through its `down()`. The pilot app switches to PKCE behind its own feature flag. The rollback is to turn the flag off and revert the migrations. If a key is compromised, follow ADR 9's emergency path.
 
-Branch flow (ADR 23): `main` (welcome commit) → `develop` → PR U1 … PR U10, each one based on and merged into `develop` in order.
+Branch flow (ADR 23): `main` (welcome commit) → `develop` → PR U1b, PR U1 … PR U10, each one targeting and merged into `develop` in order (U1b first, then `develop` is merged into `feat/u1-bootstrap`). Nothing targets `main` except promotions from `develop`.
 
 ## Open Questions
 
@@ -182,4 +188,4 @@ No open questions remain. Closed in round 3:
 
 - argon2id vs bcrypt: bcrypt cost 12 confirmed (ADR 10).
 - SendGrid vs SES: generic SMTP via Nodemailer (ADR 17). Hosting target no longer affects the email choice.
-- Duplicate-signup notice (conflict 3): a duplicate signup returns the same response as a successful one, and the existing owner gets the `account-exists` template ("signup attempt" notice). The template says someone tried to register with this address, suggests logging in or resetting the password, and carries no token. Any link in it is built from `AUTH_PUBLIC_BASE_URL`. Revised in round 4: Phase 1 now includes the hosted forgot-password page (ADR 26), so the template deep-links to `${AUTH_PUBLIC_BASE_URL}/password/forgot?client_id=...` (still no token). The email is queued through the outbox in the same transaction as a normal signup, so timing matches.
+- Duplicate-signup notice (conflict 3): a duplicate signup returns the same response as a successful one, and the existing owner gets the `account-exists` template ("signup attempt" notice). The template says someone tried to register with this address, suggests logging in or resetting the password, and carries no token. Any link in it is built from `AUTH_PUBLIC_BASE_URL`. Revised in round 4: Phase 1 now includes the hosted forgot-password page (ADR 26), so the template deep-links to `${AUTH_PUBLIC_BASE_URL}/api/v1/password/forgot?client_id=...` (still no token). The email is queued through the outbox in the same transaction as a normal signup, so timing matches.

@@ -8,7 +8,7 @@ Per-app templated emails for confirmation, welcome, and password reset.
 
 ### Requirement: Email types
 
-The system MUST send these emails: account confirmation, welcome (after confirmation), password reset, a duplicate-signup ("account exists / signup attempt") notice, and (assumption) a password-changed notice. The duplicate-signup notice MUST suggest logging in or resetting the password, MUST link to the hosted forgot-password page `${AUTH_PUBLIC_BASE_URL}/password/forgot?client_id=...`, and MUST NOT contain a token.
+The system MUST send these emails: account confirmation, welcome (after confirmation), password reset, a duplicate-signup ("account exists / signup attempt") notice, and (assumption) a password-changed notice. The duplicate-signup notice MUST suggest logging in or resetting the password, MUST link to the hosted forgot-password page `${AUTH_PUBLIC_BASE_URL}/api/v1/password/forgot?client_id=...`, and MUST NOT contain a token.
 
 #### Scenario: Confirmation on signup
 - GIVEN a new registration in app A
@@ -31,12 +31,12 @@ Each app MUST be able to configure template content (sender name, subject, body 
 
 ### Requirement: Link safety
 
-Links MUST contain only the raw single-use token and MUST be built from the single global `AUTH_PUBLIC_BASE_URL` setting (the public URL of the Auth host), for example `${AUTH_PUBLIC_BASE_URL}/accounts/confirm?token=...` and `${AUTH_PUBLIC_BASE_URL}/password/reset?token=...&client_id=...`. Non-token links (the `account-exists` deep link to `${AUTH_PUBLIC_BASE_URL}/password/forgot?client_id=...`) carry only the public `client_id`. Emails MUST NOT contain passwords or password hashes. Tokens MUST NOT be logged.
+Links MUST contain only the raw single-use token and MUST be built from the single global `AUTH_PUBLIC_BASE_URL` setting (the public URL of the Auth host), for example `${AUTH_PUBLIC_BASE_URL}/api/v1/accounts/confirm?token=...` and `${AUTH_PUBLIC_BASE_URL}/api/v1/password/reset?token=...&client_id=...`. Non-token links (the `account-exists` deep link to `${AUTH_PUBLIC_BASE_URL}/api/v1/password/forgot?client_id=...`) carry only the public `client_id`. Emails MUST NOT contain passwords or password hashes. Tokens MUST NOT be logged.
 
 #### Scenario: Account-exists deep link
 - GIVEN a duplicate signup in app A
 - WHEN the `account-exists` notice is rendered
-- THEN it links to `${AUTH_PUBLIC_BASE_URL}/password/forgot?client_id=<A>`
+- THEN it links to `${AUTH_PUBLIC_BASE_URL}/api/v1/password/forgot?client_id=<A>`
 - AND it contains no token
 
 #### Scenario: Email content

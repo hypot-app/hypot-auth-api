@@ -8,7 +8,7 @@ Hosted login and OAuth2 Authorization Code with PKCE, so app backends and client
 
 ### Requirement: Authorization endpoint
 
-The system MUST provide an authorization endpoint at `GET /oauth/authorize` that accepts `client_id`, `redirect_uri`, `response_type=code`, `code_challenge`, `code_challenge_method=S256`, and `state`, and presents a hosted login (and signup) page. The hosted UI is minimal and unbranded in Phase 1.
+The system MUST provide an authorization endpoint at `GET /api/v1/oauth/authorize` that accepts `client_id`, `redirect_uri`, `response_type=code`, `code_challenge`, `code_challenge_method=S256`, and `state`, and presents a hosted login (and signup) page. The hosted UI is minimal and unbranded in Phase 1.
 
 #### Scenario: Valid authorization request
 - GIVEN a registered app and an exactly matching `redirect_uri`
@@ -37,7 +37,7 @@ PKCE MUST be required for every client, public and confidential. Requests withou
 
 ### Requirement: Credential submission and code issuance
 
-The hosted login form MUST submit to `POST /oauth/login`. On valid credentials for a confirmed account of that app, the system MUST issue a single-use authorization code bound to `client_id`, `redirect_uri`, `code_challenge`, and the account, and redirect to `redirect_uri` with `code` and the original `state`. Codes MUST be stored hashed and expire in at most 60 seconds (assumption: 60s).
+The hosted login form MUST submit to `POST /api/v1/oauth/login`. On valid credentials for a confirmed account of that app, the system MUST issue a single-use authorization code bound to `client_id`, `redirect_uri`, `code_challenge`, and the account, and redirect to `redirect_uri` with `code` and the original `state`. Codes MUST be stored hashed and expire in at most 60 seconds (assumption: 60s).
 
 #### Scenario: Successful login
 - GIVEN a confirmed account with the correct password
@@ -52,7 +52,7 @@ The hosted login form MUST submit to `POST /oauth/login`. On valid credentials f
 
 ### Requirement: Code exchange
 
-The token endpoint (`POST /oauth/token`, `grant_type=authorization_code`) MUST exchange a code only when `client_id`, `redirect_uri`, and `code_verifier` (SHA-256 matching the stored challenge) are all valid. Confidential clients MUST additionally authenticate with their client secret. A code MUST be usable once; reuse MUST fail.
+The token endpoint (`POST /api/v1/oauth/token`, `grant_type=authorization_code`) MUST exchange a code only when `client_id`, `redirect_uri`, and `code_verifier` (SHA-256 matching the stored challenge) are all valid. Confidential clients MUST additionally authenticate with their client secret. A code MUST be usable once; reuse MUST fail.
 
 #### Scenario: Valid exchange
 - GIVEN an unexpired unused code and the matching verifier

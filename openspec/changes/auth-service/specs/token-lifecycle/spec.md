@@ -42,10 +42,10 @@ The system MUST publish public keys at a JWKS endpoint (`/.well-known/jwks.json`
 
 ### Requirement: Token endpoints
 
-The system MUST expose `POST /oauth/token`, which accepts `grant_type=authorization_code` or `grant_type=refresh_token`, and `POST /oauth/revoke`. Any other `grant_type` MUST be rejected with an `unsupported_grant_type` error.
+The system MUST expose `POST /api/v1/oauth/token`, which accepts `grant_type=authorization_code` or `grant_type=refresh_token`, and `POST /api/v1/oauth/revoke`. Any other `grant_type` MUST be rejected with an `unsupported_grant_type` error.
 
 #### Scenario: Unsupported grant
-- GIVEN a request to `POST /oauth/token` with `grant_type=password`
+- GIVEN a request to `POST /api/v1/oauth/token` with `grant_type=password`
 - WHEN it is processed
 - THEN it is rejected with `unsupported_grant_type`
 
@@ -91,7 +91,7 @@ If an already-used or revoked refresh token is presented, the system MUST revoke
 
 ### Requirement: Logout and revocation
 
-Logout (`POST /oauth/revoke`) MUST revoke the presented refresh token's family. A password change or password reset MUST revoke all of the account's refresh tokens in that app. Access tokens are not denylisted; the up-to-1-hour window is accepted.
+Logout (`POST /api/v1/oauth/revoke`) MUST revoke the presented refresh token's family. A password change or password reset MUST revoke all of the account's refresh tokens in that app. Access tokens are not denylisted; the up-to-1-hour window is accepted.
 
 #### Scenario: Logout
 - GIVEN an active session

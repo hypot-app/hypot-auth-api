@@ -25,7 +25,7 @@ The system MUST enforce uniqueness on the pair `(app_id, email)`. Email comparis
 
 ### Requirement: Account routes
 
-The system MUST expose `POST /accounts/signup`, `GET /accounts/confirm` (token in the `token` query parameter), `POST /accounts/resend-confirmation`, and `GET /me`.
+The system MUST expose `POST /api/v1/accounts/signup`, `GET /api/v1/accounts/confirm` (token in the `token` query parameter), `POST /api/v1/accounts/resend-confirmation`, and `GET /api/v1/me`.
 
 #### Scenario: Route surface
 - GIVEN the Phase 1 release
@@ -34,7 +34,7 @@ The system MUST expose `POST /accounts/signup`, `GET /accounts/confirm` (token i
 
 ### Requirement: Registration
 
-`POST /accounts/signup` MUST accept registration with `client_id`, email, and password. Passwords MUST be hashed with bcrypt at cost 12 or higher. New accounts MUST start unconfirmed and a confirmation email MUST be sent. (Assumption: minimum password length is 8; richer policies are Phase 3.)
+`POST /api/v1/accounts/signup` MUST accept registration with `client_id`, email, and password. Passwords MUST be hashed with bcrypt at cost 12 or higher. New accounts MUST start unconfirmed and a confirmation email MUST be sent. (Assumption: minimum password length is 8; richer policies are Phase 3.)
 
 #### Scenario: Successful signup
 - GIVEN a valid `client_id`, a well-formed email, and a password of at least 8 characters
@@ -85,17 +85,17 @@ The system MUST NOT issue an authorization code or tokens for an unconfirmed acc
 
 ### Requirement: Profile retrieval
 
-The system MUST expose `GET /me` authenticated by a valid access token and return the profile (`sub`, email, confirmation state) for the token's account only. The token's `aud` MUST match the app.
+The system MUST expose `GET /api/v1/me` authenticated by a valid access token and return the profile (`sub`, email, confirmation state) for the token's account only. The token's `aud` MUST match the app.
 
 #### Scenario: Valid token
 - GIVEN a valid, unexpired access token
-- WHEN the client calls `GET /me`
+- WHEN the client calls `GET /api/v1/me`
 - THEN the profile of `sub` is returned
 - AND no password hash or internal fields are returned
 
 #### Scenario: Missing or invalid token
 - GIVEN no token, an expired token, or a bad signature
-- WHEN `GET /me` is called
+- WHEN `GET /api/v1/me` is called
 - THEN the service returns 401 with a generic error
 
 ### Requirement: Generic error messages

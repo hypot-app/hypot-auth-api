@@ -4,10 +4,10 @@
 
 | Field | Value |
 |-------|-------|
-| Estimated changed lines | 4,870-6,720 (excludes `package-lock.json`). There is no generated client. TypeORM adds about 500 lines of schemas, mappers, mapper tests, and `up`/`down` migrations. Round 3 adds about 150 lines: SMTP and URL config (+30 in U2), the Nodemailer adapter and its Mailpit test (+100 in U4), and the extra routes (+20). Round 4 adds about 100 lines for the hosted forgot-password page: view, controller, and e2e (+90 in U9), the login link and its test (+10 in U7). Round 5 adds about 40-80 lines for the post-reset redirect URI: column, migration, value object, CLI flag, and tests (+30-55 in U3), redirect branch and e2e for both cases (+10-25 in U9). Round 6 adds about 80-120 lines for the container setup (U1b: Dockerfile, `.dockerignore`, `compose.yaml`, README section). Totals are now 4,870-6,720. |
+| Estimated changed lines | 4,870-6,720 (excludes `package-lock.json`). There is no generated client. TypeORM adds about 500 lines of schemas, mappers, mapper tests, and `up`/`down` migrations. Round 3 adds about 150 lines: SMTP and URL config (+30 in U2), the Nodemailer adapter and its Mailpit test (+100 in U4), and the extra routes (+20). Round 4 adds about 100 lines for the hosted forgot-password page: view, controller, and e2e (+90 in U9), the login link and its test (+10 in U7). Round 5 adds about 40-80 lines for the post-reset redirect URI: column, migration, value object, CLI flag, and tests (+30-55 in U3), redirect branch and e2e for both cases (+10-25 in U9). Round 6 adds about 80-120 lines for the container setup (U1b: Dockerfile, `.dockerignore`, `compose.yaml`, README section). The API versioning decision (ADR 28, `decisions-round6`) adds about 30-50 lines in U2: the `configureApp` function, the shared e2e factory, the prefix e2e test, and the welcome test update. Totals are now 4,900-6,770. |
 | 400-line budget risk | High |
 | Chained PRs recommended | Yes |
-| Suggested split | Welcome commit on `main` (no PR) -> PR U1b (main, then develop) -> PR U1 -> PR U2 -> ... -> PR U10, each targeting <=400 lines. Units forecast above 400 have pre-planned a/b split points. |
+| Suggested split | Welcome commit on `main` (no PR) -> PR U1b (into develop) -> PR U1 (after `develop` is merged into it) -> PR U2 -> ... -> PR U10, each targeting <=400 lines. Units forecast above 400 have pre-planned a/b split points. |
 | Delivery strategy | ask-on-risk, resolved as chained PRs |
 | Chain strategy | stacked-to-develop (base `develop`) |
 
@@ -26,32 +26,32 @@ main:    [welcome commit] ── (promotion to main is out of scope)
 develop:      ●── U1 ── U2 ── U3 ── ... ── U10      (each PR targets develop, merges in order)
 ```
 
-Every PR targets `develop`. The next unit branches from the updated `develop` only after the previous PR merges. If a diff shows earlier units, rebase it onto `develop` before review.
+Every feature or work-unit PR (U1b, U1, U2, ...) targets `develop`, never `main`; `main` only receives promotions from `develop`. The next unit branches from the updated `develop` only after the previous PR merges. If a diff shows earlier units, update it from `develop` before review (rebase if unpublished; merge `develop` in if the branch is already published).
 
 ### Suggested Work Units
 
 | Unit | Goal | Est. lines | Depends on | Split point if over 400 |
 |------|------|-----------:|------------|-------------------------|
 | U1 | Bootstrap: TypeORM + pg scaffold, DataSource, test stack, config.yaml | 300 | welcome commit | - |
-| U1b | Container setup: Dockerfile, `.dockerignore`, `compose.yaml` (api, postgres, mailpit), README section | 100 | welcome commit (based on `main`) | - |
-| U2 | shared-kernel + platform (config incl. SMTP and base URL, TypeORM module, UoW, health) | 480 | U1 | U2a kernel + config / U2b persistence + UoW + health |
+| U1b | Container setup: Dockerfile, `.dockerignore`, `compose.yaml` (api, postgres, mailpit), README section | 100 | welcome commit (branched from 047fff7, develop's tip; targets `develop`) | - |
+| U2 | shared-kernel + platform (config incl. SMTP and base URL, TypeORM module, UoW, health, `api/v1` prefix via `configureApp`) | 520 | U1 | U2a kernel + config / U2b persistence + UoW + health + prefix |
 | U3 | app-registry + CLI (incl. post-reset redirect URI) | 550 | U2 | U3a apps persistence + use cases / U3b CLI + CORS |
 | U4 | transactional-email (outbox, worker, Nodemailer SMTP adapter, templates) | 650 | U2 | U4a outbox + worker / U4b SMTP adapter + renderer + templates |
 | U5 | user-accounts (signup, confirm, resend) | 600 | U3, U4 | U5a persistence + hasher / U5b endpoints |
 | U6 | token-lifecycle A: KeyStore, JWT issuer, JWKS | 350 | U2 | - |
 | U7 | authorization-flow: authorize, login (with forgot-password link), code issue | 660 | U3, U5, U6 | U7a codes persistence + GET validation / U7b views + POST login |
 | U8 | token-lifecycle B: code exchange, refresh, revoke | 600 | U7 | U8a code exchange / U8b refresh + revoke |
-| U9 | GET /me + password-management (incl. hosted forgot page, post-reset redirect) | 610 | U5, U8 | U9a /me + forgot (API + page) / U9b reset + change |
+| U9 | GET /api/v1/me + password-management (incl. hosted forgot page, post-reset redirect) | 610 | U5, U8 | U9a /api/v1/me + forgot (API + page) / U9b reset + change |
 | U10 | E2E suite, OpenAPI, perf gate, docs | 600 | all | U10a e2e / U10b OpenAPI + docs + perf |
 
 The units run sequentially because there is a single writer. Sub-PRs (for example U5a and U5b) also target `develop` in order. Measure `additions + deletions` before you open each PR.
 
 ## Spec/Design conflicts (resolve before apply)
 
-1. **RESOLVED (round 3).** Endpoint paths are now fixed in the specs and in the design route table: `GET /`, `GET /health`, `GET /.well-known/jwks.json`, `GET /oauth/authorize`, `POST /oauth/login`, `POST /oauth/token` (`authorization_code` | `refresh_token`), `POST /oauth/revoke`, `GET /me`, `POST /accounts/signup`, `GET /accounts/confirm`, `POST /accounts/resend-confirmation`, `GET /password/forgot` (round 4), `POST /password/forgot`, `GET /password/reset`, `POST /password/reset`, `POST /password/change` (16 routes). The login submit path is `/oauth/login` (the earlier `POST /oauth/authorize` is dropped).
+1. **RESOLVED (round 3).** Endpoint paths are now fixed in the specs and in the design route table: `GET /`, `GET /health`, `GET /.well-known/jwks.json`, `GET /api/v1/oauth/authorize`, `POST /api/v1/oauth/login`, `POST /api/v1/oauth/token` (`authorization_code` | `refresh_token`), `POST /api/v1/oauth/revoke`, `GET /api/v1/me`, `POST /api/v1/accounts/signup`, `GET /api/v1/accounts/confirm`, `POST /api/v1/accounts/resend-confirmation`, `GET /api/v1/password/forgot` (round 4), `POST /api/v1/password/forgot`, `GET /api/v1/password/reset`, `POST /api/v1/password/reset`, `POST /api/v1/password/change` (16 routes; the three root routes `GET /`, `GET /health`, `GET /.well-known/jwks.json` stay unprefixed, ADR 28). The login submit path is `/api/v1/oauth/login` (the earlier `POST /oauth/authorize` is dropped).
 2. Refresh TTL 30d and auth code TTL 60s: consistent (both are spec assumptions; design adopts them). No conflict.
 3. **RESOLVED (round 3).** Duplicate-signup notice email confirmed: identical HTTP response, plus an `account-exists` notice to the existing owner suggesting login or password reset, links from `AUTH_PUBLIC_BASE_URL`. Template added in U4 (task 4.5); spec and design updated.
-4. Generic errors: spec requires generic and equivalent status/body. Design adds an OAuth `invalid_grant` 400 and `/me` 401, and is silent on confidential-client auth failure (spec: "rejected"). Proposed: `invalid_client` 401 for it.
+4. Generic errors: spec requires generic and equivalent status/body. Design adds an OAuth `invalid_grant` 400 and `/api/v1/me` 401, and is silent on confidential-client auth failure (spec: "rejected"). Proposed: `invalid_client` 401 for it.
 5. **RESOLVED (round 3).** No per-app link base. Links use the global `AUTH_PUBLIC_BASE_URL`; templates stay as files per `client_id`, and `apps.email_from` may override the from address. The transactional-email spec is amended.
 6. Design ADR 11 adds a 72-byte password maximum that specs omit (min 8 only). Proposed: add a spec scenario in U5.
 7. Design pre-publishes a `next` key in JWKS; spec says only current and previous. Compatible; add a JWKS scenario in U6.
@@ -79,7 +79,7 @@ Steps 1.1-1.3 run directly on `main` and `develop` (no PR). Steps 1.4-1.9 run on
 
 ## U1b Container setup (separate small PR, lands before U1)
 
-Branch `feat/u1b-docker` is based on `main` (not on `develop` or U1). It merges to `main` first and then to `develop`, and it must land before U1 (`feat/u1-bootstrap`) merges. Forecast: about 80-120 changed lines.
+Branch `feat/u1b-docker` was branched from 047fff7, which is also the tip of `develop`, so no rebase is needed. The PR targets `develop` (never `main`). Merge order: U1b merges into `develop` first; then `develop` is merged into `feat/u1-bootstrap` with a merge commit, not a rebase, because that branch is already published; then PR U1 merges. Forecast: about 80-120 changed lines.
 
 - [ ] 1b.1 `Dockerfile`, multi-stage: build stage `node:24-alpine` (`npm ci`, `npm run build`); runtime stage `node:24-alpine` (`npm ci --omit=dev`, copy `dist/` only, `NODE_ENV=production`, non-root `node` user, `EXPOSE 3000`, `HEALTHCHECK` on `GET /` using node, `CMD ["node","dist/main.js"]`)
 - [ ] 1b.2 `.dockerignore`: `node_modules`, `dist`, `.git`, `openspec`, `.atl`, `coverage`, `test`, markdown docs, `.env*`
@@ -93,6 +93,7 @@ Branch `feat/u1b-docker` is based on `main` (not on `develop` or U1). It merges 
 - [ ] 2.2 RED/GREEN: `src/platform/config` zod schema (DB settings consumed by `typeorm.options.ts`, plus `AUTH_PUBLIC_BASE_URL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`; `SMTP_USER`/`SMTP_PASS` both or neither), fail fast on invalid env; test
 - [ ] 2.3 RED/GREEN: `TypeOrmModule.forRootAsync` wiring plus the `TypeOrmUnitOfWork` adapter (`DataSource.transaction()` + AsyncLocalStorage `EntityManager`, plus a `currentManager()` helper for repositories); integration test for commit and rollback (Testcontainers)
 - [ ] 2.4 RED/GREEN: `GET /health` with a DB ping, e2e; REFACTOR module wiring. Commit: `feat(platform): add config, typeorm, uow, health`
+- [ ] 2.5 RED/GREEN/REFACTOR: API prefix (ADR 28). RED: an e2e test built on the shared factory asserting that `/api/v1/...` business routes resolve (for example `GET /api/v1/me` answers 401, not 404), that `GET /`, `GET /health`, and `GET /.well-known/jwks.json` stay at the root, and that the unprefixed business path (for example `GET /me`) returns 404. GREEN: `src/platform/configure-app.ts` exporting `configureApp(app)`, which calls `app.setGlobalPrefix('api/v1', { exclude: ['/', 'health', '.well-known/jwks.json'] })`; call it from `main.ts` and from the e2e factory `test/support/create-test-app.ts`. REFACTOR: update the existing welcome e2e test from U1 to build its app through the shared factory. Commit: `feat(platform): add api v1 global prefix`
 
 ## U3 app-registry
 
@@ -110,49 +111,49 @@ Branch `feat/u1b-docker` is based on `main` (not on `develop` or U1). It merges 
 - [ ] 4.2 GREEN: `EmailOutbox` port, mapper, and TypeORM repository; `EmailSender` port plus an in-memory fake (captures messages); `TemplateRenderer` (escaped Handlebars, `templates/default`, per-`client_id` override)
 - [ ] 4.3 RED/GREEN: `SmtpEmailSender` (Nodemailer `createTransport` from `SMTP_HOST/PORT/SECURE/USER/PASS`), from address `app.email_from ?? MAIL_FROM`; integration test against a Mailpit container (Testcontainers, `axllent/mailpit`) asserting delivery, from override, and no secrets in logs; add Mailpit helper to `test/support/`
 - [ ] 4.4 GREEN: worker with backoff, payload purge, provider failure logged without secrets; link builder using `AUTH_PUBLIC_BASE_URL` (no per-app base)
-- [ ] 4.5 Templates: confirmation, welcome, reset, password-changed, `account-exists` (duplicate-signup notice: says someone tried to register, suggests login or password reset, links to `${AUTH_PUBLIC_BASE_URL}/password/forgot?client_id=...`, no token; reset email link carries `&client_id=`). Test: no password, every link starts with `AUTH_PUBLIC_BASE_URL`, the `account-exists` link has the app's `client_id` and no token. Commit: `feat(email): add outbox, worker, templates`
+- [ ] 4.5 Templates: confirmation, welcome, reset, password-changed, `account-exists` (duplicate-signup notice: says someone tried to register, suggests login or password reset, links to `${AUTH_PUBLIC_BASE_URL}/api/v1/password/forgot?client_id=...`, no token; confirmation link is `${AUTH_PUBLIC_BASE_URL}/api/v1/accounts/confirm?token=...`; reset link is `${AUTH_PUBLIC_BASE_URL}/api/v1/password/reset?token=...&client_id=...`). Test: no password, every link starts with `AUTH_PUBLIC_BASE_URL`, the `account-exists` link has the app's `client_id` and no token. Commit: `feat(email): add outbox, worker, templates`
 
 ## U5 user-accounts
 
 - [ ] 5.1 RED: `UserSchema` and `OneTimeTokenSchema` plus migrations `CreateUsers` (`CREATE EXTENSION IF NOT EXISTS citext`, UNIQUE(app_id,email)) and `CreateOneTimeTokens`, each with `down()`; test for the same email across apps; reversibility test
 - [ ] 5.2 GREEN: domain `User` and `OneTimeToken`, mappers with round-trip tests, TypeORM repositories implementing `UserRepository` and `OneTimeTokenRepository`
 - [ ] 5.3 RED/GREEN: `PasswordHasher` bcrypt 12 (min 8 chars, max 72 bytes), dummy compare for timing
-- [ ] 5.4 RED/GREEN: `POST /accounts/signup`; duplicate gives identical response plus the `account-exists` notice email to the existing owner; invalid input validation
-- [ ] 5.5 RED/GREEN: `GET /accounts/confirm` (24h, single-use) plus welcome email; generic invalid-or-expired
-- [ ] 5.6 RED/GREEN: `POST /accounts/resend-confirmation` invalidates old tokens, identical response. Commit: `feat(accounts): add signup and confirmation`
+- [ ] 5.4 RED/GREEN: `POST /api/v1/accounts/signup`; duplicate gives identical response plus the `account-exists` notice email to the existing owner; invalid input validation
+- [ ] 5.5 RED/GREEN: `GET /api/v1/accounts/confirm` (24h, single-use) plus welcome email; generic invalid-or-expired
+- [ ] 5.6 RED/GREEN: `POST /api/v1/accounts/resend-confirmation` invalidates old tokens, identical response. Commit: `feat(accounts): add signup and confirmation`
 
 ## U6 token-lifecycle A
 
 - [ ] 6.1 RED/GREEN: `KeyStore` JWK-set adapter (`active`, `next`, `retired`), fixed test key in `test/support/`
 - [ ] 6.2 RED/GREEN: `AccessTokenIssuer` with `jose` (RS256, `kid`, iss/aud/sub/iat/exp 3600/jti, no roles)
-- [ ] 6.3 RED/GREEN: `GET /.well-known/jwks.json` (max-age 300, public keys only, rotation overlap). Commit: `feat(tokens): add key store, issuer, jwks`
+- [ ] 6.3 RED/GREEN: `GET /.well-known/jwks.json` (served at the root, excluded from the prefix; max-age 300, public keys only, rotation overlap). Commit: `feat(tokens): add key store, issuer, jwks`
 
 ## U7 authorization-flow
 
 - [ ] 7.1 RED: `AuthorizationCodeSchema` plus migration `CreateAuthorizationCodes` with `down()`; mapper round-trip test; TypeORM repository implementing `AuthorizationCodeRepository`; integration test
-- [ ] 7.2 RED/GREEN: `GET /oauth/authorize` validation (S256 only, `plain` and missing challenge rejected, no redirect on bad client/URI)
-- [ ] 7.3 RED/GREEN: Handlebars login/signup views (the form posts to `/oauth/login`), strict CSP, HMAC-signed params, CSRF double-submit
-- [ ] 7.4 RED/GREEN: `POST /oauth/login` issues hashed 60s code and redirects with `state`; identical generic failure for wrong password, unknown email, unconfirmed.
-- [ ] 7.5 RED/GREEN: the login view links to `/password/forgot?client_id=<client_id>` (view test asserts the link and the app's `client_id`). Commit: `feat(authz): add hosted login and code issuance`
+- [ ] 7.2 RED/GREEN: `GET /api/v1/oauth/authorize` validation (S256 only, `plain` and missing challenge rejected, no redirect on bad client/URI)
+- [ ] 7.3 RED/GREEN: Handlebars login/signup views (the form posts to `/api/v1/oauth/login`), strict CSP, HMAC-signed params, CSRF double-submit
+- [ ] 7.4 RED/GREEN: `POST /api/v1/oauth/login` issues hashed 60s code and redirects with `state`; identical generic failure for wrong password, unknown email, unconfirmed.
+- [ ] 7.5 RED/GREEN: the login view links to `/api/v1/password/forgot?client_id=<client_id>` (view test asserts the link and the app's `client_id`). Commit: `feat(authz): add hosted login and code issuance`
 
 ## U8 token-lifecycle B
 
 - [ ] 8.1 RED: `RefreshTokenSchema` plus migration `CreateRefreshTokens` with `down()`; mapper round-trip test; TypeORM repository implementing `RefreshTokenRepository` with a `findByHashForUpdate` that uses `setLock('pessimistic_write')`
-- [ ] 8.2 RED/GREEN: `POST /oauth/token` code exchange (`grant_type=authorization_code`; verifier, redirect, app binding, reuse, `client_secret_basic`); any other `grant_type` returns `unsupported_grant_type`
+- [ ] 8.2 RED/GREEN: `POST /api/v1/oauth/token` code exchange (`grant_type=authorization_code`; verifier, redirect, app binding, reuse, `client_secret_basic`); any other `grant_type` returns `unsupported_grant_type`
 - [ ] 8.3 RED/GREEN: refresh rotation inside `UnitOfWork` with a row lock, reuse revokes family (concurrent-refresh integration test), 30d expiry, wrong app
-- [ ] 8.4 RED/GREEN: `POST /oauth/revoke` family revoke. Commit: `feat(tokens): add exchange, refresh rotation, revoke`
+- [ ] 8.4 RED/GREEN: `POST /api/v1/oauth/revoke` family revoke. Commit: `feat(tokens): add exchange, refresh rotation, revoke`
 
-## U9 /me and password-management
+## U9 /api/v1/me and password-management
 
-- [ ] 9.1 RED/GREEN: `GET /me` with JWT guard (`aud` check, no internal fields, 401 generic)
-- [ ] 9.2 RED/GREEN: `POST /password/forgot` generic response; reset email only for confirmed accounts; CSRF check on form submits
-- [ ] 9.3 RED: hosted forgot-password page tests. View test: `forgot.hbs` renders hidden `client_id` and CSRF token, no account-state wording. Controller e2e: `GET /password/forgot?client_id=` returns 200 with strict CSP and CSRF cookie for an active app; unknown or inactive `client_id` returns the generic error page with no form
-- [ ] 9.4 GREEN: `forgot.hbs` view and `GET /password/forgot` controller (validates `client_id` through the app registry, reuses the CSP/CSRF middleware from U7); `POST /password/forgot` renders the generic result page. REFACTOR: share layout and CSRF helper with the login and reset views
+- [ ] 9.1 RED/GREEN: `GET /api/v1/me` with JWT guard (`aud` check, no internal fields, 401 generic)
+- [ ] 9.2 RED/GREEN: `POST /api/v1/password/forgot` generic response; reset email only for confirmed accounts; CSRF check on form submits
+- [ ] 9.3 RED: hosted forgot-password page tests. View test: `forgot.hbs` renders hidden `client_id` and CSRF token, no account-state wording. Controller e2e: `GET /api/v1/password/forgot?client_id=` returns 200 with strict CSP and CSRF cookie for an active app; unknown or inactive `client_id` returns the generic error page with no form
+- [ ] 9.4 GREEN: `forgot.hbs` view and `GET /api/v1/password/forgot` controller (validates `client_id` through the app registry, reuses the CSP/CSRF middleware from U7); `POST /api/v1/password/forgot` renders the generic result page. REFACTOR: share layout and CSRF helper with the login and reset views
 - [ ] 9.5 RED/GREEN e2e: submit for confirmed, unknown, and other-app-only emails gives identical status and body; missing CSRF is rejected with no email; the reset email link carries `client_id`
-- [ ] 9.6 RED/GREEN: `GET /password/reset?token=&client_id=` renders the hosted reset form (strict CSP, CSRF) without revealing token validity; `POST /password/reset` (1h, single-use, superseded) revokes all app refresh tokens; a `client_id` that does not match the token's app gives the generic error; the success page is app-scoped
+- [ ] 9.6 RED/GREEN: `GET /api/v1/password/reset?token=&client_id=` renders the hosted reset form (strict CSP, CSRF) without revealing token validity; `POST /api/v1/password/reset` (1h, single-use, superseded) revokes all app refresh tokens; a `client_id` that does not match the token's app gives the generic error; the success page is app-scoped
 - [ ] 9.6a RED: e2e for the post-reset redirect. Case 1: app with `post_reset_redirect_uri` set; a valid reset returns 302 with `Location` exactly equal to the stored value (no added query, no token or email). Case 2: app with null; a valid reset returns 200 with the app-scoped confirmation page and no `Location`. Also: `redirect_uri`, `next`, and `return_to` in query or form are ignored; failed resets (invalid, expired, reused, `client_id` mismatch, weak password) never redirect
-- [ ] 9.6b GREEN/REFACTOR: after a successful `POST /password/reset`, read the app through `AppRepository` and answer 302 to `post_reset_redirect_uri`, or render the confirmation page when null; read no request input for the target. REFACTOR: extract the success-response choice into a small helper
-- [ ] 9.7 RED/GREEN: `POST /password/change` plus notice email. Commit: `feat(password): add forgot, reset, change`
+- [ ] 9.6b GREEN/REFACTOR: after a successful `POST /api/v1/password/reset`, read the app through `AppRepository` and answer 302 to `post_reset_redirect_uri`, or render the confirmation page when null; read no request input for the target. REFACTOR: extract the success-response choice into a small helper
+- [ ] 9.7 RED/GREEN: `POST /api/v1/password/change` plus notice email. Commit: `feat(password): add forgot, reset, change`
 
 ## U10 Verification and docs
 
@@ -160,4 +161,4 @@ Branch `feat/u1b-docker` is based on `main` (not on `develop` or U1). It merges 
 - [ ] 10.2 E2E: anti-enumeration status/body equality and timing tolerance across all flows
 - [ ] 10.3 Full migration chain test: run all migrations, revert all of them to an empty schema, then run them again
 - [ ] 10.4 OpenAPI setup, `README` (including the migration runbook: `migration:run` / `migration:revert`), `.env.example` (with `AUTH_PUBLIC_BASE_URL` and all `SMTP_*` / `MAIL_FROM`, pointing at a local Mailpit), `ops:revoke-all` CLI command, login P95 load-test script
-- [ ] 10.5 Verify the route table matches the design exactly (16 routes) and no Phase 2-4 endpoints exist. Commit: `docs: add openapi, runbook, e2e coverage`
+- [ ] 10.5 Verify the route table matches the design exactly (16 routes: 13 under `/api/v1`, 3 at the root) and no Phase 2-4 endpoints exist. Commit: `docs: add openapi, runbook, e2e coverage`

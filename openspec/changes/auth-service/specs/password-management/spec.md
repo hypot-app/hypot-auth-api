@@ -8,20 +8,20 @@ Change password, forgot password, and reset password flows.
 
 ### Requirement: Password routes
 
-The system MUST expose `GET /password/forgot` (hosted forgot-password form, `client_id` query parameter), `POST /password/forgot`, `GET /password/reset` (hosted reset form, token in the `token` query parameter), `POST /password/reset`, and `POST /password/change`. The reset link in emails MUST point to `GET /password/reset`.
+The system MUST expose `GET /api/v1/password/forgot` (hosted forgot-password form, `client_id` query parameter), `POST /api/v1/password/forgot`, `GET /api/v1/password/reset` (hosted reset form, token in the `token` query parameter), `POST /api/v1/password/reset`, and `POST /api/v1/password/change`. The reset link in emails MUST point to `GET /api/v1/password/reset`.
 
 #### Scenario: Reset form
 - GIVEN a reset link from an email
-- WHEN the user opens `GET /password/reset?token=...`
+- WHEN the user opens `GET /api/v1/password/reset?token=...`
 - THEN the hosted reset form is rendered without revealing whether the token is valid
 
 ### Requirement: Hosted forgot-password page
 
-`GET /password/forgot?client_id=...` MUST render a server-side form (strict CSP, CSRF protection, same approach as the hosted login and reset form) that posts `(client_id, email)` to `POST /password/forgot`. The `client_id` MUST be validated against the app registry; an unknown or inactive `client_id` MUST render the same generic error page as `/oauth/authorize`, with no form. The hosted login page MUST link to this page with its `client_id`. The reset email link MUST carry the `client_id`, and the reset MUST fail with the generic invalid-or-expired error when it does not match the token's app. The page and its submit response MUST NOT reveal whether an account exists.
+`GET /api/v1/password/forgot?client_id=...` MUST render a server-side form (strict CSP, CSRF protection, same approach as the hosted login and reset form) that posts `(client_id, email)` to `POST /api/v1/password/forgot`. The `client_id` MUST be validated against the app registry; an unknown or inactive `client_id` MUST render the same generic error page as `/api/v1/oauth/authorize`, with no form. The hosted login page MUST link to this page with its `client_id`. The reset email link MUST carry the `client_id`, and the reset MUST fail with the generic invalid-or-expired error when it does not match the token's app. The page and its submit response MUST NOT reveal whether an account exists.
 
 #### Scenario: Form rendered for a valid app
 - GIVEN an active app A
-- WHEN the user opens `GET /password/forgot?client_id=<A>`
+- WHEN the user opens `GET /api/v1/password/forgot?client_id=<A>`
 - THEN the form is rendered with `client_id` and a CSRF token
 - AND the response carries the strict CSP header
 
@@ -43,7 +43,7 @@ The system MUST expose `GET /password/forgot` (hosted forgot-password form, `cli
 #### Scenario: Login page link
 - GIVEN the hosted login page for app A
 - WHEN it is rendered
-- THEN it contains a link to `/password/forgot?client_id=<A>`
+- THEN it contains a link to `/api/v1/password/forgot?client_id=<A>`
 
 #### Scenario: App-scoped reset
 - GIVEN a reset email sent for app A
@@ -79,7 +79,7 @@ After a successful password reset, the system MUST redirect the user (HTTP 302) 
 
 ### Requirement: Forgot password
 
-`POST /password/forgot` MUST accept a forgot-password request for `(client_id, email)` and ALWAYS respond with the same generic success message and status, regardless of whether the account exists. A reset email MUST be sent only when a confirmed account exists.
+`POST /api/v1/password/forgot` MUST accept a forgot-password request for `(client_id, email)` and ALWAYS respond with the same generic success message and status, regardless of whether the account exists. A reset email MUST be sent only when a confirmed account exists.
 
 #### Scenario: Existing account
 - GIVEN a confirmed account in app A

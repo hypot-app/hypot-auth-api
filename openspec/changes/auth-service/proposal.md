@@ -25,7 +25,7 @@ This plan replaces the PRD's conflicting phase lists. The PRD itself stays unedi
 - Refresh tokens: stored hashed, rotated on every use, revoked on logout
 - JWKS endpoint, so apps can validate tokens locally
 - Email verification (24h link, resend supported), forgot and reset password (1h, single-use, hashed), change password
-- `GET /me`, `/health`, OpenAPI
+- `GET /api/v1/me`, `/health` (root), OpenAPI
 - Welcome, confirmation, and reset emails with per-app templates
 - Generic auth errors that never reveal whether an account exists
 
