@@ -3,7 +3,7 @@ import type { EmailTemplate } from './email-template';
 export type OutboxStatus = 'pending' | 'sent' | 'failed';
 
 /** Longest error text kept on a row. Provider errors are untrusted and unbounded. */
-const MAX_ERROR_LENGTH = 500;
+export const MAX_ERROR_LENGTH = 500;
 
 export interface OutboxEmail {
   readonly id: string;
