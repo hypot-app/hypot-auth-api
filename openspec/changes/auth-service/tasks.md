@@ -4,10 +4,10 @@
 
 | Field | Value |
 |-------|-------|
-| Estimated changed lines | 4,790-6,600 (excludes `package-lock.json`). There is no generated client. TypeORM adds about 500 lines of schemas, mappers, mapper tests, and `up`/`down` migrations. Round 3 adds about 150 lines: SMTP and URL config (+30 in U2), the Nodemailer adapter and its Mailpit test (+100 in U4), and the extra routes (+20). Round 4 adds about 100 lines for the hosted forgot-password page: view, controller, and e2e (+90 in U9), the login link and its test (+10 in U7). Round 5 adds about 40-80 lines for the post-reset redirect URI: column, migration, value object, CLI flag, and tests (+30-55 in U3), redirect branch and e2e for both cases (+10-25 in U9). Totals are now 4,790-6,600. |
+| Estimated changed lines | 4,870-6,720 (excludes `package-lock.json`). There is no generated client. TypeORM adds about 500 lines of schemas, mappers, mapper tests, and `up`/`down` migrations. Round 3 adds about 150 lines: SMTP and URL config (+30 in U2), the Nodemailer adapter and its Mailpit test (+100 in U4), and the extra routes (+20). Round 4 adds about 100 lines for the hosted forgot-password page: view, controller, and e2e (+90 in U9), the login link and its test (+10 in U7). Round 5 adds about 40-80 lines for the post-reset redirect URI: column, migration, value object, CLI flag, and tests (+30-55 in U3), redirect branch and e2e for both cases (+10-25 in U9). Round 6 adds about 80-120 lines for the container setup (U1b: Dockerfile, `.dockerignore`, `compose.yaml`, README section). Totals are now 4,870-6,720. |
 | 400-line budget risk | High |
 | Chained PRs recommended | Yes |
-| Suggested split | Welcome commit on `main` (no PR) -> PR U1 -> PR U2 -> ... -> PR U10, each targeting <=400 lines. Units forecast above 400 have pre-planned a/b split points. |
+| Suggested split | Welcome commit on `main` (no PR) -> PR U1b (main, then develop) -> PR U1 -> PR U2 -> ... -> PR U10, each targeting <=400 lines. Units forecast above 400 have pre-planned a/b split points. |
 | Delivery strategy | ask-on-risk, resolved as chained PRs |
 | Chain strategy | stacked-to-develop (base `develop`) |
 
@@ -33,6 +33,7 @@ Every PR targets `develop`. The next unit branches from the updated `develop` on
 | Unit | Goal | Est. lines | Depends on | Split point if over 400 |
 |------|------|-----------:|------------|-------------------------|
 | U1 | Bootstrap: TypeORM + pg scaffold, DataSource, test stack, config.yaml | 300 | welcome commit | - |
+| U1b | Container setup: Dockerfile, `.dockerignore`, `compose.yaml` (api, postgres, mailpit), README section | 100 | welcome commit (based on `main`) | - |
 | U2 | shared-kernel + platform (config incl. SMTP and base URL, TypeORM module, UoW, health) | 480 | U1 | U2a kernel + config / U2b persistence + UoW + health |
 | U3 | app-registry + CLI (incl. post-reset redirect URI) | 550 | U2 | U3a apps persistence + use cases / U3b CLI + CORS |
 | U4 | transactional-email (outbox, worker, Nodemailer SMTP adapter, templates) | 650 | U2 | U4a outbox + worker / U4b SMTP adapter + renderer + templates |
@@ -75,6 +76,16 @@ Steps 1.1-1.3 run directly on `main` and `develop` (no PR). Steps 1.4-1.9 run on
 - [x] 1.7 Smoke tests: e2e `GET /` returns the welcome message (supertest), and an integration test boots Postgres and runs migrations (`SELECT 1`)
 - [x] 1.8 Fix the `openspec/config.yaml` `apply:` block (it mixes a list item and mapping keys). Set `apply.tdd: true`, `apply.test_command: "npm test"`, `verify.test_command: "npm test"`, `verify.build_command: "npm run build"`, `strict_tdd: true`. Commit `openspec/` and `PRD-AUTH.md` in this PR.
 - [x] 1.9 (Done: integration suite green with Docker running (2/2); build and unit/e2e green. No git remote yet, so PR U1 is pending a remote) Verify: `npm test` and `npm run build` are green. Commit: `chore: bootstrap typeorm, migrations cli and test stack`. Open PR U1 with base `develop`.
+
+## U1b Container setup (separate small PR, lands before U1)
+
+Branch `feat/u1b-docker` is based on `main` (not on `develop` or U1). It merges to `main` first and then to `develop`, and it must land before U1 (`feat/u1-bootstrap`) merges. Forecast: about 80-120 changed lines.
+
+- [ ] 1b.1 `Dockerfile`, multi-stage: build stage `node:24-alpine` (`npm ci`, `npm run build`); runtime stage `node:24-alpine` (`npm ci --omit=dev`, copy `dist/` only, `NODE_ENV=production`, non-root `node` user, `EXPOSE 3000`, `HEALTHCHECK` on `GET /` using node, `CMD ["node","dist/main.js"]`)
+- [ ] 1b.2 `.dockerignore`: `node_modules`, `dist`, `.git`, `openspec`, `.atl`, `coverage`, `test`, markdown docs, `.env*`
+- [ ] 1b.3 `compose.yaml` with `api` (built from the Dockerfile, port 3000, `PORT` and `DATABASE_URL`, `depends_on` postgres `service_healthy`), `postgres` (`postgres:17-alpine`, dev-only credentials, named volume, `pg_isready` healthcheck, port 5432), and `mailpit` (`axllent/mailpit`, ports 8025 UI and 1025 SMTP). The app does not connect to the DB yet; U2 wires it.
+- [ ] 1b.4 README: "Run locally with Docker" section (`docker compose up --build`, URLs, Node 24 + npm alternative)
+- [ ] 1b.5 Verify: `docker build`, `docker compose up -d --build`, `curl http://localhost:3000/` returns the welcome message, Mailpit UI answers on :8025, then `docker compose down -v`. Commit: `build: add dockerfile and compose for local development`.
 
 ## U2 Platform (RED -> GREEN -> REFACTOR per item)
 
