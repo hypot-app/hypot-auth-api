@@ -36,6 +36,7 @@ function outboxRow(appId: string, overrides: Partial<EmailOutboxRow> = {}): Emai
     attempts: 0,
     next_attempt_at: NOW,
     last_error: null,
+    locked_until: null,
     created_at: NOW,
     ...overrides,
   };
@@ -61,13 +62,6 @@ describe('email_outbox table (integration)', () => {
     appId = app.id;
   });
 
-  it('persists and reloads every column, including the jsonb payload', async () => {
-    const saved = outboxRow(appId, { payload: { token: 'abc', note: 'x' }, attempts: 2, last_error: 'boom', status: 'failed' });
-    await repo().save(saved);
-
-    expect(await repo().findOneByOrFail({ id: saved.id })).toEqual(saved);
-  });
-
   it('rejects an unknown status', async () => {
     await expect(repo().save(outboxRow(appId, { status: 'weird' as EmailOutboxRow['status'] }))).rejects.toThrow(
       /invalid input value for enum/,
@@ -76,35 +70,6 @@ describe('email_outbox table (integration)', () => {
 
   it('rejects a row for a nonexistent app', async () => {
     await expect(repo().save(outboxRow(randomUUID()))).rejects.toThrow(/violates foreign key constraint/);
-  });
-
-  it('SKIP LOCKED: a second transaction skips rows locked by the first', async () => {
-    const a = outboxRow(appId, { next_attempt_at: new Date('2026-01-01T00:00:01.000Z') });
-    const b = outboxRow(appId, { next_attempt_at: new Date('2026-01-01T00:00:02.000Z') });
-    await repo().save([a, b]);
-
-    const claimOne = (manager: import('typeorm').EntityManager) =>
-      manager
-        .getRepository<EmailOutboxRow>(EmailOutboxSchema)
-        .createQueryBuilder('o')
-        .where('o.status = :status', { status: 'pending' })
-        .orderBy('o.next_attempt_at', 'ASC')
-        .limit(1)
-        .setLock('pessimistic_write')
-        .setOnLocked('skip_locked')
-        .getMany();
-
-    let secondClaim: EmailOutboxRow[] = [];
-    await db.dataSource.transaction(async (first) => {
-      const firstClaim = await claimOne(first);
-      expect(firstClaim.map((r) => r.id)).toEqual([a.id]);
-
-      await db.dataSource.transaction(async (second) => {
-        secondClaim = await claimOne(second);
-      });
-    });
-
-    expect(secondClaim.map((r) => r.id)).toEqual([b.id]);
   });
 
   describe('CreateEmailOutbox migration', () => {

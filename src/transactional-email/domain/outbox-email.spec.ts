@@ -25,6 +25,7 @@ describe('OutboxEmail', () => {
       attempts: 0,
       nextAttemptAt: NOW,
       lastError: null,
+      lockedUntil: null,
       createdAt: NOW,
     });
   });
@@ -52,6 +53,13 @@ describe('OutboxEmail', () => {
     expect(failed.payload).toEqual({});
     expect(failed.attempts).toBe(2);
     expect(failed.lastError).toBe('gave up');
+  });
+
+  it('keeps the lease it was claimed under, so completion can be fenced on it', () => {
+    const claimed = { ...queued(), lockedUntil: LATER };
+    expect(OutboxEmail.markSent(claimed).lockedUntil).toEqual(LATER);
+    expect(OutboxEmail.markRetry(claimed, 'timeout', LATER).lockedUntil).toEqual(LATER);
+    expect(OutboxEmail.markFailed(claimed, 'gave up').lockedUntil).toEqual(LATER);
   });
 
   it('bounds the stored error text', () => {

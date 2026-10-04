@@ -10,6 +10,8 @@ import { startTestDatabase, type TestDatabase } from '../support/postgres';
 
 const T0 = new Date('2026-01-01T00:00:00.000Z');
 const at = (seconds: number) => new Date(T0.getTime() + seconds * 1000);
+const LEASE_SECONDS = 120;
+const LEASE_MS = LEASE_SECONDS * 1000;
 
 describe('TypeOrmEmailOutbox (integration)', () => {
   let db: TestDatabase;
@@ -30,10 +32,8 @@ describe('TypeOrmEmailOutbox (integration)', () => {
   });
 
   const rawRow = async (id: string) => {
-    const rows: { payload: unknown; status: string }[] = await db.dataSource.query(
-      `SELECT payload, status FROM email_outbox WHERE id = $1`,
-      [id],
-    );
+    const rows: { payload: unknown; status: string; attempts: number; locked_until: Date | null }[] =
+      await db.dataSource.query(`SELECT payload, status, attempts, locked_until FROM email_outbox WHERE id = $1`, [id]);
     return rows[0];
   };
 
@@ -67,12 +67,12 @@ describe('TypeOrmEmailOutbox (integration)', () => {
     appId = app.id;
   });
 
-  it('saves a queued email and claims it back as a domain value', async () => {
+  it('saves a queued email and claims it back, now holding a lease', async () => {
     const queued = email(at(0));
     await outbox.save(queued);
 
-    const claimed = await uow.run(() => outbox.claimNextDue(at(1)));
-    expect(claimed).toEqual(queued);
+    const claimed = await outbox.claimNextDue(at(1), LEASE_MS);
+    expect(claimed).toEqual({ ...queued, lockedUntil: at(1 + LEASE_SECONDS) });
   });
 
   it('claims the oldest due email first and ignores future, sent and failed ones', async () => {
@@ -84,20 +84,43 @@ describe('TypeOrmEmailOutbox (integration)', () => {
     await outbox.save(OutboxEmail.markSent(email(at(0)))); // already sent
     await outbox.save(OutboxEmail.markFailed(email(at(0)), 'gave up')); // dead
 
-    expect((await uow.run(() => outbox.claimNextDue(at(10))))?.id).toBe(older.id);
-    await outbox.save(OutboxEmail.markSent(older));
-    expect((await uow.run(() => outbox.claimNextDue(at(10))))?.id).toBe(newer.id);
-    await outbox.save(OutboxEmail.markSent(newer));
-    expect(await uow.run(() => outbox.claimNextDue(at(10)))).toBeNull();
+    const first = await outbox.claimNextDue(at(10), LEASE_MS);
+    expect(first?.id).toBe(older.id);
+    // The first is leased, so the next claim skips it even though it is still pending.
+    expect((await outbox.claimNextDue(at(10), LEASE_MS))?.id).toBe(newer.id);
+    expect(await outbox.claimNextDue(at(10), LEASE_MS)).toBeNull();
   });
 
-  it('persists a purged payload as an empty object', async () => {
-    const queued = email(at(0));
-    await outbox.save(queued);
-    expect((await rawRow(queued.id)).payload).toEqual({ token: 'raw-token' });
+  it('re-claims a row whose lease has expired, and not before', async () => {
+    await outbox.save(email(at(0)));
+    const first = await outbox.claimNextDue(at(1), LEASE_MS);
 
-    await outbox.save(OutboxEmail.markSent(queued));
-    expect(await rawRow(queued.id)).toEqual({ payload: {}, status: 'sent' });
+    expect(await outbox.claimNextDue(at(1 + LEASE_SECONDS - 1), LEASE_MS)).toBeNull();
+    const second = await outbox.claimNextDue(at(1 + LEASE_SECONDS + 1), LEASE_MS);
+    expect(second?.id).toBe(first?.id);
+    expect(second?.lockedUntil).toEqual(at(1 + LEASE_SECONDS + 1 + LEASE_SECONDS));
+  });
+
+  it('complete stores the outcome and clears the lease', async () => {
+    await outbox.save(email(at(0)));
+    const claimed = (await outbox.claimNextDue(at(1), LEASE_MS)) as OutboxEmail;
+
+    expect(await outbox.complete(OutboxEmail.markSent(claimed))).toBe(true);
+
+    expect(await rawRow(claimed.id)).toEqual({ payload: {}, status: 'sent', attempts: 1, locked_until: null });
+  });
+
+  it('complete with a stale lease changes nothing: another worker re-claimed the row', async () => {
+    await outbox.save(email(at(0)));
+    const stale = (await outbox.claimNextDue(at(1), LEASE_MS)) as OutboxEmail;
+    // Lease expires; a second worker claims the same row.
+    const current = (await outbox.claimNextDue(at(1 + LEASE_SECONDS + 1), LEASE_MS)) as OutboxEmail;
+
+    expect(await outbox.complete(OutboxEmail.markSent(stale))).toBe(false);
+    expect(await rawRow(stale.id)).toMatchObject({ status: 'pending', attempts: 0, payload: { token: 'raw-token' } });
+
+    expect(await outbox.complete(OutboxEmail.markSent(current))).toBe(true);
+    expect(await rawRow(stale.id)).toMatchObject({ status: 'sent', locked_until: null });
   });
 
   it('joins the unit of work: a rollback discards the enqueue', async () => {
@@ -109,6 +132,6 @@ describe('TypeOrmEmailOutbox (integration)', () => {
       }),
     ).rejects.toThrow('signup failed');
 
-    expect(await uow.run(() => outbox.claimNextDue(at(10)))).toBeNull();
+    expect(await outbox.claimNextDue(at(10), LEASE_MS)).toBeNull();
   });
 });

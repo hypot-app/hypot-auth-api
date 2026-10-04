@@ -1,9 +1,7 @@
 import { EmailOutboxMapper } from './email-outbox.mapper';
 import type { EmailOutboxRow } from './email-outbox.schema';
 
-const NOW = new Date('2026-01-01T00:00:00.000Z');
-
-const rowOf = (overrides: Partial<EmailOutboxRow> = {}): EmailOutboxRow => ({
+const row: EmailOutboxRow = {
   id: '11111111-1111-4111-8111-111111111111',
   app_id: '22222222-2222-4222-8222-222222222222',
   to_address: 'ana@example.com',
@@ -13,38 +11,27 @@ const rowOf = (overrides: Partial<EmailOutboxRow> = {}): EmailOutboxRow => ({
   attempts: 3,
   next_attempt_at: new Date('2026-01-02T00:00:00.000Z'),
   last_error: 'connection refused',
-  created_at: NOW,
-  ...overrides,
-});
+  locked_until: new Date('2026-01-01T00:02:00.000Z'),
+  created_at: new Date('2026-01-01T00:00:00.000Z'),
+};
 
 describe('EmailOutboxMapper', () => {
-  it('maps a row to a domain OutboxEmail', () => {
-    const email = EmailOutboxMapper.toDomain(rowOf());
+  it('maps every column to the domain value and back, without sharing the payload object', () => {
+    const email = EmailOutboxMapper.toDomain(row);
     expect(email).toEqual({
-      id: '11111111-1111-4111-8111-111111111111',
-      appId: '22222222-2222-4222-8222-222222222222',
+      id: row.id,
+      appId: row.app_id,
       to: 'ana@example.com',
       template: 'password-reset',
       payload: { token: 'raw-token' },
       status: 'failed',
       attempts: 3,
-      nextAttemptAt: new Date('2026-01-02T00:00:00.000Z'),
+      nextAttemptAt: row.next_attempt_at,
       lastError: 'connection refused',
-      createdAt: NOW,
+      lockedUntil: row.locked_until,
+      createdAt: row.created_at,
     });
-  });
-
-  it('round-trips row -> domain -> row, including the null last_error case', () => {
-    const failed = rowOf();
-    const fresh = rowOf({ status: 'pending', attempts: 0, last_error: null });
-    expect(EmailOutboxMapper.toPersistence(EmailOutboxMapper.toDomain(failed))).toEqual(failed);
-    expect(EmailOutboxMapper.toPersistence(EmailOutboxMapper.toDomain(fresh))).toEqual(fresh);
-  });
-
-  it('does not share the payload object between row and domain', () => {
-    const row = rowOf();
-    const email = EmailOutboxMapper.toDomain(row);
-    row.payload.token = 'tampered';
-    expect(email.payload).toEqual({ token: 'raw-token' });
+    expect(email.payload).not.toBe(row.payload);
+    expect(EmailOutboxMapper.toPersistence(email)).toEqual(row);
   });
 });

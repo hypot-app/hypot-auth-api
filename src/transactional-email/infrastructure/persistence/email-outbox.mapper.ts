@@ -13,6 +13,7 @@ export const EmailOutboxMapper = {
       attempts: row.attempts,
       nextAttemptAt: row.next_attempt_at,
       lastError: row.last_error,
+      lockedUntil: row.locked_until,
       createdAt: row.created_at,
     };
   },
@@ -28,6 +29,7 @@ export const EmailOutboxMapper = {
       attempts: email.attempts,
       next_attempt_at: email.nextAttemptAt,
       last_error: email.lastError,
+      locked_until: email.lockedUntil,
       created_at: email.createdAt,
     };
   },

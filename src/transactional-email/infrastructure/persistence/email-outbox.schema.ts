@@ -13,6 +13,8 @@ export interface EmailOutboxRow {
   attempts: number;
   next_attempt_at: Date;
   last_error: string | null;
+  /** Lease expiry while a worker holds the row; null when nobody does. */
+  locked_until: Date | null;
   created_at: Date;
 }
 
@@ -29,6 +31,7 @@ export const EmailOutboxSchema = new EntitySchema<EmailOutboxRow>({
     attempts: { type: Number, default: 0 },
     next_attempt_at: { type: 'timestamptz' },
     last_error: { type: String, nullable: true },
+    locked_until: { type: 'timestamptz', nullable: true },
     created_at: { type: 'timestamptz' },
   },
 });

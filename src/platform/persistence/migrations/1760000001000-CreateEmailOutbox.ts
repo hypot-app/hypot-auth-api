@@ -16,6 +16,7 @@ export class CreateEmailOutbox1760000001000 implements MigrationInterface {
         "attempts" integer NOT NULL DEFAULT 0,
         "next_attempt_at" timestamptz NOT NULL,
         "last_error" text,
+        "locked_until" timestamptz,
         "created_at" timestamptz NOT NULL DEFAULT now(),
         CONSTRAINT "PK_email_outbox_id" PRIMARY KEY ("id"),
         CONSTRAINT "FK_email_outbox_app_id" FOREIGN KEY ("app_id") REFERENCES "apps" ("id")

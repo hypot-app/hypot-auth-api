@@ -17,6 +17,12 @@ export interface OutboxEmail {
   readonly attempts: number;
   readonly nextAttemptAt: Date;
   readonly lastError: string | null;
+  /**
+   * The lease a worker holds on this row, or null. A claimed email carries the lease it
+   * was claimed under; the transitions below keep it, and the outbox uses it to fence
+   * the completion (a worker whose lease was lost cannot overwrite the new owner).
+   */
+  readonly lockedUntil: Date | null;
   readonly createdAt: Date;
 }
 
@@ -42,6 +48,7 @@ export const OutboxEmail = {
       attempts: 0,
       nextAttemptAt: input.now,
       lastError: null,
+      lockedUntil: null,
       createdAt: input.now,
     };
   },
