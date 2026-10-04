@@ -66,6 +66,43 @@ describe('UpdateAppUseCase / DeactivateAppUseCase', () => {
     },
   );
 
+  it('normalizes updated origins and keeps redirect uris verbatim', async () => {
+    const result = await update.execute({
+      clientId: 'abc',
+      allowedOrigins: ['HTTPS://B.example', 'https://b.example'],
+      redirectUris: ['https://b.example/Cb'],
+      isProduction: false,
+    });
+    expect(result.ok).toBe(true);
+    const stored = await apps.findByClientId('abc');
+    expect(stored?.allowedOrigins).toEqual(['https://b.example']);
+    expect(stored?.redirectUris).toEqual(['https://b.example/Cb']);
+  });
+
+  it.each(['https://a.example/', 'https://a.example/app', 'null', '*', 'http://a.example'])(
+    'rejects the invalid origin %s and changes nothing',
+    async (origin) => {
+      const result = await update.execute({ clientId: 'abc', allowedOrigins: [origin], name: 'Changed', isProduction: false });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('invalid_allowed_origin');
+      const stored = await apps.findByClientId('abc');
+      expect(stored?.allowedOrigins).toEqual(['https://a.example']);
+      expect(stored?.name).toBe('Shop');
+    },
+  );
+
+  it.each(['/cb', 'https://a.example/cb#x', 'http://a.example/cb'])(
+    'rejects the invalid redirect uri %s and changes nothing',
+    async (uri) => {
+      const result = await update.execute({ clientId: 'abc', redirectUris: [uri], name: 'Changed', isProduction: false });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('invalid_redirect_uri');
+      const stored = await apps.findByClientId('abc');
+      expect(stored?.redirectUris).toEqual(['https://a.example/cb']);
+      expect(stored?.name).toBe('Shop');
+    },
+  );
+
   it('rejects http localhost in production and accepts it otherwise', async () => {
     const prod = await update.execute({ clientId: 'abc', postResetRedirectUri: 'http://localhost:3000/l', isProduction: true });
     expect(prod.ok).toBe(false);

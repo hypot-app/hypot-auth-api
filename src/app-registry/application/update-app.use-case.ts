@@ -4,6 +4,8 @@ import { err, ok, type Result } from '../../shared-kernel/result';
 import type { UnitOfWork } from '../../shared-kernel/unit-of-work';
 import type { App } from '../domain/app';
 import type { AppRepository } from '../domain/app.repository';
+import { AllowedOrigin } from '../domain/allowed-origin';
+import { AppRedirectUri } from '../domain/app-redirect-uri';
 import { PostResetRedirectUri } from '../domain/post-reset-redirect-uri';
 
 export interface UpdateAppInput {
@@ -30,9 +32,25 @@ export class UpdateAppUseCase {
     const app = await this.deps.apps.findByClientId(input.clientId);
     if (!app) return err(new DomainError('app_not_found', `No app with client_id ${input.clientId}`));
 
+    const rules = { isProduction: input.isProduction };
+
+    let redirectUris: string[] | undefined;
+    if (input.redirectUris !== undefined) {
+      const validated = AppRedirectUri.createAll(input.redirectUris, rules);
+      if (!validated.ok) return err(validated.error);
+      redirectUris = validated.value.map((uri) => uri.value);
+    }
+
+    let allowedOrigins: string[] | undefined;
+    if (input.allowedOrigins !== undefined) {
+      const validated = AllowedOrigin.createAll(input.allowedOrigins, rules);
+      if (!validated.ok) return err(validated.error);
+      allowedOrigins = validated.value.map((origin) => origin.value);
+    }
+
     let postResetRedirectUri: string | null | undefined;
     if (input.postResetRedirectUri !== undefined) {
-      const validated = PostResetRedirectUri.optional(input.postResetRedirectUri, { isProduction: input.isProduction });
+      const validated = PostResetRedirectUri.optional(input.postResetRedirectUri, rules);
       if (!validated.ok) return err(validated.error);
       postResetRedirectUri = validated.value?.value ?? null;
     }
@@ -40,8 +58,8 @@ export class UpdateAppUseCase {
     const updated = app.update(
       {
         name: input.name,
-        redirectUris: input.redirectUris,
-        allowedOrigins: input.allowedOrigins,
+        redirectUris,
+        allowedOrigins,
         emailFrom: input.emailFrom,
         postResetRedirectUri,
       },
