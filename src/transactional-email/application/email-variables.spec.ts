@@ -24,30 +24,25 @@ const build = (template: string, payload: Record<string, string>) =>
   buildEmailVariables({ template, payload, app, links });
 
 describe('buildEmailVariables', () => {
-  it('confirmation: app name and the confirmation link built from the token', () => {
+  // Link formats are asserted once, in email-links.spec; here only that each template is wired to its link.
+  it('confirmation: app name and the confirmation link for the token', () => {
     expect(build('confirmation', { token: TOKEN })).toEqual({
       ok: true,
-      value: { appName: 'Shop', link: `https://auth.example.com/api/v1/accounts/confirm?token=${TOKEN}` },
+      value: { appName: 'Shop', link: links.confirmation(TOKEN) },
     });
   });
 
-  it('password-reset: link carries the token and the app client_id', () => {
+  it('password-reset: link for the token and the app client_id', () => {
     expect(build('password-reset', { token: TOKEN })).toEqual({
       ok: true,
-      value: {
-        appName: 'Shop',
-        link: `https://auth.example.com/api/v1/password/reset?token=${TOKEN}&client_id=app_0123456789abcdef0123456789abcdef`,
-      },
+      value: { appName: 'Shop', link: links.passwordReset(TOKEN, app.clientId) },
     });
   });
 
-  it('account-exists: forgot-password link has the client_id and no token', () => {
+  it('account-exists: forgot-password link for the client_id, no token needed', () => {
     expect(build('account-exists', {})).toEqual({
       ok: true,
-      value: {
-        appName: 'Shop',
-        link: 'https://auth.example.com/api/v1/password/forgot?client_id=app_0123456789abcdef0123456789abcdef',
-      },
+      value: { appName: 'Shop', link: links.accountExists(app.clientId) },
     });
   });
 
