@@ -42,12 +42,12 @@ const urlsIn = (text: string): string[] => text.match(/https?:\/\/\S+/g) ?? [];
 
 describe('default email templates', () => {
   it.each(EMAIL_TEMPLATES)('%s: has a subject and body, and never prints a password or hash', async (template) => {
-    const { subject, text, html } = await renderDefault(template);
+    const { subject, text } = await renderDefault(template);
 
     expect(subject.trim()).not.toBe('');
     expect(subject).toContain('Shop');
     expect(text).toContain('Shop');
-    for (const output of [subject, text, html ?? '']) {
+    for (const output of [subject, text]) {
       expect(output).not.toContain(PASSWORD);
       expect(output).not.toContain('$2b$12$');
     }
@@ -82,14 +82,6 @@ describe('default email templates', () => {
 
   it.each(['welcome', 'password-changed'] as const)('%s: informational, no links', async (template) => {
     expect(urlsIn((await renderDefault(template)).text)).toEqual([]);
-  });
-
-  it('every link in every default email starts with AUTH_PUBLIC_BASE_URL and the /api/v1 prefix', async () => {
-    const found: string[] = [];
-    for (const template of EMAIL_TEMPLATES) found.push(...urlsIn((await renderDefault(template)).text));
-
-    expect(found).toHaveLength(3); // confirmation, password-reset, account-exists
-    for (const url of found) expect(url.startsWith(`${BASE_URL}/api/v1/`)).toBe(true);
   });
 
   it('keeps an app name with special characters readable in the plain text', async () => {

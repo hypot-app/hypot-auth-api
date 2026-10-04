@@ -62,6 +62,24 @@ describe('HandlebarsTemplateRenderer', () => {
       }
     });
 
+    it.each([
+      ['percent-encoded traversal', '..%2fescape'],
+      ['percent-encoded dots', '%2e%2e/escape'],
+      ['an absolute path', 'ABSOLUTE'],
+      ['a Windows drive path', 'C:\\escape'],
+    ])('ignores a client_id that is %s', async (_label, raw) => {
+      const outside = join(root, '..', 'escape');
+      await mkdir(outside, { recursive: true });
+      await writeFile(join(outside, 'welcome.subject.hbs'), 'ESCAPED');
+      await writeFile(join(outside, 'welcome.text.hbs'), 'ESCAPED');
+      try {
+        const clientId = raw === 'ABSOLUTE' ? outside : raw;
+        expect(await render({ clientId })).toEqual({ subject: 'Welcome to Shop', text: 'Hello from Shop.' });
+      } finally {
+        await rm(outside, { recursive: true, force: true });
+      }
+    });
+
     it('rejects a template name that is not a known auth email', async () => {
       await expect(render({ template: '../default/welcome' })).rejects.toThrow('unknown template');
       await expect(render({ template: 'newsletter' })).rejects.toThrow('unknown template');
@@ -73,18 +91,6 @@ describe('HandlebarsTemplateRenderer', () => {
   });
 
   describe('escaping', () => {
-    it('escapes variables in the html part', async () => {
-      await put('default', 'welcome.html.hbs', '<p>Welcome to {{appName}}</p>');
-
-      const rendered = await render({ variables: { appName: '<script>alert(1)</script>' } });
-
-      expect(rendered.html).toBe('<p>Welcome to &lt;script&gt;alert(1)&lt;/script&gt;</p>');
-    });
-
-    it('leaves html undefined when there is no html template', async () => {
-      expect((await render()).html).toBeUndefined();
-    });
-
     it('keeps plain text readable: no html entities in subject or text', async () => {
       const rendered = await render({ variables: { appName: `Tom & Jerry's` } });
       expect(rendered).toEqual({ subject: `Welcome to Tom & Jerry's`, text: `Hello from Tom & Jerry's.` });

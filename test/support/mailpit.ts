@@ -8,7 +8,6 @@ export interface MailpitMessage {
   to: { name: string; address: string }[];
   subject: string;
   text: string;
-  html: string;
 }
 
 export interface TestMailpit {
@@ -29,7 +28,6 @@ interface MailpitMessageResponse {
   To: { Name: string; Address: string }[];
   Subject: string;
   Text: string;
-  HTML: string;
 }
 
 /**
@@ -61,7 +59,6 @@ export async function startMailpit(): Promise<TestMailpit> {
         to: m.To.map((t) => ({ name: t.Name, address: t.Address })),
         subject: m.Subject,
         text: m.Text,
-        html: m.HTML,
       }));
     },
     async clear() {

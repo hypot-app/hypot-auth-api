@@ -14,13 +14,13 @@ const LINE_BREAKS = /[\r\n]+/g;
 
 /**
  * Renders emails from Handlebars files laid out as
- * `<root>/<set>/<template>.{subject,text,html}.hbs`, where `<set>` is `default` or a
+ * `<root>/<set>/<template>.{subject,text}.hbs`, where `<set>` is `default` or a
  * client_id. Each part falls back from the app's override to the default set.
  *
- * Subject and text are plain text, so they are not HTML-escaped (a `&` stays a `&`);
- * the html part is escaped. Templates run on an isolated Handlebars instance with no
- * custom helpers and strict mode: an undefined variable fails the render instead of
- * printing nothing, and object internals such as `constructor` are not reachable.
+ * Subject and text are plain text, so they are not HTML-escaped (a `&` stays a `&`).
+ * Templates run on an isolated Handlebars instance with no custom helpers and strict
+ * mode: an undefined variable fails the render instead of printing nothing, and object
+ * internals such as `constructor` are not reachable.
  */
 export class HandlebarsTemplateRenderer implements TemplateRenderer {
   private readonly handlebars = Handlebars.create();
@@ -37,33 +37,25 @@ export class HandlebarsTemplateRenderer implements TemplateRenderer {
 
     const subject = await this.required(sets, input.template, 'subject');
     const text = await this.required(sets, input.template, 'text');
-    const html = await this.find(sets, input.template, 'html');
 
     return {
-      subject: this.fill(subject, false, input.variables).replace(LINE_BREAKS, ' '),
-      text: this.fill(text, false, input.variables),
-      ...(html === null ? {} : { html: this.fill(html, true, input.variables) }),
+      subject: this.fill(subject, input.variables).replace(LINE_BREAKS, ' '),
+      text: this.fill(text, input.variables),
     };
   }
 
-  /** The first existing file among the sets, or null. */
-  private async find(sets: string[], template: string, kind: 'subject' | 'text' | 'html'): Promise<string | null> {
+  /** The first existing file among the sets. Both parts must exist in at least the default set. */
+  private async required(sets: string[], template: string, kind: 'subject' | 'text'): Promise<string> {
     for (const set of sets) {
       const source = await readIfExists(join(this.root, set, `${template}.${kind}.hbs`));
       if (source !== null) return source;
     }
-    return null;
+    throw new Error(`template file not found: ${template}.${kind}.hbs`);
   }
 
-  /** Subject and text must exist in at least the default set. Only html is optional. */
-  private async required(sets: string[], template: string, kind: 'subject' | 'text'): Promise<string> {
-    const source = await this.find(sets, template, kind);
-    if (source === null) throw new Error(`template file not found: ${template}.${kind}.hbs`);
-    return source;
-  }
-
-  private fill(source: string, escape: boolean, variables: Record<string, string>): string {
-    return this.handlebars.compile(source, { noEscape: !escape, strict: true })(variables);
+  /** noEscape: subject and text are plain text. */
+  private fill(source: string, variables: Record<string, string>): string {
+    return this.handlebars.compile(source, { noEscape: true, strict: true })(variables);
   }
 }
 
