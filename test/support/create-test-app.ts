@@ -2,6 +2,7 @@ import type { INestApplication, Type } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { AppModule } from '../../src/app.module';
 import { APP_CONFIG, type AppConfig } from '../../src/platform/config/app-config';
+import { configureApp } from '../../src/platform/configure-app';
 
 export interface TestAppOptions {
   /** Connection URL of the Testcontainers database the app must use. */
@@ -38,6 +39,7 @@ export async function createTestApp(options: TestAppOptions): Promise<INestAppli
     .compile();
 
   const app = moduleRef.createNestApplication();
+  configureApp(app);
   await app.init();
   return app;
 }
