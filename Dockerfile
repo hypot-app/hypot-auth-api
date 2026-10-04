@@ -2,8 +2,8 @@
 
 # Build on Debian 12 (glibc 2.36). The runtime must be the same Debian release
 # so native modules compiled here (e.g. bcrypt in U5) load at runtime.
-# node:24-slim is bookworm, so the matching distroless tag is nodejs24-debian12.
-FROM node:24-slim AS build
+# Both tags are pinned to Debian 12: node:24-bookworm-slim and nodejs24-debian12.
+FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -11,7 +11,7 @@ COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
 RUN npm run build
 
-FROM node:24-slim AS prod-deps
+FROM node:24-bookworm-slim AS prod-deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
