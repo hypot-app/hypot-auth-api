@@ -89,6 +89,19 @@ describe('RegisterAppUseCase', () => {
   });
 
   it.each([
+    ['a display name', 'Shop <hello@a.example>'],
+    ['CRLF header injection', 'hello@a.example\r\nBcc: x@evil.example'],
+    ['a list', 'a@a.example, b@a.example'],
+    ['not an address', 'hello'],
+  ])('rejects an invalid email_from (%s) and persists nothing', async (_label, emailFrom) => {
+    const result = await useCase.execute(input({ emailFrom }));
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('invalid_email_from');
+    expect(apps.apps.size).toBe(0);
+  });
+
+  it.each([
     ['relative', '/login'],
     ['javascript scheme', 'javascript:alert(1)'],
     ['plain http on a public host', 'http://a.example/login'],
