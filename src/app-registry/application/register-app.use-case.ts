@@ -6,6 +6,7 @@ import type { UnitOfWork } from '../../shared-kernel/unit-of-work';
 import { App, type ClientType } from '../domain/app';
 import type { AppRepository } from '../domain/app.repository';
 import { AllowedOrigin } from '../domain/allowed-origin';
+import { AppEmailFrom } from '../domain/app-email-from';
 import { AppRedirectUri } from '../domain/app-redirect-uri';
 import { PostResetRedirectUri } from '../domain/post-reset-redirect-uri';
 import type { IdGenerator } from './id-generator';
@@ -42,6 +43,8 @@ export class RegisterAppUseCase {
     const rules = { isProduction: input.isProduction };
     const postReset = PostResetRedirectUri.optional(input.postResetRedirectUri, rules);
     if (!postReset.ok) return err(postReset.error);
+    const emailFrom = AppEmailFrom.optional(input.emailFrom);
+    if (!emailFrom.ok) return err(emailFrom.error);
     const redirectUris = AppRedirectUri.createAll(input.redirectUris, rules);
     if (!redirectUris.ok) return err(redirectUris.error);
     const allowedOrigins = AllowedOrigin.createAll(input.allowedOrigins, rules);
@@ -57,7 +60,7 @@ export class RegisterAppUseCase {
       clientSecretHash: secret?.hash ?? null,
       redirectUris: redirectUris.value.map((uri) => uri.value),
       allowedOrigins: allowedOrigins.value.map((origin) => origin.value),
-      emailFrom: input.emailFrom ?? null,
+      emailFrom: emailFrom.value,
       postResetRedirectUri: postReset.value?.value ?? null,
       status: 'active',
       createdAt: now,

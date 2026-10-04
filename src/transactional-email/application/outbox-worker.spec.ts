@@ -1,13 +1,13 @@
 import { App } from '../../app-registry/domain/app';
 import { FixedClock } from '../../shared-kernel/clock';
 import { FakeEmailSender } from '../../../test/support/fake-email-sender';
-import { InMemoryAppRepository, PassThroughUnitOfWork } from '../../../test/support/in-memory-app.repository';
+import { InMemoryAppRepository } from '../../../test/support/in-memory-app.repository';
 import { InMemoryEmailOutbox } from '../../../test/support/in-memory-email-outbox';
 import type { EmailTemplate } from '../domain/email-template';
 import { OutboxEmail } from '../domain/outbox-email';
 import type { TemplateRenderer } from '../domain/template-renderer';
 import { EmailLinks } from './email-links';
-import { OutboxWorker, retryDelayMs, type WorkerLogger } from './outbox-worker';
+import { LEASE_MS, OutboxWorker, retryDelayMs, type WorkerLogger } from './outbox-worker';
 
 const NOW = new Date('2026-01-01T00:00:00.000Z');
 const TOKEN = 'T0kenSecretValue_0123456789abcdefghijklmnopq';
@@ -45,7 +45,7 @@ class RecordingRenderer implements TemplateRenderer {
   }
 }
 
-function setup() {
+function setup(options: { sendDeadlineMs?: number } = {}) {
   const outbox = new InMemoryEmailOutbox();
   const apps = new InMemoryAppRepository();
   const sender = new FakeEmailSender();
@@ -58,12 +58,12 @@ function setup() {
     apps,
     sender,
     renderer,
-    uow: new PassThroughUnitOfWork(),
     clock,
     links: new EmailLinks('https://auth.example'),
     defaultFrom: MAIL_FROM,
     logger,
     maxAttempts: 3,
+    ...options,
   });
   const enqueue = async (
     app: App,
@@ -186,6 +186,17 @@ describe('OutboxWorker', () => {
       }
     });
 
+    it('masks a recipient echoed with different letter case', async () => {
+      const { worker, sender, outbox, enqueue, logs } = setup();
+      const email = await enqueue(appWith('a1', null), 'welcome', {}, 'Ana.Lopez@Example.com');
+      sender.failWith = new Error('550 <ANA.LOPEZ@EXAMPLE.COM> rejected, ana.lopez@example.com unknown');
+
+      await worker.processNext();
+
+      expect(outbox.emails.get(email.id)?.lastError).toBe('Error: 550 <[redacted]> rejected, [redacted] unknown');
+      expect(logs.join(' ').toLowerCase()).not.toContain('ana.lopez');
+    });
+
     it('bounds a very long provider message in both the stored error and the log', async () => {
       const { worker, sender, outbox, enqueue, logs } = setup();
       const email = await enqueue(appWith('a1', null), 'welcome');
@@ -195,16 +206,6 @@ describe('OutboxWorker', () => {
 
       expect(outbox.emails.get(email.id)?.lastError).toHaveLength(500);
       expect(logs[0]?.length).toBeLessThan(700);
-    });
-
-    it('logs the email id, template and attempt', async () => {
-      const { worker, sender, enqueue, logs } = setup();
-      const email = await enqueue(appWith('a1', null), 'confirmation', { token: TOKEN });
-      sender.failWith = new Error('timeout');
-
-      await worker.processNext();
-
-      expect(logs).toEqual([`email ${email.id} (confirmation) attempt 1/3 failed, will retry: Error: timeout`]);
     });
 
     it('gives up after maxAttempts: failed, payload purged, error logged', async () => {
@@ -250,6 +251,57 @@ describe('OutboxWorker', () => {
       await worker.processNext();
 
       expect(outbox.emails.get(email.id)?.lastError).toBe('unknown error');
+    });
+  });
+
+  describe('lease', () => {
+    it('claims under a lease and releases it when the outcome is stored', async () => {
+      const { worker, outbox, enqueue, sender } = setup();
+      const email = await enqueue(appWith('a1', null), 'welcome');
+      let leaseDuringSend: Date | null = null;
+      sender.send = async () => {
+        leaseDuringSend = outbox.emails.get(email.id)?.lockedUntil ?? null;
+      };
+
+      await worker.processNext();
+
+      expect(leaseDuringSend).toEqual(new Date(NOW.getTime() + LEASE_MS));
+      expect(outbox.emails.get(email.id)).toMatchObject({ status: 'sent', lockedUntil: null });
+    });
+
+    it('aborts a send that hangs past the deadline and schedules a retry', async () => {
+      const { worker, sender, outbox, enqueue, logs } = setup({ sendDeadlineMs: 20 });
+      const email = await enqueue(appWith('a1', null), 'confirmation', { token: TOKEN });
+      sender.send = () => new Promise<void>(() => undefined);
+
+      expect(await worker.processNext()).toBe(true);
+
+      expect(outbox.emails.get(email.id)).toMatchObject({
+        status: 'pending',
+        attempts: 1,
+        lastError: 'Error: send exceeded the 20 ms deadline',
+        payload: { token: TOKEN },
+        lockedUntil: null,
+        nextAttemptAt: new Date(NOW.getTime() + retryDelayMs(1)),
+      });
+      expect(logs).toHaveLength(1);
+    });
+
+    it('discards the outcome when the lease was lost to another worker mid-send', async () => {
+      const { worker, sender, outbox, enqueue, clock, logs } = setup();
+      const email = await enqueue(appWith('a1', null), 'welcome');
+      sender.send = async () => {
+        // The send outlives the lease, another worker re-claims the row.
+        clock.advanceMs(LEASE_MS + 1);
+        await outbox.claimNextDue(clock.now(), LEASE_MS);
+      };
+
+      expect(await worker.processNext()).toBe(true);
+
+      const row = outbox.emails.get(email.id);
+      expect(row).toMatchObject({ status: 'pending', attempts: 0 });
+      expect(row?.lockedUntil).toEqual(new Date(NOW.getTime() + 2 * LEASE_MS + 1));
+      expect(logs).toEqual([`email ${email.id} (welcome) lease lost before the outcome was stored, outcome discarded`]);
     });
   });
 

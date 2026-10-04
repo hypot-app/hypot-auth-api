@@ -5,6 +5,7 @@ import type { UnitOfWork } from '../../shared-kernel/unit-of-work';
 import type { App } from '../domain/app';
 import type { AppRepository } from '../domain/app.repository';
 import { AllowedOrigin } from '../domain/allowed-origin';
+import { AppEmailFrom } from '../domain/app-email-from';
 import { AppRedirectUri } from '../domain/app-redirect-uri';
 import { PostResetRedirectUri } from '../domain/post-reset-redirect-uri';
 
@@ -48,6 +49,13 @@ export class UpdateAppUseCase {
       allowedOrigins = validated.value.map((origin) => origin.value);
     }
 
+    let emailFrom: string | null | undefined;
+    if (input.emailFrom !== undefined) {
+      const validated = AppEmailFrom.optional(input.emailFrom);
+      if (!validated.ok) return err(validated.error);
+      emailFrom = validated.value;
+    }
+
     let postResetRedirectUri: string | null | undefined;
     if (input.postResetRedirectUri !== undefined) {
       const validated = PostResetRedirectUri.optional(input.postResetRedirectUri, rules);
@@ -60,7 +68,7 @@ export class UpdateAppUseCase {
         name: input.name,
         redirectUris,
         allowedOrigins,
-        emailFrom: input.emailFrom,
+        emailFrom,
         postResetRedirectUri,
       },
       this.deps.clock.now(),

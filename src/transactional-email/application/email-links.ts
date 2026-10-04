@@ -1,4 +1,4 @@
-import { API_PREFIX } from '../../platform/configure-app';
+import { API_PREFIX } from '../../shared-kernel/api-prefix';
 
 /**
  * Builds every link that goes into an email. The base is the single global
