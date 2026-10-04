@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, type MiddlewareConsumer, type NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CLOCK, type Clock } from '../shared-kernel/clock';
 import { TOKEN_GENERATOR, type TokenGenerator } from '../shared-kernel/token-generator';
@@ -9,6 +9,7 @@ import { RegisterAppUseCase } from './application/register-app.use-case';
 import { ResolveClientUseCase } from './application/resolve-client.use-case';
 import { UpdateAppUseCase } from './application/update-app.use-case';
 import { APP_REPOSITORY, type AppRepository } from './domain/app.repository';
+import { AppCorsMiddleware } from './http/app-cors.middleware';
 import { CryptoIdGenerator } from './infrastructure/crypto-id-generator';
 import { AppSchema } from './infrastructure/persistence/app.schema';
 import { TypeOrmAppRepository } from './infrastructure/persistence/typeorm-app.repository';
@@ -45,4 +46,9 @@ import { TypeOrmAppRepository } from './infrastructure/persistence/typeorm-app.r
   ],
   exports: [APP_REPOSITORY, RegisterAppUseCase, UpdateAppUseCase, DeactivateAppUseCase, ResolveClientUseCase],
 })
-export class AppRegistryModule {}
+export class AppRegistryModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    // Paths get the global `api/v1` prefix. Only the browser-facing API routes need CORS.
+    consumer.apply(AppCorsMiddleware).forRoutes('oauth/token', 'oauth/revoke', 'me');
+  }
+}
