@@ -20,4 +20,12 @@ export class TypeOrmAppRepository implements AppRepository {
       .findOneBy({ client_id: clientId });
     return row ? AppMapper.toDomain(row) : null;
   }
+
+  async isOriginAllowed(origin: string): Promise<boolean> {
+    const rows: unknown[] = await currentManager(this.dataSource).query(
+      `SELECT 1 FROM apps WHERE status = 'active' AND $1 = ANY(allowed_origins) LIMIT 1`,
+      [origin],
+    );
+    return rows.length > 0;
+  }
 }

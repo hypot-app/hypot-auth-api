@@ -116,23 +116,3 @@ describe('App changes', () => {
     expect(app.isActive()).toBe(true);
   });
 });
-
-describe('App.allowsOrigin', () => {
-  const app = App.restore(props({ allowedOrigins: ['https://a.example', 'http://localhost:5173'] }));
-
-  it('matches a registered origin exactly', () => {
-    expect(app.allowsOrigin('https://a.example')).toBe(true);
-    expect(app.allowsOrigin('http://localhost:5173')).toBe(true);
-  });
-
-  it.each(['https://other.example', 'https://a.example/', 'HTTPS://A.EXAMPLE', 'https://sub.a.example', 'null', '*', ''])(
-    'rejects %p',
-    (origin) => {
-      expect(app.allowsOrigin(origin)).toBe(false);
-    },
-  );
-
-  it('rejects everything when no origin is registered', () => {
-    expect(App.restore(props({ allowedOrigins: [] })).allowsOrigin('https://a.example')).toBe(false);
-  });
-});

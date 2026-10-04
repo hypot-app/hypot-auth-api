@@ -13,6 +13,10 @@ export class InMemoryAppRepository implements AppRepository {
   async findByClientId(clientId: string): Promise<App | null> {
     return this.apps.get(clientId) ?? null;
   }
+
+  async isOriginAllowed(origin: string): Promise<boolean> {
+    return [...this.apps.values()].some((app) => app.isActive() && app.allowedOrigins.includes(origin));
+  }
 }
 
 /** Unit-test double: runs the work directly, with no transaction. */

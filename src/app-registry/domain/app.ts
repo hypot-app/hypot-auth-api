@@ -99,11 +99,6 @@ export class App implements AppProps {
     return this.status === 'active';
   }
 
-  /** Exact string equality against the registered origins; never a wildcard. */
-  allowsOrigin(origin: string): boolean {
-    return this.allowedOrigins.includes(origin);
-  }
-
   private snapshot(): AppProps {
     return { ...this };
   }

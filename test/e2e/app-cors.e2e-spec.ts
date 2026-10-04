@@ -18,12 +18,9 @@ class ProbeController {
   }
 }
 
-describe('per-app CORS (e2e)', () => {
+describe('CORS origin allowlist (e2e)', () => {
   let db: TestDatabase;
   let app: INestApplication;
-  let clientA: string;
-  let clientB: string;
-  let clientOff: string;
 
   const server = () => app.getHttpServer();
 
@@ -42,10 +39,10 @@ describe('per-app CORS (e2e)', () => {
       if (!result.ok) throw result.error;
       return result.value.app.clientId;
     };
-    clientA = await create('A', ['https://a.example']);
-    clientB = await create('B', ['https://b.example']);
-    clientOff = await create('Off', ['https://off.example']);
-    await db.dataSource.query(`UPDATE apps SET status = 'inactive' WHERE client_id = $1`, [clientOff]);
+    await create('A', ['https://a.example']);
+    await create('B', ['https://b.example', 'http://localhost:5173']);
+    const off = await create('Off', ['https://off.example']);
+    await db.dataSource.query(`UPDATE apps SET status = 'inactive' WHERE client_id = $1`, [off]);
   }, 180_000);
 
   afterAll(async () => {
@@ -53,116 +50,97 @@ describe('per-app CORS (e2e)', () => {
     await db?.teardown();
   }, 60_000);
 
-  it('echoes a registered origin when client_id is in the query string', async () => {
+  it.each(['https://a.example', 'https://b.example', 'http://localhost:5173'])(
+    'echoes %s, registered by some active app, with no client_id anywhere',
+    async (origin) => {
+      const response = await request(server()).post('/api/v1/oauth/token').set('Origin', origin).expect(201);
+
+      expect(response.headers['access-control-allow-origin']).toBe(origin);
+      expect(response.headers['vary']).toMatch(/Origin/);
+    },
+  );
+
+  it('covers a bearer-only GET /api/v1/me with no client_id', async () => {
     const response = await request(server())
-      .post(`/api/v1/oauth/token?client_id=${clientA}`)
+      .get('/api/v1/me')
+      .set('Authorization', 'Bearer x')
       .set('Origin', 'https://a.example')
-      .expect(201);
+      .expect(200);
 
     expect(response.headers['access-control-allow-origin']).toBe('https://a.example');
-    expect(response.headers['vary']).toMatch(/Origin/);
   });
 
-  it('reads client_id from a form-encoded body', async () => {
+  it('answers a body-less preflight for /me with 204 and the allow headers', async () => {
     const response = await request(server())
-      .post('/api/v1/oauth/token')
-      .type('form')
-      .send({ client_id: clientA, grant_type: 'authorization_code' })
+      .options('/api/v1/me')
       .set('Origin', 'https://a.example')
-      .expect(201);
+      .set('Access-Control-Request-Method', 'GET')
+      .set('Access-Control-Request-Headers', 'authorization')
+      .expect(204);
 
     expect(response.headers['access-control-allow-origin']).toBe('https://a.example');
+    expect(response.headers['access-control-allow-methods']).toMatch(/GET/);
+    expect(response.headers['access-control-allow-headers']).toMatch(/authorization/i);
   });
 
-  it('answers a preflight for a registered origin with 204 and the allow headers', async () => {
+  it('answers a body-less preflight for the token endpoint', async () => {
     const response = await request(server())
-      .options(`/api/v1/oauth/token?client_id=${clientA}`)
-      .set('Origin', 'https://a.example')
+      .options('/api/v1/oauth/token')
+      .set('Origin', 'https://b.example')
       .set('Access-Control-Request-Method', 'POST')
       .set('Access-Control-Request-Headers', 'content-type')
       .expect(204);
 
-    expect(response.headers['access-control-allow-origin']).toBe('https://a.example');
+    expect(response.headers['access-control-allow-origin']).toBe('https://b.example');
     expect(response.headers['access-control-allow-methods']).toMatch(/POST/);
-    expect(response.headers['access-control-allow-headers']).toMatch(/content-type/i);
   });
 
-  it('returns no allow header for an origin the app did not register', async () => {
-    const response = await request(server())
-      .post(`/api/v1/oauth/token?client_id=${clientA}`)
-      .set('Origin', 'https://other.example')
-      .expect(201);
+  it('returns no CORS headers for an unknown origin', async () => {
+    const response = await request(server()).post('/api/v1/oauth/token').set('Origin', 'https://other.example').expect(201);
 
     expect(response.headers['access-control-allow-origin']).toBeUndefined();
   });
 
-  it('does not let one app use the origins of another', async () => {
+  it('returns no CORS headers on a preflight from an unknown origin', async () => {
     const response = await request(server())
-      .post(`/api/v1/oauth/token?client_id=${clientB}`)
-      .set('Origin', 'https://a.example')
-      .expect(201);
-
-    expect(response.headers['access-control-allow-origin']).toBeUndefined();
-  });
-
-  it('returns no allow header on a preflight from an unregistered origin', async () => {
-    const response = await request(server())
-      .options(`/api/v1/oauth/token?client_id=${clientA}`)
+      .options('/api/v1/me')
       .set('Origin', 'https://other.example')
-      .set('Access-Control-Request-Method', 'POST');
+      .set('Access-Control-Request-Method', 'GET');
 
     expect(response.headers['access-control-allow-origin']).toBeUndefined();
     expect(response.headers['access-control-allow-methods']).toBeUndefined();
   });
 
-  it.each([
-    ['an unknown client_id', 'zzz'],
-    ['no client_id', ''],
-  ])('returns no allow header for %s', async (_label, clientId) => {
-    const url = clientId ? `/api/v1/oauth/token?client_id=${clientId}` : '/api/v1/oauth/token';
-    const response = await request(server()).post(url).set('Origin', 'https://a.example').expect(201);
+  it('returns no CORS headers for the origin of an inactive app', async () => {
+    const response = await request(server()).post('/api/v1/oauth/token').set('Origin', 'https://off.example').expect(201);
 
     expect(response.headers['access-control-allow-origin']).toBeUndefined();
   });
 
-  it('returns no allow header for an inactive app', async () => {
-    const response = await request(server())
-      .post(`/api/v1/oauth/token?client_id=${clientOff}`)
-      .set('Origin', 'https://off.example')
-      .expect(201);
+  it.each(['https://a.example/', 'HTTPS://A.EXAMPLE', 'https://sub.a.example', 'null'])(
+    'matches origins exactly: %s is not allowed',
+    async (origin) => {
+      const response = await request(server()).post('/api/v1/oauth/token').set('Origin', origin).expect(201);
 
-    expect(response.headers['access-control-allow-origin']).toBeUndefined();
-  });
+      expect(response.headers['access-control-allow-origin']).toBeUndefined();
+    },
+  );
 
   it('adds no CORS headers when the request has no Origin', async () => {
-    const response = await request(server()).post(`/api/v1/oauth/token?client_id=${clientA}`).expect(201);
+    const response = await request(server()).post('/api/v1/oauth/token').expect(201);
 
     expect(response.headers['access-control-allow-origin']).toBeUndefined();
   });
 
-  it('never answers with a wildcard origin', async () => {
-    const response = await request(server())
-      .post(`/api/v1/oauth/token?client_id=${clientA}`)
-      .set('Origin', 'https://a.example');
+  it('never answers with a wildcard origin or credentials', async () => {
+    const response = await request(server()).post('/api/v1/oauth/token').set('Origin', 'https://a.example');
 
     expect(response.headers['access-control-allow-origin']).not.toBe('*');
     expect(response.headers['access-control-allow-credentials']).toBeUndefined();
   });
 
-  it('covers GET /api/v1/me too', async () => {
-    const response = await request(server())
-      .get(`/api/v1/me?client_id=${clientA}`)
-      .set('Origin', 'https://a.example')
-      .expect(200);
-
-    expect(response.headers['access-control-allow-origin']).toBe('https://a.example');
-  });
-
   it('does not apply to routes outside the API CORS surface', async () => {
-    const response = await request(server())
-      .get(`/health?client_id=${clientA}`)
-      .set('Origin', 'https://a.example')
-      .expect(200);
+    const response = await request(server()).get('/health').set('Origin', 'https://a.example').expect(200);
 
     expect(response.headers['access-control-allow-origin']).toBeUndefined();
   });
