@@ -11,6 +11,8 @@ COPY tsconfig.json tsconfig.build.json ./
 COPY scripts ./scripts
 COPY src ./src
 RUN npm run build
+# Empty dir owned by the runtime user: seeds the dev signing keys volume (compose keygen service).
+RUN mkdir /keys
 
 FROM node:24-bookworm-slim AS prod-deps
 WORKDIR /app
@@ -24,6 +26,7 @@ ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY --from=build --chown=65532:65532 /keys /keys
 COPY package.json healthcheck.js ./
 EXPOSE 3000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \

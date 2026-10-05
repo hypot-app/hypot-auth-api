@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { ConfigError, loadConfig } from './app-config';
 
 const validEnv = {
@@ -5,6 +8,7 @@ const validEnv = {
   AUTH_PUBLIC_BASE_URL: 'https://auth.example.com',
   SMTP_HOST: 'smtp.example.com',
   MAIL_FROM: 'no-reply@example.com',
+  AUTH_SIGNING_KEYS: '{"active":"inline-keys"}',
 };
 
 describe('loadConfig', () => {
@@ -18,6 +22,7 @@ describe('loadConfig', () => {
       authPublicBaseUrl: 'https://auth.example.com',
       smtp: { host: 'smtp.example.com', port: 587, secure: false, auth: undefined },
       mailFrom: 'no-reply@example.com',
+      signingKeysJson: '{"active":"inline-keys"}',
     });
   });
 
@@ -118,5 +123,42 @@ describe('loadConfig', () => {
     }
     expect(message).toContain('SMTP_USER and SMTP_PASS');
     expect(message).not.toContain('mailer-secret-user');
+  });
+
+  describe('signing keys (ADR 20)', () => {
+    const { AUTH_SIGNING_KEYS: _inline, ...envWithoutKeys } = validEnv;
+    let dir: string;
+    beforeEach(() => {
+      dir = mkdtempSync(join(tmpdir(), 'hypot-config-'));
+    });
+    afterEach(() => {
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('reads the key set from a mounted file', () => {
+      const file = join(dir, 'keys.json');
+      writeFileSync(file, '{"active":"from-file"}');
+      const config = loadConfig({ ...envWithoutKeys, AUTH_SIGNING_KEYS_FILE: file });
+      expect(config.signingKeysJson).toBe('{"active":"from-file"}');
+    });
+
+    it('requires exactly one of AUTH_SIGNING_KEYS and AUTH_SIGNING_KEYS_FILE', () => {
+      expect(() => loadConfig(envWithoutKeys)).toThrow('AUTH_SIGNING_KEYS');
+      expect(() => loadConfig({ ...validEnv, AUTH_SIGNING_KEYS_FILE: join(dir, 'keys.json') })).toThrow(
+        'AUTH_SIGNING_KEYS and AUTH_SIGNING_KEYS_FILE',
+      );
+    });
+
+    it('fails fast when the key file cannot be read', () => {
+      const act = () => loadConfig({ ...envWithoutKeys, AUTH_SIGNING_KEYS_FILE: join(dir, 'missing.json') });
+      expect(act).toThrow(ConfigError);
+      expect(act).toThrow('AUTH_SIGNING_KEYS_FILE: cannot read the file');
+    });
+
+    it('never leaks the inline key set when the config is invalid', () => {
+      const act = () => loadConfig({ ...validEnv, AUTH_SIGNING_KEYS: 'PRIVATE-KEY-MARKER', PORT: 'abc' });
+      expect(act).toThrow('PORT');
+      expect(act).not.toThrow('PRIVATE-KEY-MARKER');
+    });
   });
 });

@@ -96,6 +96,30 @@ backends, not browser SPAs. Enabling it would let any registered origin drive si
 (email bombing, enumeration timing). Revisit only with a product requirement for SPA-native signup, together
 with rate limiting.
 
+### Signing keys and JWKS
+
+Access tokens are RS256 JWTs signed with a key set that is supplied as a secret and never committed
+(ADR 32). The set is one JSON document: `{ "active": <private JWK>, "next": <private JWK>, "retired": [<JWK>] }`
+with a `kid` on every key. Provide it in exactly one of two ways:
+
+- `AUTH_SIGNING_KEYS_FILE`: path of a mounted file (preferred), or
+- `AUTH_SIGNING_KEYS`: the JSON itself.
+
+The service refuses to start when the set is invalid (bad JSON, missing or mismatched private key, duplicate
+`kid`, RSA key under 2048 bits). The error names the problem, never the key.
+
+`GET /.well-known/jwks.json` (root, no prefix) publishes the public half of `active`, `next` and `retired`
+with `Cache-Control: public, max-age=300`. Private parameters are never published.
+
+Dev keys: with Docker, compose creates a throwaway set in the `signing_keys` volume (a one-shot `keygen`
+service; `docker compose down -v` discards it). Without Docker run `npm run keys:generate`, which writes the
+gitignored `.keys/signing-keys.json` and leaves an existing file untouched, then add
+`AUTH_SIGNING_KEYS_FILE=.keys/signing-keys.json` to your `.env`.
+
+Rotation is a config change: (1) add the new key as `next` and deploy; (2) after the 5 minute JWKS cache
+(and once every consumer has refreshed) move `next` to `active` and the old `active` to `retired`; (3) after
+1 hour plus the cache TTL remove `retired`. Emergency rotation also revokes all refresh tokens.
+
 ## Run locally without Docker
 
 Requires Node 24 (see `.nvmrc`).
@@ -104,6 +128,7 @@ Requires Node 24 (see `.nvmrc`).
 cp .env.example .env               # use localhost hosts: DATABASE_URL @localhost:5432, SMTP_HOST=localhost
 docker compose up -d postgres mailpit
 npm ci
+npm run keys:generate        # dev-only signing keys, then set AUTH_SIGNING_KEYS_FILE in .env (see Signing keys)
 npm run migration:run              # builds, then applies pending migrations
 npm run start:dev                  # recompiles and restarts on changes
 ```
@@ -119,5 +144,6 @@ required variable is missing or invalid (see `.env.example`).
 
 - `GET /` welcome message
 - `GET /health` liveness plus database ping (200, or 503 when the database is down)
+- `GET /.well-known/jwks.json` public signing keys (see Signing keys and JWKS)
 - `POST /api/v1/accounts/signup`, `GET /api/v1/accounts/confirm`, `POST /api/v1/accounts/resend-confirmation`
 - Business routes are served under `/api/v1`; `/`, `/health` and `/.well-known/jwks.json` stay at the root.

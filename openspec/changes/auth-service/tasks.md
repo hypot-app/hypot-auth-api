@@ -138,9 +138,9 @@ Branch `feat/u1b-docker` was branched from 047fff7, which is also the tip of `de
 
 ## U6 token-lifecycle A
 
-- [ ] 6.1 RED/GREEN: `KeyStore` JWK-set adapter (`active`, `next`, `retired`), fixed test key in `test/support/`
+- [x] 6.1 RED/GREEN: `KeyStore` JWK-set adapter (`active`, `next`, `retired`), fixed test key in `test/support/` (U6a: keys are generated at test time by `generateKeySet`, nothing committed; config `AUTH_SIGNING_KEYS[_FILE]`, dev script `npm run keys:generate`, compose `keygen` service, ADR 32)
 - [ ] 6.2 RED/GREEN: `AccessTokenIssuer` with `jose` (RS256, `kid`, iss/aud/sub/iat/exp 3600/jti, no roles)
-- [ ] 6.3 RED/GREEN: `GET /.well-known/jwks.json` (served at the root, excluded from the prefix; max-age 300, public keys only, rotation overlap). Commit: `feat(tokens): add key store, issuer, jwks`
+- [x] 6.3 RED/GREEN (U6a): `GET /.well-known/jwks.json` (served at the root, excluded from the prefix; max-age 300, public keys only, rotation overlap). Commit: `feat(tokens): add key store, issuer, jwks`
 
 ## U7 authorization-flow
 

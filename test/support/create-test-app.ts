@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { AppModule } from '../../src/app.module';
 import { APP_CONFIG, type AppConfig } from '../../src/platform/config/app-config';
 import { configureApp } from '../../src/platform/configure-app';
+import { generateKeySet } from '../../src/token-lifecycle/infrastructure/signing-key-generator';
 
 export interface TestAppOptions {
   /** Connection URL of the Testcontainers database the app must use. */
@@ -21,6 +22,8 @@ export function buildTestConfig(options: Pick<TestAppOptions, 'databaseUrl' | 'c
     authPublicBaseUrl: 'http://localhost:3000',
     smtp: { host: 'localhost', port: 1025, secure: false, auth: undefined },
     mailFrom: 'no-reply@example.test',
+    // Generated per app: private keys never live in the repository.
+    signingKeysJson: JSON.stringify(generateKeySet({ next: false })),
     ...options.config,
   };
 }
