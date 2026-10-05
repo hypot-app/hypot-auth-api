@@ -8,8 +8,12 @@ export interface UserRepository {
    * for the same address cannot both return true.
    */
   add(user: User): Promise<boolean>;
-  /** Writes the changes of an existing account (matched by id). */
-  save(user: User): Promise<void>;
+  /**
+   * Marks the address as confirmed at `at`, touching only the verification columns so a
+   * concurrent change to anything else (a password reset) is never overwritten. A no-op
+   * when the account is already confirmed or unknown: the first confirmation time is kept.
+   */
+  markEmailVerified(userId: string, at: Date): Promise<void>;
   /** `email` must be normalized. */
   findByAppAndEmail(appId: string, email: string): Promise<User | null>;
   findById(id: string): Promise<User | null>;

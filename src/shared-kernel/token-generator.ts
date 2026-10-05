@@ -27,3 +27,14 @@ export class CryptoTokenGenerator implements TokenGenerator {
     return { token, hash: hashToken(token) };
   }
 }
+
+/**
+ * Tokens come back from untrusted input (a link, a form). Anything that could not have been
+ * generated here is rejected before it is hashed or looked up. A loose superset of the
+ * generator's 43-character output.
+ */
+const TOKEN_PATTERN = /^[A-Za-z0-9_-]{16,256}$/;
+
+export function isWellFormedToken(value: unknown): value is string {
+  return typeof value === 'string' && TOKEN_PATTERN.test(value);
+}

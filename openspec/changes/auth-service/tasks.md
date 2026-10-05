@@ -131,9 +131,10 @@ Branch `feat/u1b-docker` was branched from 047fff7, which is also the tip of `de
 - [x] 5.1 RED: `UserSchema` and `OneTimeTokenSchema` plus migrations `CreateUsers` (`CREATE EXTENSION IF NOT EXISTS citext`, UNIQUE(app_id,email)) and `CreateOneTimeTokens`, each with `down()`; test for the same email across apps; reversibility test
 - [x] 5.2 GREEN: domain `User` and `OneTimeToken`, mappers with round-trip tests, TypeORM repositories implementing `UserRepository` and `OneTimeTokenRepository`
 - [x] 5.3 RED/GREEN: `PasswordHasher` bcrypt 12 (min 8 chars, max 72 bytes), dummy compare for timing (U5a: hasher port with `hash` and `verify`, password policy, email normalization. No dummy compare here: signup hashes the submitted password on both of its paths (5.4), and the login dummy compare belongs to U7)
-- [ ] 5.4 RED/GREEN: `POST /api/v1/accounts/signup`; duplicate gives identical response plus the `account-exists` notice email to the existing owner; invalid input validation
-- [ ] 5.5 RED/GREEN: `GET /api/v1/accounts/confirm` (24h, single-use) plus welcome email; generic invalid-or-expired
-- [ ] 5.6 RED/GREEN: `POST /api/v1/accounts/resend-confirmation` invalidates old tokens, identical response. Commit: `feat(accounts): add signup and confirmation`
+- [x] 5.4 RED/GREEN: `POST /api/v1/accounts/signup`; duplicate gives identical response plus the `account-exists` notice email to the existing owner; invalid input validation
+- [x] 5.5 RED/GREEN: `GET /api/v1/accounts/confirm` (24h, single-use) plus welcome email; generic invalid-or-expired
+- [x] 5.6 RED/GREEN: `POST /api/v1/accounts/resend-confirmation` invalidates old tokens, identical response. Commit: `feat(accounts): add signup and confirmation`
+- [x] 5.7 Review fixes. Confirm marks the email verified with a targeted `UPDATE .. WHERE email_verified_at IS NULL` (`UserRepository.markEmailVerified`, `save` removed) so a concurrent password change is not overwritten, proven by an integration test that changes `password_hash` between the read and the write (W2). `revertThrough` throws when no applied migration matches the prefix (S2). ADR 31 and README: residual new-vs-duplicate signup timing delta documented (W4), resend timing gap explicitly accepted until Phase 2 rate limiting (W3), no CORS on `/api/v1/accounts/*` recorded (decision).
 
 ## U6 token-lifecycle A
 

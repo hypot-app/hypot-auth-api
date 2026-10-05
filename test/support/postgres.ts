@@ -11,7 +11,8 @@ export interface TestDatabase {
   /**
    * Reverts migrations, newest first, until the one whose class name starts with
    * `namePrefix` has been reverted too. Tests of an older migration use this so they
-   * do not have to count the migrations added after it.
+   * do not have to count the migrations added after it. Throws when no applied
+   * migration matches, so a typo cannot turn the call into a silent no-op.
    */
   revertThrough(namePrefix: string): Promise<void>;
   /** Destroys the DataSource and stops the container. */
@@ -45,6 +46,9 @@ export async function startTestDatabase(options: { entities?: EntitySchema[] } =
         const rows: unknown[] = await dataSource.query(`SELECT 1 FROM migrations WHERE name LIKE $1`, [`${namePrefix}%`]);
         return rows.length > 0;
       };
+      if (!(await isApplied())) {
+        throw new Error(`revertThrough: no applied migration starts with "${namePrefix}"`);
+      }
       while (await isApplied()) await dataSource.undoLastMigration();
     },
     async teardown() {

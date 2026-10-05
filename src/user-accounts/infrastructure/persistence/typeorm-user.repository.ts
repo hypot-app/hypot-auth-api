@@ -24,8 +24,15 @@ export class TypeOrmUserRepository implements UserRepository {
     return result.raw.length > 0;
   }
 
-  async save(user: User): Promise<void> {
-    await currentManager(this.dataSource).getRepository<UserRow>(UserSchema).save(UserMapper.toPersistence(user));
+  async markEmailVerified(userId: string, at: Date): Promise<void> {
+    // A targeted UPDATE, not a whole-row save: the use case read the account earlier, and
+    // writing that copy back would undo anything committed since (a password change).
+    await currentManager(this.dataSource)
+      .createQueryBuilder()
+      .update(UserSchema)
+      .set({ email_verified_at: at, updated_at: at })
+      .where('id = :userId AND email_verified_at IS NULL', { userId })
+      .execute();
   }
 
   async findByAppAndEmail(appId: string, email: string): Promise<User | null> {

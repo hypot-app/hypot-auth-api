@@ -19,4 +19,10 @@ describe('Postgres test stack (integration)', () => {
   it('truncate helper succeeds on a migrated database', async () => {
     await expect(db.truncate()).resolves.toBeUndefined();
   });
+
+  it('revertThrough fails on a prefix no applied migration matches and reverts nothing', async () => {
+    const before: unknown[] = await db.dataSource.query('SELECT 1 FROM migrations');
+    await expect(db.revertThrough('NoSuchMigration')).rejects.toThrow(/NoSuchMigration/);
+    expect(await db.dataSource.query('SELECT 1 FROM migrations')).toHaveLength(before.length);
+  });
 });
