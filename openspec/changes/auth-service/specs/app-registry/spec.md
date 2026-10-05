@@ -24,7 +24,7 @@ The system MUST store each app with a unique `app_id`, a unique public `client_i
 
 ### Requirement: Email link URLs
 
-Each app MUST have an `email_confirmation_url` and a `password_reset_url`. Both MUST be supplied on create and MUST NOT be cleared or set empty on update. Each MUST be an absolute URL with scheme `https`, or `http` for `localhost` and `127.0.0.1` only when `NODE_ENV` is not `production`. Each MUST contain no userinfo and no fragment. Invalid input MUST be rejected with no change persisted. The ORIGIN of each URL (scheme, host and port, normalized as for allowed origins) MUST equal one of the app's `allowed_origins`, so the app's confirm and reset pages can call Auth from the browser. This MUST be enforced on create and on update, including an update that changes only `allowed_origins` and would leave a URL's origin unlisted. The URLs MUST come only from the app record, never from a request. Existing apps without values receive them through `update`; until then they cannot use signup or password reset (assumption).
+Each app MUST have an `email_confirmation_url` and a `password_reset_url`. Both MUST be supplied on create and MUST NOT be cleared or set empty on update. Each MUST be an absolute URL with scheme `https`, or `http` for `localhost` and `127.0.0.1` only when `NODE_ENV` is not `production`. Each MUST contain no userinfo and no fragment. Invalid input MUST be rejected with no change persisted. The ORIGIN of each URL (scheme, host and port, normalized as for allowed origins) MUST equal one of the app's `allowed_origins`, so the app's confirm and reset pages can call Auth from the browser. This MUST be enforced on create and on update, including an update that changes only `allowed_origins` and would leave a URL's origin unlisted. The URLs MUST come only from the app record, never from a request. Because both URLs must be listed origins, an app MUST have at least one allowed origin on create. Existing apps without values receive them through `update`; until then they cannot use signup or password reset (assumption). An app is treated as unconfigured when EITHER URL is null (the account-exists email links to the reset URL), so signup, resend and forgot MUST answer `unconfigured_client` until both are set.
 
 #### Scenario: Create requires both URLs
 - GIVEN an operator registers an app without `--password-reset-url`
@@ -41,6 +41,11 @@ Each app MUST have an `email_confirmation_url` and a `password_reset_url`. Both 
 - GIVEN a relative URL, a `javascript:` or `ftp:` URL, a URL with userinfo or a fragment, or `http://a.example/confirm`
 - WHEN the app is created or updated
 - THEN the CLI rejects it and persists nothing
+
+#### Scenario: Create requires an allowed origin
+- GIVEN an operator registers an app with both URLs and no `--origin`
+- WHEN the app is created
+- THEN the CLI exits non-zero saying at least one `--origin` is required and nothing is persisted
 
 #### Scenario: URL origin must be an allowed origin
 - GIVEN an operator registers an app with `--origin https://a.example` and `--email-confirmation-url https://other.example/confirm`

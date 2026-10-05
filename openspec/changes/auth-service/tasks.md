@@ -43,7 +43,7 @@ Every PR targets `develop`, never `main`. The next branch starts from the update
 | U18 | password-management: forgot, reset, change | 790-890 | U15, U16, U17 | a forgot incl. unconfirmed accounts (285-320) / b reset (245-280) / c change incl. `invalid_current_password` (260-290) |
 | U19 | OpenAPI, retention job, e2e, integration guide status pass, ops, smoke test | 1,205-1,440 | all | a OpenAPI (245-280) / b retention (370-420, `size:exception` if over 400) / c e2e + migration chain + grace journey (350-400) / d docs status pass, ops, issuer check (270-310) |
 
-U11 row is not edited here (a parallel branch owns it). Add 40-50 lines for the U11b "Pending additions" note at the end of this file; the totals above already include them.
+U11 row is not edited here (a parallel branch owns it). The U11b origin rule (11.4a) is now folded into U11b; the totals above already include it.
 
 The units run sequentially: one writer. Sub-PRs also target `develop` in order.
 
@@ -78,7 +78,7 @@ Round 11 amendment (binding user decisions plus orchestrator defaults, see ADR 3
 17. **Auth stores no profile:** `GET /me` returns `{ id, email, email_verified, created_at }`.
 18. **Origin mismatch:** refresh gives `401 invalid_grant`; logout gives `204` with no effect (design had `400 invalid_client`).
 19. **New per-IP limits:** `refresh_ip` 60 / 15 min and `confirm_ip` 20 / 1 h, `429` with an integer `Retry-After`; `/me` has none.
-20. **Email URL origins** must be allowed origins of the app (app-registry spec; task note at the end of this file for U11b).
+20. **Email URL origins** must be allowed origins of the app (app-registry spec; task 11.4a).
 21. **Shared rules:** error body `{error, message}` everywhere, confirm `200 {message}`, fixed generic bodies, fixed preflight headers, `iss` = `AUTH_PUBLIC_BASE_URL` and JWKS = `${iss}/.well-known/jwks.json`.
 
 Real forks: none. Items 8 and 9 are the closest; both follow the specs, and the orchestrator can revert 9 (add `client_id` to the confirm and reset bodies) at the cost of one extra field.
@@ -119,13 +119,13 @@ Real forks: none. Items 8 and 9 are the closest; both follow the specs, and the 
 - [x] 11.2 RED/GREEN/REFACTOR: `git mv` `PostResetRedirectUri` to `AppUrl` (`src/app-registry/domain/app-url.ts`) with the same table-driven rules (https, localhost http outside production, no userinfo, no fragment, relative/`javascript:`/`ftp:` rejected). Tests move with it and stay green. (Pulled in from U11b because the VO and column go away here: the `PostResetRedirectUri` use-case inputs, the CLI flags `--post-reset-redirect-uri` and `--clear-post-reset-redirect-uri`, their tests and README mentions are removed in U11a; U11b adds the new inputs.)
 - [x] 11.3 RED: migration `1760000004000-AppEmailLinkUrls` int test: up adds nullable `email_confirmation_url` and `password_reset_url` and drops `post_reset_redirect_uri`; down restores it and drops both; up, down, up. Fix the `CreateApps` reversibility test for the new head. GREEN: migration, `AppRow`, `AppSchema`, `AppMapper` and domain `App` (`string | null`, round-trip including null).
 
-**U11b** `feat/u11b-app-url-cli` (150-190 lines; the removal of the post-reset use-case inputs, CLI flags, tests and README mentions already landed in U11a)
+**U11b** `feat/u11b-app-url-cli` (about 400 lines after trimming duplicate tests; the removal of the post-reset use-case inputs, CLI flags, tests and README mentions already landed in U11a; includes 11.4a, folded in from the round 11 amendment)
 
 - [x] 11.4 RED/GREEN: register requires both URLs validated through `AppUrl` (`isProduction` from config); update replaces but rejects clear or blank; invalid input persists nothing. Mutation: skip validation on update, the clear/blank test fails.
 - [x] 11.5 RED/GREEN/REFACTOR: CLI `--email-confirmation-url` and `--password-reset-url` (required on create, optional on update). Assert that an unknown option such as `--post-reset-redirect-uri` exits non-zero, and assert the specific `CliError` messages. Re-add the CLI test that `NODE_ENV=production` rejects `http://localhost` for both URLs (verify S1, dropped with the old post-reset tests in U11a). REFACTOR shared option parsing. (Flag and use-case removal already done in 11.2.)
 - [x] 11.6 Docs: README `app create` / `app update` examples with both new flags (the `--post-reset-redirect-uri` mentions are already gone), a note that existing dev apps need one `app update` with both URLs before signup or forgot works.
 
-Addition approved by the user in the contract review (spec amendment lands later in a docs PR): the origin of both `email_confirmation_url` and `password_reset_url` must be one of the app's `allowed_origins`. Enforced as an `App` invariant (`email_url_origin_not_allowed`), so it holds on create and on update, including an update that removes an origin a stored URL uses. Comparison uses the normalized origin (`URL.origin`), consistent with `AllowedOrigin`. An app therefore needs at least one allowed origin. `AppUrl.create` also takes an optional label so errors name the field (`Invalid email_confirmation_url: ...`).
+- [x] 11.4a RED/GREEN: email URL origin rule (app-registry spec, ADR 39). The origin of `email_confirmation_url` and `password_reset_url` must be one of the app's `allowed_origins` (compared after the `AllowedOrigin` normalization via `URL.origin`). Enforced as an `App` invariant (`email_url_origin_not_allowed`) in `App.create`, and `App.update` rebuilds through it, so it holds on create and on update, including an update that removes an origin a stored URL uses. Errors name the field and the origin, and nothing is persisted. `AppUrl.create` takes an optional label so errors name the field (`Invalid email_confirmation_url: ...`). Legacy apps with null URLs skip the rule. An app needs at least one allowed origin: create without `--origin` fails with `at least one --origin is required`. Mutation: skip the check on update, the orphaned-origins test fails. CLI messages asserted as in 11.5.
 
 **U11c** `feat/u11c-origin-binding` (230-260 lines)
 
@@ -221,14 +221,14 @@ Addition approved by the user in the contract review (spec amendment lands later
 **U17b** `feat/u17b-accounts-limits` (285-320 lines)
 
 - [ ] 17.4 RED/GREEN: signup and resend call `AbuseGuard` first, before bcrypt and any lookup. IP-limited gives `429 rate_limited` with `Retry-After`, identical for a new and an existing email, and runs no hash. A per-account cap gives the normal `202`; signup still creates the account but queues nothing; resend queues nothing. Store failure gives `503` before any lookup. Mutation: make the `429` depend on account existence, the equality test fails.
-- [ ] 17.5 RED/GREEN: an app with a null `email_confirmation_url` gives `400 unconfigured_client` on signup and resend before any account work (no rows, no outbox, no hash).
+- [ ] 17.5 RED/GREEN: an app with a null `email_confirmation_url` OR a null `password_reset_url` gives `400 unconfigured_client` on signup and resend before any account work (no rows, no outbox, no hash). Both are checked because signup for an existing email sends the account-exists mail, which links to `password_reset_url` (12.3). Scenario: app with only `email_confirmation_url` set (legacy app half-updated) gets `unconfigured_client` on signup and resend, and the reverse case (only `password_reset_url`) does too.
 - [ ] 17.6 RED/GREEN e2e: new, duplicate and capped signups are indistinguishable (the fixed `message` texts of signup and resend are asserted byte for byte, and every error body has string `error` and `message`); remove the "resend gap accepted until Phase 2" wording from ADR 31 and README, since the limits now bound it.
 
 ## U18 Password management
 
 **U18a** `feat/u18a-forgot` (285-320 lines)
 
-- [ ] 18.1 RED/GREEN: `ForgotPasswordUseCase` order: client (`invalid_client` or `unconfigured_client` as `400`), `email_ip` (`429`), `email_account` (silent), then by account state, in one UoW: confirmed gives a 1 h token that supersedes earlier unused reset tokens plus a `reset` outbox row; UNCONFIRMED gives a new confirmation token that supersedes earlier unused confirmation tokens (reuse the resend code path) plus a `confirmation` outbox row, and never a reset token; unknown or other-app-only gives nothing. Always the fixed generic `202` body `{ "message": "If an account exists for this address, an email is on its way." }`. Unit with fakes.
+- [ ] 18.1 RED/GREEN: `ForgotPasswordUseCase` order: client (`invalid_client`, or `unconfigured_client` as `400` when EITHER `email_confirmation_url` OR `password_reset_url` is null, since the unconfirmed-account path sends a confirmation link and the confirmed path a reset link), `email_ip` (`429`), `email_account` (silent), then by account state, in one UoW: confirmed gives a 1 h token that supersedes earlier unused reset tokens plus a `reset` outbox row; UNCONFIRMED gives a new confirmation token that supersedes earlier unused confirmation tokens (reuse the resend code path) plus a `confirmation` outbox row, and never a reset token; unknown or other-app-only gives nothing. Always the fixed generic `202` body `{ "message": "If an account exists for this address, an email is on its way." }`. Unit with fakes.
 - [ ] 18.2 RED/GREEN: `POST /api/v1/password/forgot` and e2e: confirmed, unconfirmed, unknown and other-app-only give byte-identical `202`; confirmed queues a `reset`, unconfirmed queues a `confirmation` (and no reset token exists for it), unknown queues nothing; the confirmation mail from forgot confirms the account through `POST /accounts/confirm`; `GET /api/v1/password/forgot` is `404`; a provider outage still gives `202`; emails from forgot for an unconfirmed account count toward the per-account cap (the 4th mail in an hour across signup, resend and forgot is suppressed); IP limit gives `429`; a malformed body gives `400 invalid_request`; CORS bound to `client_id`. Mutations: send a reset for an unconfirmed account; do not count the unconfirmed email toward the cap; both fail a named test.
 
 **U18b** `feat/u18b-reset` (245-280 lines)
@@ -273,9 +273,3 @@ Addition approved by the user in the contract review (spec amendment lands later
 - [ ] F.1 Split liveness (`/live`) from readiness (`/health`) before any orchestrator deployment.
 - [ ] F.2 Support `_FILE`-suffixed env vars for secrets other than the signing keys (ADR 20).
 - [ ] F.3 Phase 2: `SET NOT NULL` migration for the two app email URLs once every row has values (ADR 39).
-
-## Pending additions for U11b
-
-Added by the round 11 amendment. Fold into U11b (`feat/u11b-app-url-cli`) when that unit is applied; this section is kept apart from the U11 section on purpose. Adds about 40-50 changed lines.
-
-- [ ] 11.4a RED/GREEN: email URL origin rule (app-registry spec, ADR 39). Register and update reject an `email_confirmation_url` or `password_reset_url` whose origin is not one of the app's `allowed_origins` (compared after the `AllowedOrigin` normalization), with an error naming the URL, and persist nothing. An update that changes only `allowed_origins` and would orphan a URL is rejected. Unit cases: listed origin accepted; unlisted origin rejected on create; URL updated to an unlisted origin rejected; origins updated so a URL is orphaned rejected; default port and case normalized before the comparison; `http://localhost` accepted outside production when listed. Mutation: skip the check on update, the orphaned-origins test fails. CLI messages asserted as in 11.5.
