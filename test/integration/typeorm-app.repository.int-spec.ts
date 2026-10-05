@@ -62,6 +62,14 @@ describe('TypeOrmAppRepository (integration)', () => {
     expect(await repository.findByClientId('missing')).toBeNull();
   });
 
+  it('finds an app by id, and returns null for an unknown id', async () => {
+    const app = App.restore(props({ clientId: 'by-id' }));
+    await repository.save(app);
+
+    expect(await repository.findById(app.id)).toEqual(app);
+    expect(await repository.findById(crypto.randomUUID())).toBeNull();
+  });
+
   it('updates an existing app when saved again', async () => {
     const original = props({ clientId: 'upd' });
     await repository.save(App.restore(original));

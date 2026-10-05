@@ -66,6 +66,24 @@ describe('UpdateAppUseCase / DeactivateAppUseCase', () => {
     },
   );
 
+  it.each(['Shop <hello@a.example>', 'hello@a.example\r\nBcc: x@evil.example', 'hello'])(
+    'rejects the invalid email_from %j and changes nothing',
+    async (emailFrom) => {
+      const result = await update.execute({ clientId: 'abc', emailFrom, name: 'Changed', isProduction: false });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('invalid_email_from');
+      const stored = await apps.findByClientId('abc');
+      expect(stored?.name).toBe('Shop');
+    },
+  );
+
+  it('sets a valid email_from and clears it with null', async () => {
+    await update.execute({ clientId: 'abc', emailFrom: 'hello@a.example', isProduction: false });
+    expect((await apps.findByClientId('abc'))?.emailFrom).toBe('hello@a.example');
+    await update.execute({ clientId: 'abc', emailFrom: null, isProduction: false });
+    expect((await apps.findByClientId('abc'))?.emailFrom).toBeNull();
+  });
+
   it('normalizes updated origins and keeps redirect uris verbatim', async () => {
     const result = await update.execute({
       clientId: 'abc',

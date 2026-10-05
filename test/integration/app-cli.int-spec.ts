@@ -133,6 +133,14 @@ describe('app CLI (integration)', () => {
       },
     );
 
+    it('rejects an email-from with a display name and persists nothing', async () => {
+      const run = await cli(['app', 'create', '--name', 'Shop', '--email-from', 'Shop <hello@a.example>']);
+
+      expect(run.errors).toHaveLength(1);
+      expect(run.errors[0].message).toContain('Invalid email_from');
+      expect(await rows()).toHaveLength(0);
+    });
+
     it.each(['/cb', 'https://a.example/cb#x', 'http://a.example/cb', 'myapp://cb'])(
       'rejects the redirect uri %s with a clear error and persists nothing',
       async (uri) => {

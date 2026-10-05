@@ -1,4 +1,4 @@
-import { buildTypeOrmOptions } from './typeorm.options';
+import { buildTypeOrmOptions, DB_POOL_MAX } from './typeorm.options';
 
 describe('buildTypeOrmOptions', () => {
   const options = buildTypeOrmOptions({ url: 'postgres://u:p@localhost:5432/db' });
@@ -6,6 +6,11 @@ describe('buildTypeOrmOptions', () => {
   it('targets postgres with the given url', () => {
     expect(options.type).toBe('postgres');
     expect(options).toMatchObject({ url: 'postgres://u:p@localhost:5432/db' });
+  });
+
+  it('sets the pg pool size explicitly instead of relying on the driver default', () => {
+    expect(DB_POOL_MAX).toBe(10);
+    expect(options).toMatchObject({ extra: { max: DB_POOL_MAX } });
   });
 
   it('never syncs the schema or auto-runs migrations', () => {
