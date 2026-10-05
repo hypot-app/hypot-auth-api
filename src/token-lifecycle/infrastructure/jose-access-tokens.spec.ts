@@ -12,6 +12,8 @@ const ISSUER = 'https://auth.example.com';
 const START = new Date('2026-01-01T00:00:00Z');
 const START_SECONDS = START.getTime() / 1000;
 const AUD = { audience: 'app_a' };
+/** Every claim an access token needs, so a forged token can only fail on what the test attacks. */
+const FULL_CLAIMS = { iss: ISSUER, aud: 'app_a', sub: 'user-1', iat: START_SECONDS, exp: START_SECONDS + 3600, jti: 'jti-1' };
 
 const storeOf = (set: KeySetJson): KeyStore => JwkSetKeyStore.fromJson(JSON.stringify(set));
 
@@ -215,12 +217,12 @@ describe('JoseAccessTokenVerifier', () => {
       ['alg RS384 with a published key (alg pinned to RS256)', () =>
         forge({ key: signingKey.privateKey, kid: signingKey.kid, alg: 'RS384' })],
       ['alg HS256 keyed with the public key (alg confusion)', async () =>
-        new SignJWT({ iss: ISSUER, aud: 'app_a', sub: 'user-1', exp: START_SECONDS + 3600 })
-          .setProtectedHeader({ alg: 'HS256', kid: signingKey.kid })
+        new SignJWT(FULL_CLAIMS)
+          .setProtectedHeader({ alg: 'HS256', kid: signingKey.kid, typ: 'at+jwt' })
           .sign(new TextEncoder().encode(publicPem))],
       ['alg none', async () => {
         const part = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
-        return `${part({ alg: 'none', kid: signingKey.kid })}.${part({ iss: ISSUER, aud: 'app_a', sub: 'user-1', exp: START_SECONDS + 3600 })}.`;
+        return `${part({ alg: 'none', kid: signingKey.kid, typ: 'at+jwt' })}.${part(FULL_CLAIMS)}.`;
       }],
       ['an otherwise valid token longer than the cap', () => forge({ key: signingKey.privateKey, kid: signingKey.kid, pad: 5000 })],
       ['a string that is not a JWT', async () => 'not-a-jwt'],
