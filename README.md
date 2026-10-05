@@ -87,7 +87,14 @@ Signup and resend answer the same body whether or not the address is registered.
 owner an `account-exists` notice (no token) instead of a confirmation. Confirmation links last 24 hours, work
 once, and a resend invalidates the previous one. Unconfirmed accounts cannot log in (login arrives in U7).
 Residual timing difference: signup always hashes (so both paths cost one bcrypt); resend does a few more
-database writes for an unconfirmed account than for an unknown one (milliseconds).
+database writes for an unconfirmed account than for an unknown one (milliseconds), and a new signup does
+three more writes and one random-token call than a duplicate (about 3-10 ms against the 250 ms hash). Both
+gaps are accepted until Phase 2 rate limiting.
+
+`/api/v1/accounts/*` intentionally has no CORS: signup, confirm and resend go through the hosted UI or app
+backends, not browser SPAs. Enabling it would let any registered origin drive signup and resend from browsers
+(email bombing, enumeration timing). Revisit only with a product requirement for SPA-native signup, together
+with rate limiting.
 
 ## Run locally without Docker
 
