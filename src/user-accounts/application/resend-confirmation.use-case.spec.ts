@@ -41,6 +41,7 @@ describe('ResendConfirmationUseCase', () => {
 
   it.each([
     ['an unknown client', { clientId: 'app_unknown', email: 'ana@example.com' }, 'invalid_client'],
+    ['an origin the app does not own', { clientId: SHOP_CLIENT_ID, email: 'ana@example.com', origin: 'https://evil.example' }, 'invalid_client'],
     ['a malformed email', { clientId: SHOP_CLIENT_ID, email: 'nope' }, 'invalid_email'],
   ])('rejects %s', async (_label, input, code) => {
     const { h } = await signedUp();

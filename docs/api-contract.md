@@ -50,7 +50,9 @@ Texts: the fixed `message` strings are listed per endpoint where they are fixed.
 
 - Applies to login, refresh, logout, signup, confirm, resend-confirmation, forgot, reset, change and `/me`.
 - A request with an `Origin` header is allowed only when the origin exactly matches an allowed origin of the app that the request identifies (body `client_id`, token owner for confirm and reset, token `aud` for `/me` and change).
+- Origin matching is exact on the browser-serialised origin (lowercase scheme and host, no trailing slash), so an uppercase `Origin` never matches.
 - Allowed: `Access-Control-Allow-Origin: <origin>` (never `*`) and `Vary: Origin`. Never `Access-Control-Allow-Credentials`. Never `Set-Cookie`.
+- The allow header is granted only after the origin binding passes (fail-closed), plus on request-validation `400` and `429` answers from an active app's origin so the client can read them. Binding rejections and `500` never carry it.
 - Not allowed: no CORS allow header, and the endpoint's own generic outcome (see each endpoint: `invalid_client`, `invalid_credentials`, `invalid_grant`, `invalid_or_expired_link`, `invalid_token`, or `204` with no effect for logout).
 - Preflight `OPTIONS`: `204`, answered when the origin belongs to **any** active app (the body is not visible). The actual request is still checked against its own `client_id`. The answer carries exactly:
 
@@ -64,7 +66,7 @@ Texts: the fixed `message` strings are listed per endpoint where they are fixed.
 
 - No `Origin` header (native clients, servers): not CORS-gated.
 - Allowed-origin lookups may be cached up to 30 seconds.
-- Today the CORS middleware is attached only to legacy routes, not to the account routes. The planned units change that.
+- Today the CORS middleware covers all 10 routes and the preflight answer above is live. The origin binding of the actual request is live for signup and resend-confirmation (`400 invalid_client`, no allow header); the other endpoints get it in their own units. `GET accounts/confirm` has no binding, and so no allow header, until U17a.
 
 ### Rate-limit behaviour (summary)
 
@@ -119,7 +121,7 @@ Status: IMPLEMENTED.
 
 ### `POST /api/v1/accounts/signup`
 
-Status: IMPLEMENTED (limits and browser CORS: PLANNED).
+Status: IMPLEMENTED (limits: PLANNED; browser CORS with origin binding: IMPLEMENTED).
 
 | Item | Value |
 |------|-------|
@@ -146,7 +148,7 @@ Status: PLANNED. The current `GET /api/v1/accounts/confirm?token=` is IMPLEMENTE
 
 ### `POST /api/v1/accounts/resend-confirmation`
 
-Status: IMPLEMENTED (limits and browser CORS: PLANNED).
+Status: IMPLEMENTED (limits: PLANNED; browser CORS with origin binding: IMPLEMENTED).
 
 | Item | Value |
 |------|-------|

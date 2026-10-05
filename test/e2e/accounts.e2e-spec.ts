@@ -19,6 +19,8 @@ interface OutboxRow {
   payload: { token?: string };
 }
 
+const SHOP_ORIGIN = 'https://shop.example';
+const BLOG_ORIGIN = 'https://blog.example';
 const SIGNUP_BODY = {
   message: 'If this address can be registered, a confirmation email is on its way.',
 };
@@ -60,7 +62,7 @@ describe('account routes (e2e)', () => {
     return token;
   };
 
-  const registerApp = async (name: string): Promise<App> => {
+  const registerApp = async (name: string, origin: string): Promise<App> => {
     const now = new Date();
     const created = App.restore({
       id: randomUUID(),
@@ -69,7 +71,7 @@ describe('account routes (e2e)', () => {
       clientType: 'public',
       clientSecretHash: null,
       redirectUris: [],
-      allowedOrigins: [],
+      allowedOrigins: [origin],
       emailFrom: null,
       emailConfirmationUrl: null,
       passwordResetUrl: null,
@@ -93,7 +95,83 @@ describe('account routes (e2e)', () => {
 
   beforeEach(async () => {
     await db.truncate();
-    [shop, blog] = [await registerApp('Shop'), await registerApp('Blog')];
+    [shop, blog] = [await registerApp('Shop', SHOP_ORIGIN), await registerApp('Blog', BLOG_ORIGIN)];
+  });
+
+  describe('browser origin binding (ADR 38)', () => {
+    const INVALID_CLIENT = { error: 'invalid_client', message: 'Unknown or inactive client' };
+
+    it('refuses a preflight from an origin no active app owns', async () => {
+      const response = await request(server())
+        .options('/api/v1/accounts/signup')
+        .set('Origin', 'https://nobody.example')
+        .set('Access-Control-Request-Method', 'POST');
+
+      expect(response.headers['access-control-allow-origin']).toBeUndefined();
+      expect(response.headers['access-control-allow-methods']).toBeUndefined();
+    });
+
+    it("signs up from the app's own origin with the allow header and no credentials header", async () => {
+      const response = await signup(credentials()).set('Origin', SHOP_ORIGIN);
+
+      expect(response.status).toBe(202);
+      expect(response.headers['access-control-allow-origin']).toBe(SHOP_ORIGIN);
+      expect(response.headers['vary']).toMatch(/Origin/);
+      expect(response.headers['access-control-allow-credentials']).toBeUndefined();
+      expect(await users()).toHaveLength(1);
+    });
+
+    it("resends from the app's own origin with the allow header", async () => {
+      const response = await resend({ client_id: shop.clientId, email: 'ana@example.com' }).set('Origin', SHOP_ORIGIN);
+
+      expect(response.status).toBe(202);
+      expect(response.headers['access-control-allow-origin']).toBe(SHOP_ORIGIN);
+    });
+
+    it('lets the browser read a request-validation 400 from an active app origin', async () => {
+      const response = await signup(credentials({ email: 'not-an-email' })).set('Origin', SHOP_ORIGIN);
+
+      expect(response.status).toBe(400);
+      expect(response.headers['access-control-allow-origin']).toBe(SHOP_ORIGIN);
+    });
+
+    it('lets the browser read a malformed-body 400 from an active app origin', async () => {
+      const response = await signup(credentials({ password: undefined })).set('Origin', SHOP_ORIGIN);
+
+      expect(response.status).toBe(400);
+      expect(response.headers['access-control-allow-origin']).toBe(SHOP_ORIGIN);
+    });
+
+    it('signs up without an Origin header (a backend caller)', async () => {
+      const response = await signup(credentials());
+
+      expect(response.status).toBe(202);
+      expect(response.headers['access-control-allow-origin']).toBeUndefined();
+    });
+
+    it.each([
+      ['signup', (origin: string) => signup(credentials({ client_id: blog.clientId })).set('Origin', origin)],
+      [
+        'resend-confirmation',
+        (origin: string) => resend({ client_id: blog.clientId, email: 'ana@example.com' }).set('Origin', origin),
+      ],
+    ])("rejects %s from another app's origin like an unknown client, with no allow header", async (_route, call) => {
+      const wrongApp = await call(SHOP_ORIGIN);
+
+      expect(wrongApp.status).toBe(400);
+      expect(wrongApp.body).toEqual(INVALID_CLIENT);
+      expect(wrongApp.headers['access-control-allow-origin']).toBeUndefined();
+      expect(wrongApp.headers['vary']).toMatch(/Origin/);
+      expect(await users()).toEqual([]);
+    });
+
+    it('answers an unknown client_id from a known origin with the same body and no allow header', async () => {
+      const response = await signup(credentials({ client_id: 'app_unknown' })).set('Origin', SHOP_ORIGIN);
+
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual(INVALID_CLIENT);
+      expect(response.headers['access-control-allow-origin']).toBeUndefined();
+    });
   });
 
   describe('POST /api/v1/accounts/signup', () => {

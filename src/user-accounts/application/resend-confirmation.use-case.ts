@@ -9,6 +9,8 @@ import type { ConfirmationIssuer } from './confirmation-issuer';
 
 export interface ResendConfirmationInput {
   clientId: string;
+  /** Browser `Origin` header, when present; it must belong to the app (ADR 38). */
+  origin?: string;
   email: string;
 }
 
@@ -28,7 +30,7 @@ export class ResendConfirmationUseCase {
   constructor(private readonly deps: ResendConfirmationDeps) {}
 
   async execute(input: ResendConfirmationInput): Promise<Result<void, DomainError>> {
-    const client = await this.deps.resolveClient.execute({ clientId: input.clientId });
+    const client = await this.deps.resolveClient.execute({ clientId: input.clientId, origin: input.origin });
     if (!client.ok) return err(client.error);
     const email = normalizeEmail(input.email);
     if (!email.ok) return err(email.error);

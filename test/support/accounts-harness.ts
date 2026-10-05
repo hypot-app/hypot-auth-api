@@ -33,7 +33,7 @@ export async function accountsHarness() {
     clientType: 'public',
     clientSecretHash: null,
     redirectUris: [],
-    allowedOrigins: [],
+    allowedOrigins: ['https://shop.example'],
     emailFrom: null,
     emailConfirmationUrl: null,
     passwordResetUrl: null,

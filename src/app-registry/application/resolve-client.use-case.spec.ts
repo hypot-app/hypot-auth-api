@@ -32,6 +32,55 @@ describe('ResolveClientUseCase', () => {
     await apps.save(App.restore(appProps({ id: '22222222-2222-4222-8222-222222222222', clientId: 'off', status: 'inactive' })));
   });
 
+  describe('origin binding', () => {
+    beforeEach(async () => {
+      await apps.save(App.restore(appProps({ clientId: 'abc', allowedOrigins: ['https://a.example'] })));
+      await apps.save(
+        App.restore(
+          appProps({ id: '33333333-3333-4333-8333-333333333333', clientId: 'other', allowedOrigins: ['https://b.example'] }),
+        ),
+      );
+      await apps.save(
+        App.restore(
+          appProps({
+            id: '22222222-2222-4222-8222-222222222222',
+            clientId: 'off',
+            status: 'inactive',
+            allowedOrigins: ['https://a.example'],
+          }),
+        ),
+      );
+    });
+
+    it('skips the binding when there is no origin (native and server callers)', async () => {
+      const result = await useCase.execute({ clientId: 'abc' });
+      expect(result.ok && result.value.clientId).toBe('abc');
+    });
+
+    it("accepts the app's own origin", async () => {
+      const result = await useCase.execute({ clientId: 'abc', origin: 'https://a.example' });
+      expect(result.ok && result.value.clientId).toBe('abc');
+    });
+
+    it('refuses the origin of another active app with the same error as an unknown client', async () => {
+      const unknown = await useCase.execute({ clientId: 'zzz', origin: 'https://a.example' });
+      const wrongApp = await useCase.execute({ clientId: 'abc', origin: 'https://b.example' });
+      expect(wrongApp.ok).toBe(false);
+      if (!wrongApp.ok && !unknown.ok) {
+        expect(wrongApp.error.code).toBe('invalid_client');
+        expect(wrongApp.error.message).toBe(unknown.error.message);
+      }
+    });
+
+    it.each(['https://A.example', 'https://a.example/', 'http://a.example', 'https://a.example:443', 'null', ''])(
+      'compares exactly: %j is not the app origin',
+      async (origin) => {
+        const result = await useCase.execute({ clientId: 'abc', origin });
+        expect(!result.ok && result.error.code).toBe('invalid_client');
+      },
+    );
+  });
+
   it('resolves an active app by client_id', async () => {
     const result = await useCase.execute({ clientId: 'abc' });
     expect(result.ok && result.value.clientId).toBe('abc');

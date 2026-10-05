@@ -1,5 +1,6 @@
 import { Controller, Get, Post, type INestApplication } from '@nestjs/common';
 import request from 'supertest';
+import { CorsGrant } from '../../src/app-registry/http/cors-grant';
 import { RegisterAppUseCase } from '../../src/app-registry/application/register-app.use-case';
 import { createTestApp } from '../support/create-test-app';
 import { startTestDatabase, type TestDatabase } from '../support/postgres';
@@ -7,14 +8,22 @@ import { startTestDatabase, type TestDatabase } from '../support/postgres';
 // Probes standing in for the real routes that arrive in later units.
 @Controller()
 class ProbeController {
-  @Post('oauth/token')
-  token(): { ok: true } {
+  // Stands in for an endpoint whose binding passed: it grants CORS.
+  @Post('auth/login')
+  login(@CorsGrant() grantCors: () => void): { ok: true } {
+    grantCors();
     return { ok: true };
   }
 
+  // Never grants CORS: stands in for an endpoint whose author forgot (fail-closed).
   @Get('me')
   me(): { ok: true } {
     return { ok: true };
+  }
+
+  @Post('auth/logout')
+  logout(): never {
+    throw new Error('unexpected failure');
   }
 }
 
@@ -55,50 +64,70 @@ describe('CORS origin allowlist (e2e)', () => {
   it.each(['https://a.example', 'https://b.example', 'http://localhost:5173'])(
     'echoes %s, registered by some active app, with no client_id anywhere',
     async (origin) => {
-      const response = await request(server()).post('/api/v1/oauth/token').set('Origin', origin).expect(201);
+      const response = await request(server()).post('/api/v1/auth/login').set('Origin', origin).expect(201);
 
       expect(response.headers['access-control-allow-origin']).toBe(origin);
       expect(response.headers['vary']).toMatch(/Origin/);
     },
   );
 
-  it('covers a bearer-only GET /api/v1/me with no client_id', async () => {
+  it('grants nothing to an endpoint that never calls the grant (fail-closed)', async () => {
     const response = await request(server())
       .get('/api/v1/me')
       .set('Authorization', 'Bearer x')
       .set('Origin', 'https://a.example')
       .expect(200);
 
-    expect(response.headers['access-control-allow-origin']).toBe('https://a.example');
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
+    expect(response.headers['vary']).toMatch(/Origin/);
   });
 
-  it('answers a body-less preflight for /me with 204 and the allow headers', async () => {
+  it('grants nothing to an unexpected 500', async () => {
+    const response = await request(server()).post('/api/v1/auth/logout').set('Origin', 'https://a.example').expect(500);
+
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  const API_ROUTES = [
+    'auth/login',
+    'auth/refresh',
+    'auth/logout',
+    'accounts/signup',
+    'accounts/confirm',
+    'accounts/resend-confirmation',
+    'password/forgot',
+    'password/reset',
+    'password/change',
+    'me',
+  ];
+
+  it.each(API_ROUTES)('answers a preflight for %s with exactly the specified headers', async (route) => {
     const response = await request(server())
-      .options('/api/v1/me')
+      .options(`/api/v1/${route}`)
       .set('Origin', 'https://a.example')
-      .set('Access-Control-Request-Method', 'GET')
-      .set('Access-Control-Request-Headers', 'authorization')
-      .expect(204);
+      .set('Access-Control-Request-Method', 'POST')
+      .set('Access-Control-Request-Headers', 'x-custom');
 
+    expect(response.status).toBe(204);
     expect(response.headers['access-control-allow-origin']).toBe('https://a.example');
-    expect(response.headers['access-control-allow-methods']).toMatch(/GET/);
-    expect(response.headers['access-control-allow-headers']).toMatch(/authorization/i);
+    expect(response.headers['access-control-allow-methods']).toBe('GET, POST, OPTIONS');
+    expect(response.headers['access-control-allow-headers']).toBe('Content-Type, Authorization');
+    expect(response.headers['access-control-max-age']).toBe('600');
+    expect(response.headers['vary']).toBe('Origin');
+    expect(response.headers['access-control-allow-credentials']).toBeUndefined();
   });
 
-  it('answers a body-less preflight for the token endpoint', async () => {
+  it('no longer covers the legacy OAuth routes', async () => {
     const response = await request(server())
       .options('/api/v1/oauth/token')
-      .set('Origin', 'https://b.example')
-      .set('Access-Control-Request-Method', 'POST')
-      .set('Access-Control-Request-Headers', 'content-type')
-      .expect(204);
+      .set('Origin', 'https://a.example')
+      .set('Access-Control-Request-Method', 'POST');
 
-    expect(response.headers['access-control-allow-origin']).toBe('https://b.example');
-    expect(response.headers['access-control-allow-methods']).toMatch(/POST/);
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
   });
 
   it('returns no CORS headers for an unknown origin', async () => {
-    const response = await request(server()).post('/api/v1/oauth/token').set('Origin', 'https://other.example').expect(201);
+    const response = await request(server()).post('/api/v1/auth/login').set('Origin', 'https://other.example').expect(201);
 
     expect(response.headers['access-control-allow-origin']).toBeUndefined();
   });
@@ -109,12 +138,13 @@ describe('CORS origin allowlist (e2e)', () => {
       .set('Origin', 'https://other.example')
       .set('Access-Control-Request-Method', 'GET');
 
+    expect(response.status).toBe(404);
     expect(response.headers['access-control-allow-origin']).toBeUndefined();
     expect(response.headers['access-control-allow-methods']).toBeUndefined();
   });
 
   it('returns no CORS headers for the origin of an inactive app', async () => {
-    const response = await request(server()).post('/api/v1/oauth/token').set('Origin', 'https://off.example').expect(201);
+    const response = await request(server()).post('/api/v1/auth/login').set('Origin', 'https://off.example').expect(201);
 
     expect(response.headers['access-control-allow-origin']).toBeUndefined();
   });
@@ -122,20 +152,20 @@ describe('CORS origin allowlist (e2e)', () => {
   it.each(['https://a.example/', 'HTTPS://A.EXAMPLE', 'https://sub.a.example', 'null'])(
     'matches origins exactly: %s is not allowed',
     async (origin) => {
-      const response = await request(server()).post('/api/v1/oauth/token').set('Origin', origin).expect(201);
+      const response = await request(server()).post('/api/v1/auth/login').set('Origin', origin).expect(201);
 
       expect(response.headers['access-control-allow-origin']).toBeUndefined();
     },
   );
 
   it('adds no CORS headers when the request has no Origin', async () => {
-    const response = await request(server()).post('/api/v1/oauth/token').expect(201);
+    const response = await request(server()).post('/api/v1/auth/login').expect(201);
 
     expect(response.headers['access-control-allow-origin']).toBeUndefined();
   });
 
   it('never answers with a wildcard origin or credentials', async () => {
-    const response = await request(server()).post('/api/v1/oauth/token').set('Origin', 'https://a.example');
+    const response = await request(server()).post('/api/v1/auth/login').set('Origin', 'https://a.example');
 
     expect(response.headers['access-control-allow-origin']).not.toBe('*');
     expect(response.headers['access-control-allow-credentials']).toBeUndefined();

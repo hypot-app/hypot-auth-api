@@ -1,7 +1,7 @@
 import { accountsHarness, SHOP_CLIENT_ID, START } from '../../../test/support/accounts-harness';
 import { hashToken } from '../../shared-kernel/token-generator';
 
-const signupInput = (overrides: Partial<{ clientId: string; email: string; password: string }> = {}) => ({
+const signupInput = (overrides: Partial<{ clientId: string; email: string; password: string; origin: string }> = {}) => ({
   clientId: SHOP_CLIENT_ID,
   email: 'Ana@Example.com',
   password: 'correct horse',
@@ -66,6 +66,7 @@ describe('SignupUseCase', () => {
 
   it.each([
     ['an unknown client', { clientId: 'app_unknown' }, 'invalid_client: Unknown or inactive client'],
+    ['an origin the app does not own', { origin: 'https://evil.example' }, 'invalid_client: Unknown or inactive client'],
     ['a malformed email', { email: 'not-an-email' }, 'invalid_email: Email address is not valid'],
     ['a short password', { password: '1234567' }, 'invalid_password: Password must be at least 8 characters'],
     ['a password over 72 bytes', { password: 'é'.repeat(37) }, 'invalid_password: Password must be at most 72 bytes'],
