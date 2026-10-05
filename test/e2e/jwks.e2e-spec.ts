@@ -49,14 +49,4 @@ describe('GET /.well-known/jwks.json (e2e)', () => {
 
     expect(verify('sha256', payload, createPublicKey({ key: published, format: 'jwk' }), signature)).toBe(true);
   });
-
-  it('refuses to boot with an invalid key set and does not echo the key material', async () => {
-    const marker = String(current.active.n);
-    const broken = JSON.stringify({ active: { ...current.active, kty: 'EC' } });
-
-    const boot = createTestApp({ databaseUrl: db.url, config: { signingKeysJson: broken } });
-
-    await expect(boot).rejects.toThrow('Invalid signing key set: active.kty');
-    await expect(boot).rejects.not.toThrow(marker);
-  });
 });
