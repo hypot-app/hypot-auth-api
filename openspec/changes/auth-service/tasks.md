@@ -1,191 +1,251 @@
-# Tasks: Auth Service MVP (Phase 1)
+# Tasks: Auth Service MVP (Phase 1), API-only re-plan
+
+Revision 2 (2026-10-05). U1-U6 are DONE and merged into `develop`; their entries below are condensed (full detail: git history and engram `sdd/auth-service/apply-progress`). The old U7-U10 are superseded. New units are U11-U19. Numbers U7-U10 are not reused, because discarded branches `u7a/u7b/u7c` and notes in engram still carry those names.
 
 ## Review Workload Forecast
 
 | Field | Value |
 |-------|-------|
-| Estimated changed lines | 4,870-6,720 (excludes `package-lock.json`). There is no generated client. TypeORM adds about 500 lines of schemas, mappers, mapper tests, and `up`/`down` migrations. Round 3 adds about 150 lines: SMTP and URL config (+30 in U2), the Nodemailer adapter and its Mailpit test (+100 in U4), and the extra routes (+20). Round 4 adds about 100 lines for the hosted forgot-password page: view, controller, and e2e (+90 in U9), the login link and its test (+10 in U7). Round 5 adds about 40-80 lines for the post-reset redirect URI: column, migration, value object, CLI flag, and tests (+30-55 in U3), redirect branch and e2e for both cases (+10-25 in U9). Round 6 adds about 80-120 lines for the container setup (U1b: Dockerfile, `.dockerignore`, `compose.yaml`, README section). The API versioning decision (ADR 28, `decisions-round6`) adds about 30-50 lines in U2: the `configureApp` function, the shared e2e factory, the prefix e2e test, and the welcome test update. Totals are now 4,900-6,770. |
+| Estimated changed lines | 6,300-7,250 (additions + deletions, excludes `package-lock.json`). Raw feature estimates multiplied by 3.75 (the proposal's 3.5-4x), tests included. Raw sum is about 1,700 code lines plus about 330 documentation lines. |
 | 400-line budget risk | High |
 | Chained PRs recommended | Yes |
-| Suggested split | Welcome commit on `main` (no PR) -> PR U1b (into develop) -> PR U1 (after `develop` is merged into it) -> PR U2 -> ... -> PR U10, each targeting <=400 lines. Units forecast above 400 have pre-planned a/b split points. |
+| Suggested split | 22 stacked PRs across 9 units (a/b/c/d per unit below), each targeting <=400 lines. Two PRs may exceed 400 and are pre-flagged `size:exception`: U14c and U19b. |
 | Delivery strategy | ask-on-risk, resolved as chained PRs |
-| Chain strategy | stacked-to-develop (base `develop`) |
+| Chain strategy | stacked-to-develop (every PR targets `develop`) |
 
 Decision needed before apply: No
 Chained PRs recommended: Yes
 Chain strategy: stacked-to-develop
 400-line budget risk: High
 
-> No decision is pending. Conflicts 1, 3, and 5 are resolved, and delivery and chain strategy are resolved. The 400-line budget risk remains High, so work follows the chained PRs. Apply can start at U1.
+> No decision is pending. Delivery and chain strategy are resolved. Measure `additions + deletions` before each PR. If U14c or U19b measures above 400 after trimming overlapping tests, record `size:exception` on that PR; every other PR must land at or under 400 or be split further.
 
 ### Branch flow
 
 ```
-main:    [welcome commit] ── (promotion to main is out of scope)
-             \
-develop:      ●── U1 ── U2 ── U3 ── ... ── U10      (each PR targets develop, merges in order)
+develop: ... U6 -> U11a -> U11b -> U11c -> U12 -> U13a -> U13b -> U13c -> U14a -> U14b -> U14c
+              -> U15a -> U15b -> U16 -> U17a -> U17b -> U18a -> U18b -> U18c -> U19a -> U19b -> U19c -> U19d
 ```
 
-Every feature or work-unit PR (U1b, U1, U2, ...) targets `develop`, never `main`; `main` only receives promotions from `develop`. The next unit branches from the updated `develop` only after the previous PR merges. If a diff shows earlier units, update it from `develop` before review (rebase if unpublished; merge `develop` in if the branch is already published).
+Every PR targets `develop`, never `main`. The next branch starts from the updated `develop` after the previous PR merges. If a diff shows earlier units, update from `develop` first (rebase if unpublished, merge `develop` in if published).
 
 ### Suggested Work Units
 
-| Unit | Goal | Est. lines | Depends on | Split point if over 400 |
-|------|------|-----------:|------------|-------------------------|
-| U1 | Bootstrap: TypeORM + pg scaffold, DataSource, test stack, config.yaml | 300 | welcome commit | - |
-| U1b | Container setup: Dockerfile, `.dockerignore`, `compose.yaml` (api, postgres, mailpit), README section | 100 | welcome commit (branched from 047fff7, develop's tip; targets `develop`) | - |
-| U2 | shared-kernel + platform (config incl. SMTP and base URL, TypeORM module, UoW, health, `api/v1` prefix via `configureApp`) | 520 | U1 | U2a kernel + config / U2b persistence + UoW + health + prefix |
-| U3 | app-registry + CLI (incl. post-reset redirect URI) | 550 | U2 | U3a apps persistence + use cases / U3b CLI + CORS |
-| U4 | transactional-email (outbox, worker, Nodemailer SMTP adapter, templates) | 650 | U2 | U4a outbox + worker / U4b SMTP adapter + renderer + templates |
-| U5 | user-accounts (signup, confirm, resend) | 600 | U3, U4 | U5a persistence + hasher / U5b endpoints |
-| U6 | token-lifecycle A: KeyStore, JWT issuer, JWKS | 350 | U2 | - |
-| U7 | authorization-flow: authorize, login (with forgot-password link), code issue | 660 | U3, U5, U6 | U7a codes persistence + GET validation / U7b views + POST login |
-| U8 | token-lifecycle B: code exchange, refresh, revoke | 600 | U7 | U8a code exchange / U8b refresh + revoke |
-| U9 | GET /api/v1/me + password-management (incl. hosted forgot page, post-reset redirect) | 610 | U5, U8 | U9a /api/v1/me + forgot (API + page) / U9b reset + change |
-| U10 | E2E suite, OpenAPI, perf gate, docs | 600 | all | U10a e2e / U10b OpenAPI + docs + perf |
+| Unit | Goal | Est. lines (3.5-4x) | Depends on | Splits (each its own PR) |
+|------|------|--------------------:|------------|--------------------------|
+| U11 | Config https rule, app email URLs (`AppUrl`), CORS origin binding | 770-880 | U6 | a config + `AppUrl` + migration (260-300) / b use cases + CLI (280-320) / c origin binding + CORS routes (230-260) |
+| U12 | transactional-email: links from app URLs with `#token` | 315-360 | U11 | single PR |
+| U13 | abuse-protection: IP, config, counters, limiter, sweeper (all before bcrypt) | 910-1,040 | U12 | a domain + config + trust proxy (315-360) / b table + store (280-320) / c guard + sweeper (315-360) |
+| U14 | session-auth A: sessions, refresh-token storage, login | 910-1,040 | U13 | a migration + schemas (230-260) / b repository (300-340) / c login (385-440, `size:exception` pre-flagged) |
+| U15 | session-auth B: refresh rotation with reuse detection, logout, revoke-all | 610-700 | U14 | a refresh (280-320) / b logout + revoke use case + `ops:revoke-all` (330-380) |
+| U16 | `AuthenticateBearerUseCase` and `GET /api/v1/me` | 315-360 | U11, U14 | single PR |
+| U17 | user-accounts: confirm becomes POST, CORS, limits, `unconfigured_client` | 545-620 | U12, U13 | a confirm POST + origin binding + CORS (260-300) / b limits + caps + unconfigured (285-320) |
+| U18 | password-management: forgot, reset, change | 720-820 | U15, U16, U17 | a forgot (245-280) / b reset (245-280) / c change (230-260) |
+| U19 | OpenAPI, retention job, e2e, integration guide, ops, smoke test | 1,230-1,420 | all | a OpenAPI (245-280) / b retention (370-420, `size:exception` if over 400) / c e2e + migration chain (315-360) / d docs and ops (about 330, docs only) |
 
-The units run sequentially because there is a single writer. Sub-PRs (for example U5a and U5b) also target `develop` in order. Measure `additions + deletions` before you open each PR.
+The units run sequentially: one writer. Sub-PRs also target `develop` in order.
 
-## Spec/Design conflicts (resolve before apply)
+**Order change from the brief:** transactional-email (U12) moves before accounts, sessions and passwords. Reason: U17a removes `GET /accounts/confirm`, and every email queued after U5 still links to it; the fragment links must exist first. U12 only needs the app URLs from U11.
 
-1. **RESOLVED (round 3).** Endpoint paths are now fixed in the specs and in the design route table: `GET /`, `GET /health`, `GET /.well-known/jwks.json`, `GET /api/v1/oauth/authorize`, `POST /api/v1/oauth/login`, `POST /api/v1/oauth/token` (`authorization_code` | `refresh_token`), `POST /api/v1/oauth/revoke`, `GET /api/v1/me`, `POST /api/v1/accounts/signup`, `GET /api/v1/accounts/confirm`, `POST /api/v1/accounts/resend-confirmation`, `GET /api/v1/password/forgot` (round 4), `POST /api/v1/password/forgot`, `GET /api/v1/password/reset`, `POST /api/v1/password/reset`, `POST /api/v1/password/change` (16 routes; the three root routes `GET /`, `GET /health`, `GET /.well-known/jwks.json` stay unprefixed, ADR 28). The login submit path is `/api/v1/oauth/login` (the earlier `POST /oauth/authorize` is dropped).
-2. Refresh TTL 30d and auth code TTL 60s: consistent (both are spec assumptions; design adopts them). No conflict.
-3. **RESOLVED (round 3).** Duplicate-signup notice email confirmed: identical HTTP response, plus an `account-exists` notice to the existing owner suggesting login or password reset, links from `AUTH_PUBLIC_BASE_URL`. Template added in U4 (task 4.5); spec and design updated.
-4. Generic errors: spec requires generic and equivalent status/body. Design adds an OAuth `invalid_grant` 400 and `/api/v1/me` 401, and is silent on confidential-client auth failure (spec: "rejected"). Proposed: `invalid_client` 401 for it.
-5. **RESOLVED (round 3).** No per-app link base. Links use the global `AUTH_PUBLIC_BASE_URL`; templates stay as files per `client_id`, and `apps.email_from` may override the from address. The transactional-email spec is amended.
-6. **RESOLVED (U5a).** Design ADR 11 adds a 72-byte password maximum that specs omitted (min 8 only). The user-accounts spec now has a scenario for it, plus one for a NUL character (bcrypt stops reading at one).
-7. Design pre-publishes a `next` key in JWKS; spec says only current and previous. Compatible; add a JWKS scenario in U6.
+## Spec/Design reconciliation
 
-Status: conflicts 1, 3, 5, and 6 resolved. Conflicts 2, 4, 7 have proposed handling inside the units and need no decision.
+The spec and design were written in parallel. Resolved (edited in the artifact that disagreed):
+
+1. **HTTP 429 (spec wins).** Login never returns 429: limited, blocked and locked logins return the generic `401`. IP-only limits on signup, resend, forgot and reset return `429` + `Retry-After` and depend only on IP and endpoint group. Per-account email caps return the normal response and send nothing (signup still creates the account). Design ADR 36 rewritten; proposal success criterion reworded.
+2. **Account-exists email (spec wins).** Links to the app's `password_reset_url` with no token and no fragment. ADR 39 and the design's closed-questions note fixed.
+3. **Password change (design wins).** Revokes ALL sessions including the caller's. Password-management spec now says so.
+4. **No refresh grace window** (both agree). Guidance goes into the integration guide (U19d).
+5. **Lockout numbers.** Pair 5 / 15 min, account 50 / 1 h, configurable. The proposal said about 10 and is fixed.
+6. **Error codes.** Specs own status, codes and bodies. Design defers and lists the names the specs leave open. Refresh failure is `invalid_grant` (design had `invalid_refresh_token`).
+
+Found and resolved by this re-plan:
+
+7. **Bcrypt vs rate limits.** The session-auth spec said every attempt runs one bcrypt; the design (and the abuse spec) skip bcrypt for limited or blocked attempts. Design wins, because skipping the hash is the point of limiting and unknown emails are blocked identically. Session-auth spec amended.
+8. **Unknown client on login.** Spec: generic `401`; design said `400 invalid_client`. Spec wins: it runs a dummy bcrypt and counts against the sentinel key `(unknown, IP)`, so random `client_id` values cannot bypass `login_ip` or grow the table. Other body endpoints keep `400 invalid_client`. App-registry spec and ADR 34/38 aligned.
+9. **Confirm and reset bodies.** Specs take `{token}` and `{token, new_password}`; design had `client_id` too. Spec wins. Origin binding looks up the token's app first; a wrong origin or unknown token gives the same generic error (no oracle). ADR 38, 40 and the route table fixed.
+10. **Trusted proxy name.** Spec `TRUSTED_PROXIES` vs design `TRUST_PROXY`. `TRUST_PROXY` wins; spec edited.
+11. **Per-account email cap.** Spec 3/h, design 5/h. 3/h wins. A `reset_ip` scope (20/h) was added because the spec limits reset per IP too.
+12. **Idle refresh TTL.** Design had 7 days idle plus 30 days absolute; spec only the 30 days. Compatible; spec gained the 7-day sentence.
+13. **Migration timestamps** now follow merge order: abuse counters 5000, sessions 6000, retention indexes 7000. `revoked_reason` gained `ops_revoke_all`.
+14. **Retention window** (the design only said "Phase 2 housekeeping"): defined in ADR 35. Sessions and one-time tokens one day after expiry, sent or failed outbox rows after 7 days, limiter rows by their own sweeper.
+
+Real forks: none. Items 8 and 9 are the closest; both follow the specs, and the orchestrator can revert 9 (add `client_id` to the confirm and reset bodies) at the cost of one extra field.
 
 ## Closed questions (round 3)
 
-- argon2id vs bcrypt: bcrypt cost 12 confirmed (design ADR 10; argon2id recorded as rejected).
-- SendGrid vs AWS SES: generic SMTP through Nodemailer (design ADR 17; vendor SDKs recorded as rejected).
+- argon2id vs bcrypt: bcrypt cost 12 (ADR 10). SendGrid vs SES: generic SMTP through Nodemailer (ADR 17).
 
-## U1 Bootstrap (no TDD yet)
+## Done units (condensed)
 
-Steps 1.1-1.3 run directly on `main` and `develop` (no PR). Steps 1.4-1.9 run on `feat/u1-bootstrap` and become PR U1 into `develop`.
+- [x] U1 Bootstrap (welcome commit, TypeORM, migrations CLI, Jest + Testcontainers, `openspec/config.yaml` strict TDD) and U1b container setup (Dockerfile, `compose.yaml`)
+- [x] U2 Platform: shared-kernel (Clock, TokenGenerator, Result, UnitOfWork), zod config, TypeORM module + UoW, `GET /health`, `api/v1` prefix via `configureApp` (ADR 28)
+- [x] U3 app-registry: apps schema + migration, register/update/deactivate CLI, `AppUrl` predecessor (`PostResetRedirectUri`), origin allowlist CORS (ADR 29), review fixes 3.7, one-shot `migrate` compose service
+- [x] U4 transactional-email: outbox with lease, worker, Nodemailer SMTP adapter, Handlebars renderer, five default templates (ADR 30)
+- [x] U5 user-accounts: users + one_time_tokens, bcrypt hasher (8 chars, 72 bytes, no NUL), signup/confirm/resend (ADR 31), review fixes
+- [x] U6 token-lifecycle A: key store (active/next/retired), RS256 `at+jwt` issuer and verifier with required audience, JWKS (ADR 32), review fixes 6.R1-6.R5
 
-- [x] 1.1 `git init -b main`; add `.gitignore` (`node_modules`, `dist`, `.env`, `coverage`), `.nvmrc` (24), `.editorconfig`
-- [x] 1.2 Welcome commit on `main`: minimal NestJS 11 app (`package.json` engines `>=24 <25`, `tsconfig.json`, `src/main.ts`, `src/app.module.ts`, `src/platform/welcome.controller.ts` with `GET /` returning `{ "message": "Welcome to the API" }`). Verify with a manual `curl`. Commit: `feat: add welcome endpoint`
-- [x] 1.3 `git switch -c develop` from the welcome commit; then `git switch -c feat/u1-bootstrap` from `develop`
-- [x] 1.4 Add `typeorm`, `@nestjs/typeorm`, `pg`, `zod` (`@nestjs/config` was dropped in U2 review; see ADR 20). Create `src/platform/persistence/typeorm.options.ts` (shared options, `synchronize: false`, `migrationsRun: false`, migrations glob) and `data-source.ts` (standalone `DataSource` for the CLI). Create an empty `migrations/` folder.
-- [x] 1.5 npm scripts: `migration:generate`, `migration:create`, `migration:run`, `migration:revert` (all `-d` the CLI DataSource), `build`, `start`, `test`
-- [x] 1.6 Add Jest with `@swc/jest` (decorator metadata enabled), `supertest`, and `@testcontainers/postgresql`. Create `jest.config.ts` and `test/support/postgres.ts`, which starts a container, initializes a TypeORM `DataSource`, runs `runMigrations()`, and exposes truncate and teardown helpers.
-- [x] 1.7 Smoke tests: e2e `GET /` returns the welcome message (supertest), and an integration test boots Postgres and runs migrations (`SELECT 1`)
-- [x] 1.8 Fix the `openspec/config.yaml` `apply:` block (it mixes a list item and mapping keys). Set `apply.tdd: true`, `apply.test_command: "npm test"`, `verify.test_command: "npm test"`, `verify.build_command: "npm run build"`, `strict_tdd: true`. Commit `openspec/` and `PRD-AUTH.md` in this PR.
-- [x] 1.9 (Done: integration suite green with Docker running (2/2); build and unit/e2e green. No git remote yet, so PR U1 is pending a remote) Verify: `npm test` and `npm run build` are green. Commit: `chore: bootstrap typeorm, migrations cli and test stack`. Open PR U1 with base `develop`.
+## Superseded units (do not implement)
 
-## U1b Container setup (separate small PR, lands before U1)
+- ~~U7 authorization-flow~~ Superseded by U13-U14: hosted login, PKCE and authorization codes are gone (ADR 34); never merged.
+- ~~U8 token-lifecycle B~~ Superseded by U15: code exchange and `/oauth/*` are gone; refresh moves to session-auth (ADR 35).
+- ~~U9 /me and password-management with hosted pages~~ Superseded by U16 and U18: JSON only, no pages, no redirect.
+- ~~U10 verification and docs~~ Superseded by U19.
 
-Branch `feat/u1b-docker` was branched from 047fff7, which is also the tip of `develop`, so no rebase is needed. The PR targets `develop` (never `main`). Merge order: U1b merges into `develop` first; then `develop` is merged into `feat/u1-bootstrap` with a merge commit, not a rebase, because that branch is already published; then PR U1 merges. Forecast: about 80-120 changed lines.
+## Conventions for every task below
 
-- [x] 1b.1 `Dockerfile`, multi-stage: build stage `node:24-alpine` (`npm ci`, `npm run build`); runtime stage `node:24-alpine` (`npm ci --omit=dev`, copy `dist/` only, `NODE_ENV=production`, non-root `node` user, `EXPOSE 3000`, `HEALTHCHECK` on `GET /` using node, `CMD ["node","dist/main.js"]`)
-- [x] 1b.2 `.dockerignore`: `node_modules`, `dist`, `.git`, `openspec`, `.atl`, `coverage`, `test`, markdown docs, `.env*`
-- [x] 1b.3 `compose.yaml` with `api` (built from the Dockerfile, port 3000, `PORT` and `DATABASE_URL`, `depends_on` postgres `service_healthy`), `postgres` (`postgres:17-alpine`, dev-only credentials, named volume, `pg_isready` healthcheck, port 5432), and `mailpit` (`axllent/mailpit`, ports 8025 UI and 1025 SMTP). The app does not connect to the DB yet; U2 wires it.
-- [x] 1b.4 README: "Run locally with Docker" section (`docker compose up --build`, URLs, Node 24 + npm alternative)
-- [x] 1b.5 Verify: `docker build`, `docker compose up -d --build`, `curl http://localhost:3000/` returns the welcome message, Mailpit UI answers on :8025, then `docker compose down -v`. Commit: `build: add dockerfile and compose for local development`.
+- Strict TDD: RED (a failing test, failing on its own assertion), GREEN (smallest change), REFACTOR (clean up with tests green). Commit by work unit with conventional commits, tests with the code.
+- **Mutation check** on every security guard: temporarily break the guard, confirm a named test fails, restore. Record each in apply-progress.
+- Every endpoint unit adds its own e2e on the shared `createTestApp` factory, with low `ABUSE_*` thresholds via config override and the fake `EmailSender`.
+- Domain and application layers import no Nest, TypeORM, pg, jose or bcrypt. Migrations implement `down()` with an up, down, up test.
+- Never read or edit `.env*`. The `.env.example` lines are documented for the user (task 19.11).
 
-## U2 Platform (RED -> GREEN -> REFACTOR per item)
+## U11 Config, app registry URLs, CORS binding
 
-- [x] 2.1 RED/GREEN: `src/shared-kernel/` Clock, TokenGenerator (>=32 bytes, SHA-256 hash), Result/DomainError, UnitOfWork port; tests
-- [x] 2.2 RED/GREEN: `src/platform/config` zod schema (DB settings consumed by `typeorm.options.ts`, plus `AUTH_PUBLIC_BASE_URL`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`; `SMTP_USER`/`SMTP_PASS` both or neither), fail fast on invalid env; test
-- [x] 2.3 RED/GREEN: `TypeOrmModule.forRootAsync` wiring plus the `TypeOrmUnitOfWork` adapter (`DataSource.transaction()` + AsyncLocalStorage `EntityManager`, plus a `currentManager()` helper for repositories); integration test for commit and rollback (Testcontainers)
-- [x] 2.4 RED/GREEN: `GET /health` with a DB ping, e2e; REFACTOR module wiring. Commit: `feat(platform): add config, typeorm, uow, health`
-- [x] 2.5 RED/GREEN/REFACTOR: API prefix (ADR 28). RED: an e2e test built on the shared factory asserting that `/api/v1/...` business routes resolve (for example `GET /api/v1/me` answers 401, not 404), that `GET /`, `GET /health`, and `GET /.well-known/jwks.json` stay at the root, and that the unprefixed business path (for example `GET /me`) returns 404. GREEN: `src/platform/configure-app.ts` exporting `configureApp(app)`, which calls `app.setGlobalPrefix('api/v1', { exclude: ['/', 'health', '.well-known/jwks.json'] })`; call it from `main.ts` and from the e2e factory `test/support/create-test-app.ts`. REFACTOR: update the existing welcome e2e test from U1 to build its app through the shared factory. Commit: `feat(platform): add api v1 global prefix`
+**U11a** `feat/u11a-config-app-urls` (260-300 lines)
 
-## U3 app-registry
+- [ ] 11.1 RED: `app-config.spec.ts` cases: `NODE_ENV=production` + `http://` `AUTH_PUBLIC_BASE_URL` throws `ConfigError` naming the variable; production + `https://` passes; development + `http://` passes. GREEN: case-sensitive `https://` prefix refine in `src/platform/config/app-config.ts`. Mutation: remove the refine, the production case fails. Add a README production note.
+- [ ] 11.2 RED/GREEN/REFACTOR: `git mv` `PostResetRedirectUri` to `AppUrl` (`src/app-registry/domain/app-url.ts`) with the same table-driven rules (https, localhost http outside production, no userinfo, no fragment, relative/`javascript:`/`ftp:` rejected). Tests move with it and stay green.
+- [ ] 11.3 RED: migration `1760000004000-AppEmailLinkUrls` int test: up adds nullable `email_confirmation_url` and `password_reset_url` and drops `post_reset_redirect_uri`; down restores it and drops both; up, down, up. Fix the `CreateApps` reversibility test for the new head. GREEN: migration, `AppRow`, `AppSchema`, `AppMapper` and domain `App` (`string | null`, round-trip including null).
 
-- [x] 3.1 RED: `AppSchema` (`EntitySchema<AppRow>`, including nullable `post_reset_redirect_uri text`) plus migration `CreateApps` with `down()` (the column is part of this create migration, since `apps` does not exist yet); integration test for unique `client_id`, for a null and a stored `post_reset_redirect_uri`, and for migration reversibility (up -> down -> up)
-- [x] 3.2 GREEN: domain `App`, `AppRepository` port, `AppMapper` (round-trip unit test, including the null case), `TypeOrmAppRepository` implementing the port; register use case (public: no secret; confidential: secret shown once, hashed)
-- [x] 3.2a RED/GREEN/REFACTOR: `PostResetRedirectUri` value object. Unit tests first: accepts `https://a.example/login`; rejects relative, `javascript:`, `ftp:`, userinfo, fragment, and `http://a.example`; accepts `http://localhost` and `http://127.0.0.1` only when `isProduction` is false and rejects them when true; null is allowed. REFACTOR: table-driven cases
-- [x] 3.3 RED/GREEN: exact redirect URI match; unknown/inactive `client_id` generic invalid-client
-- [x] 3.4 RED/GREEN: `src/cli.ts` nest-commander create/update/deactivate; e2e: app routes return 404
-- [x] 3.4a RED/GREEN/REFACTOR: CLI `--post-reset-redirect-uri <url>` on create and update, plus `--clear-post-reset-redirect-uri` on update. Use cases validate through `PostResetRedirectUri` (`isProduction` from validated config) before persisting. Tests: valid value stored, omitted gives null, update and clear, invalid value rejected with nothing persisted, `NODE_ENV=production` rejects http localhost. REFACTOR: share the option parsing between create and update
-- [x] 3.5 RED/GREEN: per-app CORS middleware from `allowed_origins`. Commit: `feat(app-registry): add apps, cli, origin checks`
-- [x] 3.6 Container migrations: the distroless image has no npm or shell, so `npm run migration:run` cannot run inside it. Run the TypeORM CLI with the image's own node: `node_modules/typeorm/cli.js migration:run -d dist/platform/persistence/data-source.js`. Steps:
-  - Confirm `typeorm` is a production dependency and that compiled migrations land in `dist/`.
-  - Add a one-shot `migrate` service to `compose.yaml` that uses the same image, overrides the command to run the migrations, and depends on `postgres` being healthy.
-  - Make `api` depend on `migrate` with `condition: service_completed_successfully`.
-  - Keep `migrationsRun: false`, so the app never migrates on startup.
-  - Document the `docker compose run --rm migrate` and revert commands in the README. The CLI (`node dist/cli.js`) runs the same way.
-  - Verify: `docker compose up -d --build` creates the `apps` table (check it with `psql` in the postgres container), the api becomes healthy, and a second `up` is a no-op.
-  - Commit: `build: run migrations in a one-shot compose service`
+**U11b** `feat/u11b-app-url-cli` (280-320 lines)
 
-### U3 review fixes (after verify)
+- [ ] 11.4 RED/GREEN: register requires both URLs validated through `AppUrl` (`isProduction` from config); update replaces but rejects clear or blank; invalid input persists nothing. Mutation: skip validation on update, the clear/blank test fails.
+- [ ] 11.5 RED/GREEN/REFACTOR: CLI `--email-confirmation-url` and `--password-reset-url` (required on create, optional on update). Remove `--post-reset-redirect-uri`, `--clear-post-reset-redirect-uri` and their use-case code and tests; unknown option exits non-zero. Assert the specific `CliError` messages and that `NODE_ENV=production` rejects `http://localhost`. REFACTOR shared option parsing.
+- [ ] 11.6 Docs: README CLI examples, a note that existing dev apps need one `app update` with both URLs before signup or forgot works.
 
-- [x] 3.7 Review fixes. Client ids are now `app_` + 32 hex chars (never start with `-`; W1). Origins and redirect URIs are validated and normalized at registration and update through `AllowedOrigin` and `AppRedirectUri` (W5). CORS is now an origin allowlist from all active apps via `AppRepository.isOriginAllowed` plus a 30 s TTL cache; `client_id` extraction and `App.allowsOrigin` removed (W2, S6). CLI tests assert the specific `CliError` messages (W4), `create-app.command.ts` explains why validation is manual (S5), and the README documents `--build` (W3). Spec, ADR 29 and README updated.
+**U11c** `feat/u11c-origin-binding` (230-260 lines)
 
-## U4 transactional-email
+- [ ] 11.7 RED: `ResolveClientUseCase.execute(clientId, { origin })` unit: no origin passes; the app's own origin passes; another active app's origin gives `invalid_client`; inactive or unknown gives `invalid_client`; comparison is exact (case, trailing slash). GREEN. Mutation: check "any active app" instead of the app's own origins, the wrong-app case fails.
+- [ ] 11.8 RED/GREEN: `AppCorsMiddleware` route list becomes the 10 API routes of ADR 38; preflight answers for any active app (204); never `Access-Control-Allow-Credentials`, never a wildcard; the 30 s cache stays. e2e on a test-only route group proves preflight, allow header and no credentials header. Each later endpoint unit adds its own wrong-origin e2e.
 
-- [x] 4.1 RED: `EmailOutboxSchema` plus migration `CreateEmailOutbox` with `down()`; `SKIP LOCKED` integration test (`setLock('pessimistic_write')` + `setOnLocked('skip_locked')`) (Done in U4a: table uses `to_address`; the SKIP LOCKED test and the up/down/up test pass. The CreateApps reversibility test now undoes two migrations because outbox references apps.)
-- [x] 4.2 GREEN: `EmailOutbox` port, mapper, and TypeORM repository; `EmailSender` port plus an in-memory fake (captures messages); `TemplateRenderer` (escaped Handlebars, `templates/default`, per-`client_id` override) (Done: ports, mapper, repository and fake sender in U4a; `TemplateRenderer` Handlebars implementation in U4b. Added `AppRepository.findById` for the worker.)
-- [x] 4.3 RED/GREEN: `SmtpEmailSender` (Nodemailer `createTransport` from `SMTP_HOST/PORT/SECURE/USER/PASS`), from address `app.email_from ?? MAIL_FROM`; integration test against a Mailpit container (Testcontainers, `axllent/mailpit`) asserting delivery, from override, and no secrets in logs; add Mailpit helper to `test/support/` (Done in U4b: Mailpit helper pinned to `axllent/mailpit:v1.31.3`; recipient must be a single plain address.)
-- [x] 4.4 GREEN: worker with backoff, payload purge, provider failure logged without secrets; link builder using `AUTH_PUBLIC_BASE_URL` (no per-app base) (Done in U4a: `OutboxWorker`, `EmailLinks`, 8 attempts, payload purged on `sent` and `failed`; U4b wires `TransactionalEmailModule` and the poller that `main.ts` starts. ADR 30.)
-- [x] 4.5 Templates: confirmation, welcome, reset, password-changed, `account-exists` (duplicate-signup notice: says someone tried to register, suggests login or password reset, links to `${AUTH_PUBLIC_BASE_URL}/api/v1/password/forgot?client_id=...`, no token; confirmation link is `${AUTH_PUBLIC_BASE_URL}/api/v1/accounts/confirm?token=...`; reset link is `${AUTH_PUBLIC_BASE_URL}/api/v1/password/reset?token=...&client_id=...`). Test: no password, every link starts with `AUTH_PUBLIC_BASE_URL`, the `account-exists` link has the app's `client_id` and no token. Commit: `feat(email): add outbox, worker, templates` (Done in U4b: five default `.subject.hbs`/`.text.hbs` pairs; build copies them to `dist/` via `scripts/copy-assets.js`.)
-- [x] 4.6 Review fixes. Outbox now uses a lease (`locked_until`, short claim and fenced completion statements, 60 s send deadline inside a 120 s lease; worker no longer needs `UnitOfWork`; ADR 30 rewritten) instead of holding a transaction during SMTP (W1). Poller shutdown awaits the in-flight drain, bounded by the send deadline, and the api container gets a 70 s stop grace (W3). STARTTLS required when SMTP credentials are set without implicit TLS (W4). ADR 25 now states that two integration files start Mailpit and what its auth test does and does not prove (W5). `API_PREFIX` moved to shared-kernel (S1); `email_from` validated at registration and update with the shared `isPlainMailbox` rule (S2); `describeError` masks case-insensitively (S3); explicit pg pool size (S7); percent-encoded and absolute `client_id` cases in the renderer spec (S8); speculative html path removed (S6). Template TTL wording stays hard-coded with a README TODO for U5/U6 (S5). Redundant tests trimmed (about 150 lines, see commit bodies).
+## U12 Transactional-email app links
 
-## U5 user-accounts
+**U12** `feat/u12-email-app-links` (315-360 lines)
 
-- [x] 5.1 RED: `UserSchema` and `OneTimeTokenSchema` plus migrations `CreateUsers` (`CREATE EXTENSION IF NOT EXISTS citext`, UNIQUE(app_id,email)) and `CreateOneTimeTokens`, each with `down()`; test for the same email across apps; reversibility test
-- [x] 5.2 GREEN: domain `User` and `OneTimeToken`, mappers with round-trip tests, TypeORM repositories implementing `UserRepository` and `OneTimeTokenRepository`
-- [x] 5.3 RED/GREEN: `PasswordHasher` bcrypt 12 (min 8 chars, max 72 bytes), dummy compare for timing (U5a: hasher port with `hash` and `verify`, password policy, email normalization. No dummy compare here: signup hashes the submitted password on both of its paths (5.4), and the login dummy compare belongs to U7)
-- [x] 5.4 RED/GREEN: `POST /api/v1/accounts/signup`; duplicate gives identical response plus the `account-exists` notice email to the existing owner; invalid input validation
-- [x] 5.5 RED/GREEN: `GET /api/v1/accounts/confirm` (24h, single-use) plus welcome email; generic invalid-or-expired
-- [x] 5.6 RED/GREEN: `POST /api/v1/accounts/resend-confirmation` invalidates old tokens, identical response. Commit: `feat(accounts): add signup and confirmation`
-- [x] 5.7 Review fixes. Confirm marks the email verified with a targeted `UPDATE .. WHERE email_verified_at IS NULL` (`UserRepository.markEmailVerified`, `save` removed) so a concurrent password change is not overwritten, proven by an integration test that changes `password_hash` between the read and the write (W2). `revertThrough` throws when no applied migration matches the prefix (S2). ADR 31 and README: residual new-vs-duplicate signup timing delta documented (W4), resend timing gap explicitly accepted until Phase 2 rate limiting (W3), no CORS on `/api/v1/accounts/*` recorded (decision).
+- [ ] 12.1 RED: `EmailLinks` unit: confirmation link `https://a.example/confirm#token=<percent-encoded>`; reset link likewise; a null URL throws `UnconfiguredLink`; no output contains `AUTH_PUBLIC_BASE_URL`. GREEN: rewrite `src/transactional-email/application/email-links.ts` from the app record.
+- [ ] 12.2 RED/GREEN: `OutboxWorker` builds links at send time from the current app (`findById`); a null URL marks the row `failed` at once with the payload purged and no token in logs. Update existing worker tests.
+- [ ] 12.3 RED/GREEN: templates `confirmation`, `reset` use the built link; `account-exists` links to `password_reset_url` with no token and no `#`; `welcome` and `password-changed` unchanged. Renderer tests: no password, no `AUTH_PUBLIC_BASE_URL` anywhere, `account-exists` has no token.
+- [ ] 12.4 RED/GREEN: update `email-pipeline.int-spec` (Mailpit): the delivered mail carries `app URL + #token=`. Mutation: build from `AUTH_PUBLIC_BASE_URL`, the pipeline and link tests fail. Update the README TTL TODO and ADR 30 payload note if they mention link bases.
 
-## U6 token-lifecycle A
+## U13 Abuse protection (all of it lands before any bcrypt path)
 
-- [x] 6.1 RED/GREEN: `KeyStore` JWK-set adapter (`active`, `next`, `retired`), fixed test key in `test/support/` (U6a: keys are generated at test time by `generateKeySet`, nothing committed; config `AUTH_SIGNING_KEYS[_FILE]`, dev script `npm run keys:generate`, compose `keygen` service, ADR 32)
-- [x] 6.2 RED/GREEN (U6b): `AccessTokenIssuer` with `jose` (RS256, `kid`, iss/aud/sub/iat/exp 3600/jti, no roles), plus `AccessTokenVerifier` (published keys by `kid`, RS256 pinned, iss/aud/exp, 5 s tolerance)
-- [x] 6.3 RED/GREEN (U6a): `GET /.well-known/jwks.json` (served at the root, excluded from the prefix; max-age 300, public keys only, rotation overlap). Commit: `feat(tokens): add key store, issuer, jwks`
+**U13a** `feat/u13a-abuse-domain-config` (315-360 lines)
 
-U6 review fixes (verify report), all done with RED first:
+- [ ] 13.1 RED/GREEN: `ClientIp` value object (`src/abuse-protection/domain/`): IPv4-mapped IPv6 becomes IPv4; IPv6 keyed on its /64; undefined or malformed falls back to the socket peer. Table-driven.
+- [ ] 13.2 RED/GREEN: `Scope`, `Policy` table and `CounterKey` (SHA-256 of scope + normalized parts, scopes cannot collide): defaults `login_ip` 100/15 min, `login_account_ip` 5/15 min block 15 min, `login_account` 50/1 h block 15 min, `email_ip` 20/1 h, `reset_ip` 20/1 h, `email_account` 3/1 h. Tests for defaults and env override.
+- [ ] 13.3 RED/GREEN: zod config `TRUST_PROXY` (`false` default, hop count, or CIDR/Express names; `true` rejected at boot) and `ABUSE_<SCOPE>_LIMIT`, `_WINDOW_SECONDS`, `_BLOCK_SECONDS` (positive integers).
+- [ ] 13.4 RED/GREEN: `configureApp` sets Express `trust proxy` from config. e2e with a test-only echo route: spoofed `X-Forwarded-For` ignored when `false`; behind a trusted proxy the client is the first untrusted address from the right; malformed falls back to the peer. Mutation: `trust proxy = true`, the spoof test fails.
 
-- [x] 6.R1 (u6a) W2: the signing key xor check and file read moved from `loadConfig` to the key store factory; `AppConfig` no longer holds the secret; `npm run cli` boots without any signing key variable (`cli-boot.int-spec.ts`).
-- [x] 6.R2 (u6a) W3: optional `retiredAt` on retired keys; expired ones are dropped at boot (retention 4205 s = 1 h + 5 s + 10 min jose cache) with a kid-only warning; keys without `retiredAt` stay and warn.
-- [x] 6.R3 (u6a) S1: key store rows for a bad `next` and bad `retired` keys. S7 + S6: README and ADR 32 say keygen is dev-only and document the rotation timing.
-- [x] 6.R4 (u6b) W1: `typ: at+jwt` set by the issuer and required by the verifier (mutation-checked).
-- [x] 6.R5 (u6b) W4: `audience` is required on `AccessTokenVerifier.verify` (id or non-empty list; empty throws); ADR 32 records how U8 `/me` must obtain and pass it. S2: forged HS256 and `none` tokens carry full valid claims.
+**U13b** `feat/u13b-abuse-store` (280-320 lines)
 
-## U7 authorization-flow
+- [ ] 13.5 RED: migration `1760000005000-CreateAbuseCounters` int test: table is `UNLOGGED` (`relpersistence = 'u'`), PK `(scope, key)`, index on `expires_at`; up, down, up. GREEN: migration, `EntitySchema`, `AbuseCounterStore` port.
+- [ ] 13.6 RED/GREEN: `PostgresAbuseCounterStore.hit` as the single atomic upsert of ADR 36 with the injected `Clock`: window rollover, threshold sets `blocked_until`, hits during a block do not extend it. Always uses the root `DataSource` manager. Int tests with a fixed clock; 10 parallel hits read count 10 and set `blocked_until` once; a rolled-back UoW leaves the count. Mutations: use the ALS manager, the rollback test fails; read-then-write instead of upsert, the concurrency test fails.
+- [ ] 13.7 RED/GREEN: `blockedUntil(keys, now)` and `reset(scope, key)`; tests include an expired block and reset of a missing key.
 
-- [ ] 7.1 RED: `AuthorizationCodeSchema` plus migration `CreateAuthorizationCodes` with `down()`; mapper round-trip test; TypeORM repository implementing `AuthorizationCodeRepository`; integration test
-- [ ] 7.2 RED/GREEN: `GET /api/v1/oauth/authorize` validation (S256 only, `plain` and missing challenge rejected, no redirect on bad client/URI)
-- [ ] 7.3 RED/GREEN: Handlebars login/signup views (the form posts to `/api/v1/oauth/login`), strict CSP, HMAC-signed params, CSRF double-submit
-- [ ] 7.4 RED/GREEN: `POST /api/v1/oauth/login` issues hashed 60s code and redirects with `state`; identical generic failure for wrong password, unknown email, unconfirmed.
-- [ ] 7.5 RED/GREEN: the login view links to `/api/v1/password/forgot?client_id=<client_id>` (view test asserts the link and the app's `client_id`). Commit: `feat(authz): add hosted login and code issuance`
+**U13c** `feat/u13c-abuse-guard-sweeper` (315-360 lines)
 
-## U8 token-lifecycle B
+- [ ] 13.8 RED/GREEN: `AbuseGuard` (application) with port fakes and a fixed clock, covering the spec scenarios: pair block while IP Y still passes, global lock, lock expiry, unknown email identical, threshold 3 configurable, success resets the pair counter and not the global one, attempts during a block do not extend it. Mutation: reset the global counter on success, the global-lock test fails.
+- [ ] 13.9 RED/GREEN: decisions `allowed`, `ip_limited(retryAfterSeconds)` and `account_suppressed` for the email and reset checks. Store failure raises `TemporarilyUnavailable` (mapped to `503 temporarily_unavailable`) before any account lookup. Mutation: fail open, the 503 test fails.
+- [ ] 13.10 RED/GREEN: `AbuseCounterSweeper` deletes expired rows every 5 min in batches of 1,000, started by `main.ts` only (outbox-poller pattern), awaits its drain on shutdown; `AbuseProtectionModule` exports the guard. Int test: expired rows deleted, live rows kept, batch loop. Check with `rg` that `abuse-protection` imports only `shared-kernel`.
 
-- [ ] 8.1 RED: `RefreshTokenSchema` plus migration `CreateRefreshTokens` with `down()`; mapper round-trip test; TypeORM repository implementing `RefreshTokenRepository` with a `findByHashForUpdate` that uses `setLock('pessimistic_write')`
-- [ ] 8.2 RED/GREEN: `POST /api/v1/oauth/token` code exchange (`grant_type=authorization_code`; verifier, redirect, app binding, reuse, `client_secret_basic`); any other `grant_type` returns `unsupported_grant_type`
-- [ ] 8.3 RED/GREEN: refresh rotation inside `UnitOfWork` with a row lock, reuse revokes family (concurrent-refresh integration test), 30d expiry, wrong app
-- [ ] 8.4 RED/GREEN: `POST /api/v1/oauth/revoke` family revoke. Commit: `feat(tokens): add exchange, refresh rotation, revoke`
+## U14 Session-auth A: sessions and login
 
-## U9 /api/v1/me and password-management
+**U14a** `feat/u14a-session-persistence` (230-260 lines)
 
-- [ ] 9.1 RED/GREEN: `GET /api/v1/me` with JWT guard (`aud` check, no internal fields, 401 generic)
-- [ ] 9.2 RED/GREEN: `POST /api/v1/password/forgot` generic response; reset email only for confirmed accounts; CSRF check on form submits
-- [ ] 9.3 RED: hosted forgot-password page tests. View test: `forgot.hbs` renders hidden `client_id` and CSRF token, no account-state wording. Controller e2e: `GET /api/v1/password/forgot?client_id=` returns 200 with strict CSP and CSRF cookie for an active app; unknown or inactive `client_id` returns the generic error page with no form
-- [ ] 9.4 GREEN: `forgot.hbs` view and `GET /api/v1/password/forgot` controller (validates `client_id` through the app registry, reuses the CSP/CSRF middleware from U7); `POST /api/v1/password/forgot` renders the generic result page. REFACTOR: share layout and CSRF helper with the login and reset views
-- [ ] 9.5 RED/GREEN e2e: submit for confirmed, unknown, and other-app-only emails gives identical status and body; missing CSRF is rejected with no email; the reset email link carries `client_id`
-- [ ] 9.6 RED/GREEN: `GET /api/v1/password/reset?token=&client_id=` renders the hosted reset form (strict CSP, CSRF) without revealing token validity; `POST /api/v1/password/reset` (1h, single-use, superseded) revokes all app refresh tokens; a `client_id` that does not match the token's app gives the generic error; the success page is app-scoped
-- [ ] 9.6a RED: e2e for the post-reset redirect. Case 1: app with `post_reset_redirect_uri` set; a valid reset returns 302 with `Location` exactly equal to the stored value (no added query, no token or email). Case 2: app with null; a valid reset returns 200 with the app-scoped confirmation page and no `Location`. Also: `redirect_uri`, `next`, and `return_to` in query or form are ignored; failed resets (invalid, expired, reused, `client_id` mismatch, weak password) never redirect
-- [ ] 9.6b GREEN/REFACTOR: after a successful `POST /api/v1/password/reset`, read the app through `AppRepository` and answer 302 to `post_reset_redirect_uri`, or render the confirmation page when null; read no request input for the target. REFACTOR: extract the success-response choice into a small helper
-- [ ] 9.7 RED/GREEN: `POST /api/v1/password/change` plus notice email. Commit: `feat(password): add forgot, reset, change`
+- [ ] 14.1 RED: migration `1760000006000-CreateAuthSessions` int test: `auth_sessions` (`revoked_reason` enum including `ops_revoke_all`, indexes on `user_id` and `expires_at`) and `refresh_tokens` (`token_hash bytea` PK, `session_id` FK indexed); up, down (drops the enum), up. GREEN.
+- [ ] 14.2 RED/GREEN: domain `Session` and `RefreshToken`, `EntitySchema` rows, mappers with round-trip tests (null `revoked_at` and `consumed_at`, every enum value). Hexagonal check on imports.
 
-## U10 Verification and docs
+**U14b** `feat/u14b-session-repository` (300-340 lines)
 
-- [ ] 10.1 E2E: full PKCE flow, refresh replay, logout, two-app isolation, audience mismatch
-- [ ] 10.2 E2E: anti-enumeration status/body equality and timing tolerance across all flows
-- [ ] 10.3 Full migration chain test: run all migrations, revert all of them to an empty schema, then run them again
-- [ ] 10.4 OpenAPI setup, `README` (including the migration runbook: `migration:run` / `migration:revert`), `.env.example` (with `AUTH_PUBLIC_BASE_URL` and all `SMTP_*` / `MAIL_FROM`, pointing at a local Mailpit), `ops:revoke-all` CLI command, login P95 load-test script
-- [ ] 10.5 Verify the route table matches the design exactly (16 routes: 13 under `/api/v1`, 3 at the root) and no Phase 2-4 endpoints exist. Commit: `docs: add openapi, runbook, e2e coverage`
+- [ ] 14.3 RED/GREEN: `SessionRepository.open(session, firstTokenHash)` and `consume(hash, appId, now)` as the single `UPDATE .. FROM auth_sessions .. RETURNING` of ADR 35. Int tests: wrong app, idle expiry, absolute expiry, revoked session each return null; N parallel consumes yield exactly one winner. Mutations: drop `consumed_at IS NULL`, the replay and concurrency tests fail; drop the `app_id` join, the wrong-app test fails.
+- [ ] 14.4 RED/GREEN: `findTokenState`, `revoke(sessionId, reason)` (idempotent, keeps the first reason) and `revokeAllForUser(userId, reason)`. Int tests include other users untouched.
 
-## Follow-ups (from U2 review, not scheduled in any unit above)
+**U14c** `feat/u14c-login` (385-440 lines, `size:exception` pre-flagged if over 400 after trimming)
 
-- [ ] F.1 Split liveness (`/live`) from readiness (`/health`) before any orchestrator deployment. Today the container HEALTHCHECK and `/health` conflate the two: a DB outage marks the container unhealthy, which would trigger restarts instead of just removing it from rotation.
-- [ ] F.2 Support `_FILE`-suffixed env vars (e.g. `DATABASE_URL_FILE`, `SMTP_PASS_FILE`) so secrets can be loaded from mounted files, as ADR 20 states. Today config reads plain env vars only.
+- [ ] 14.5 RED: `LoginUseCase` unit with recording fakes. Exactly one `verify` on each path (unknown email, wrong password, unconfirmed, success, unknown client, malformed email, password bcrypt cannot hash compared as `''`); zero `verify` when limited or blocked; both lockout counters recorded on a mismatch, including unknown emails; success resets the pair counter only; unknown client keys the sentinel `(unknown, IP)`. Mutations: return early for an unknown email, skip the dummy hash, skip the confirmed check, record a failure on success. The U7 ordering is a reference, not cherry-picked.
+- [ ] 14.6 GREEN: `LoginUseCase`, boot-time dummy cost-12 hash provider, session issue in one `UnitOfWork` (open session + first token, then sign the access token with `aud` = `client_id`, `sub` = user id). Config `REFRESH_IDLE_TTL_SECONDS` (604800) and `REFRESH_ABSOLUTE_TTL_SECONDS` (2592000).
+- [ ] 14.7 RED/GREEN: `POST /api/v1/auth/login` (zod body, `req.ip`, `Origin` passed to the use case). e2e: 200 body shape, `expires_in` 3600, `aud`, no `Set-Cookie`; byte-identical `401` (status, body, headers) for unknown email, wrong password, unconfirmed, locked, blocked, IP-limited and unknown client, and never `429`; correct password on an unconfirmed, locked or blocked account issues nothing; malformed body gives `400` without state wording; wrong-app origin gives the generic `401`; no `Origin` skips the binding; allow header bound to the app, no credentials header.
+
+## U15 Session-auth B: refresh and logout
+
+**U15a** `feat/u15a-refresh-rotation` (280-320 lines)
+
+- [ ] 15.1 RED/GREEN: `RefreshSessionUseCase`: consume, successor and `last_used_at` in one UoW. Wrong app, unknown, expired and revoked give an identical `401 invalid_grant`. A consumed token of the same app revokes its session (`reuse_detected`); a consumed token of another app revokes nothing. Mutations: revoke on a wrong-app token, skip revoke on reuse; both fail a named test.
+- [ ] 15.2 RED/GREEN: int concurrency: N parallel refreshes of one token give one success, and the session ends revoked including the winner's successor. Replay of R1 after R1 to R2 to R3 revokes R2 and R3. Rotation does not extend the absolute expiry; the idle expiry caps at the session expiry.
+- [ ] 15.3 RED/GREEN: `POST /api/v1/auth/refresh` and e2e: same body shape as login, DB rows hold only hashes, invalid client gives `400 invalid_client`, origin binding and allow headers.
+
+**U15b** `feat/u15b-logout-revoke-all` (330-380 lines)
+
+- [ ] 15.4 RED/GREEN: `LogoutUseCase` and `POST /api/v1/auth/logout`: `204` for active, revoked, expired, unknown and other-app tokens; revokes only when the token belongs to the client's app; a later refresh fails; an issued access token still verifies until `exp`.
+- [ ] 15.5 RED/GREEN: `RevokeAccountSessionsUseCase` (userId, reason) exported by `session-auth` for password-management; int test: all of that user's sessions revoked, other users untouched, reason stored.
+- [ ] 15.6 RED/GREEN: CLI `ops:revoke-all` (nest-commander, requires `--yes`, prints the count, reason `ops_revoke_all`); the CLI boots without a signing key; e2e shows a refresh fails afterward. Mutation: omit the `--yes` guard, the guard test fails.
+
+## U16 `/me`
+
+**U16** `feat/u16-me-bearer` (315-360 lines)
+
+- [ ] 16.1 RED/GREEN: `AuthenticateBearerUseCase` (`token-lifecycle/application`, ADR 32): read `aud` from the unverified payload only to pick the expectation, require an active app through `ResolveClientUseCase`, then `verify(token, { audience })`, then bind the origin to that app. Unit: missing, expired, bad signature, `none`, HS256, no `aud`, unknown `aud`, inactive `aud`, wrong `typ`, wrong-app origin all give one identical `unauthorized`; no `Origin` passes. Mutations: skip the verify call, skip the active-app check.
+- [ ] 16.2 RED/GREEN: `GET /api/v1/me`: profile (`sub`, email, `email_verified`) of that account only, read through `UserRepository.findById` scoped to the token's app (add if missing). Unknown user is `401`. e2e: no password hash or internal fields, generic `401` bodies identical, allow header bound to the token's `aud`, app B origin gets none.
+
+## U17 User-accounts changes
+
+**U17a** `feat/u17a-confirm-post-cors` (260-300 lines)
+
+- [ ] 17.1 RED/GREEN: `GET /api/v1/accounts/confirm` returns `404` and leaves the token unused; `POST /api/v1/accounts/confirm {token}` confirms, queues `welcome`, and every failure (malformed, unknown, used, expired, wrong purpose) gives an identical `400 invalid_or_expired_link`. Remove the GET controller.
+- [ ] 17.2 RED/GREEN: `OneTimeTokenRepository.findAppByTokenHash` (read-only). The origin is bound to the token's app before the consume; a wrong origin or unknown token gives the same generic error and the token stays unused; no `Origin` passes. Mutation: consume before binding, the token-stays-unused test fails.
+- [ ] 17.3 RED/GREEN: CORS on `accounts/signup`, `accounts/confirm`, `accounts/resend-confirmation`: preflight, own-origin allow header, other-app origin rejected with `400 invalid_client` and no allow header. Replace the "no CORS on accounts" note in README and ADR 31 (already marked superseded).
+
+**U17b** `feat/u17b-accounts-limits` (285-320 lines)
+
+- [ ] 17.4 RED/GREEN: signup and resend call `AbuseGuard` first, before bcrypt and any lookup. IP-limited gives `429 rate_limited` with `Retry-After`, identical for a new and an existing email, and runs no hash. A per-account cap gives the normal `202`; signup still creates the account but queues nothing; resend queues nothing. Store failure gives `503` before any lookup. Mutation: make the `429` depend on account existence, the equality test fails.
+- [ ] 17.5 RED/GREEN: an app with a null `email_confirmation_url` gives `400 unconfigured_client` on signup and resend before any account work (no rows, no outbox, no hash).
+- [ ] 17.6 RED/GREEN e2e: new, duplicate and capped signups are indistinguishable; remove the "resend gap accepted until Phase 2" wording from ADR 31 and README, since the limits now bound it.
+
+## U18 Password management
+
+**U18a** `feat/u18a-forgot` (245-280 lines)
+
+- [ ] 18.1 RED/GREEN: `ForgotPasswordUseCase` order: client (`invalid_client` or `unconfigured_client` as `400`), `email_ip` (`429`), `email_account` (silent), then only for a confirmed account: a 1 h token that supersedes earlier unused reset tokens plus a `reset` outbox row, in one UoW. Always the generic `202`. Unit with fakes.
+- [ ] 18.2 RED/GREEN: `POST /api/v1/password/forgot` and e2e: confirmed, unknown, other-app-only and unconfirmed give identical `202` and only the confirmed one queues mail; `GET /api/v1/password/forgot` is `404`; a provider outage still gives `202`; the 4th request in an hour is suppressed; IP limit gives `429`; CORS bound to `client_id`. Mutation: send mail for an unconfirmed account.
+
+**U18b** `feat/u18b-reset` (245-280 lines)
+
+- [ ] 18.3 RED/GREEN: `ResetPasswordUseCase {token, new_password}`: validate the password first (weak gives `400` and the token stays usable), `reset_ip` check, origin bound to the token's app (shared with 17.2), then one UoW: consume the token, write the hash and `password_changed_at`, `revokeAllForUser(password_reset)`. Used, expired (over 1 h), superseded and unknown give one generic error. Int tests: concurrent double submit has one winner; a revoke failure rolls back (hash unchanged, token unused). Mutations: revoke outside the UoW, ignore supersession.
+- [ ] 18.4 RED/GREEN: `POST /api/v1/password/reset` e2e: `204`, no `Location`, hash is `$2b$12$`, `GET` is `404`, two sessions both die, `429` on IP limit, CORS bound through the token.
+
+**U18c** `feat/u18c-change` (230-260 lines)
+
+- [ ] 18.5 RED/GREEN: `ChangePasswordUseCase` via `AuthenticateBearerUseCase`: lockout counters are checked before bcrypt (blocked gives the generic invalid-credentials); a wrong current password records both counters; success resets the pair counter, writes the hash, `revokeAllForUser(password_changed)` and queues the `password-changed` notice, all in one UoW. Mutations: skip failure recording, exclude the caller's session from revocation.
+- [ ] 18.6 RED/GREEN: `POST /api/v1/password/change` e2e: `204`; missing or invalid token `401`; wrong current password changes nothing; weak new password `400` with no state change; every refresh token of the account (the caller's too) fails afterward while the current access token verifies until `exp`; failed changes feed the same counters as login; CORS bound to the token's `aud`.
+
+## U19 OpenAPI, retention, e2e, docs and ops
+
+**U19a** `feat/u19a-openapi` (245-280 lines)
+
+- [ ] 19.1 RED/GREEN: route-table test lists the registered routes and asserts exactly 13 (3 at the root, 10 under `/api/v1`), no `/api/v1/oauth/*`, no `GET` under `/accounts/confirm` or `/password/*`, no page route.
+- [ ] 19.2 RED/GREEN: OpenAPI 3.1 document generated by `npm run openapi:generate` into `openapi.json` (a build artifact, not a runtime route, so the route table stays at 13). Contract test: its paths equal the registered routes; bodies, success shapes, the error code table and the bearer scheme are present.
+
+**U19b** `feat/u19b-retention` (370-420 lines, `size:exception` only if over 400 after trimming)
+
+- [ ] 19.3 RED/GREEN: migration `1760000007000-RetentionIndexes` (`one_time_tokens(expires_at)`, partial index on `email_outbox(created_at)` for `sent` and `failed`); up, down, up.
+- [ ] 19.4 RED/GREEN: `RetentionSweeper` with the ADR 35 windows (sessions and their refresh tokens one day after expiry, `one_time_tokens` one day after expiry, `sent` and `failed` outbox rows after 7 days), hourly, batches of 1,000, injected clock, started by `main.ts` only, awaits its drain on shutdown. Int tests: boundary rows kept and deleted, `pending` outbox rows never deleted, a live session with consumed tokens untouched (reuse detection survives), batch loop. Mutations: `<=` for `<` at the boundary, delete `pending` rows.
+- [ ] 19.5 RED/GREEN: wiring test that `main.ts` starts the outbox poller, the abuse sweeper (limiter rows) and the retention sweeper, and the CLI and tests start none.
+
+**U19c** `feat/u19c-e2e-suite` (315-360 lines)
+
+- [ ] 19.6 e2e journeys on the shared factory: signup, confirm by POST using the fragment token from the fake sender, login, `/me`, refresh, replay revokes, logout; forgot, reset, old sessions dead, login with the new password; change password; two-app isolation (same email, cross-app token); audience mismatch verified through JWKS only; anti-enumeration equality of status and body across login, forgot, signup and resend, with a timing check on medians (tolerance, not strict).
+- [ ] 19.7 Full migration chain test: run every migration, revert all to an empty schema, run them again.
+
+**U19d** `feat/u19d-docs-ops` (about 330 lines, docs and one script)
+
+- [ ] 19.8 `docs/integration-guide.md`: pin the JWKS URL and never trust `jku`, `x5u` or embedded `jwk` headers; check `iss`, `aud`, `typ: at+jwt` and pin RS256; JWKS cache and rotation timing; serialize refreshes (one in-flight promise, `navigator.locks`, no grace window, so a race logs the user out); keep the access token in memory; refresh token storage and XSS risk; CORS (exact origins, no credentials, origin bound to `client_id`); fragment handling (`location.hash`, `history.replaceState` before third-party scripts); error code table; `429` and `Retry-After` handling; password change logs out every session; native clients send no `Origin`.
+- [ ] 19.9 README ops runbook: migrations, `ops:revoke-all`, the cleanup jobs and retention windows (outbox, one-time tokens, sessions and refresh tokens, limiter rows), `TRUST_PROXY` behind a load balancer, https `AUTH_PUBLIC_BASE_URL` in production, `UNLOGGED` counters, key rotation pointer.
+- [ ] 19.10 `docs/env-example-additions.md`: the exact lines the user must paste into `.env.example` (`AUTH_PUBLIC_BASE_URL`, `SMTP_*`, `MAIL_FROM`, `AUTH_SIGNING_KEYS[_FILE]`, `TRUST_PROXY`, `ABUSE_*`, `REFRESH_*`). The agent never edits `.env*`.
+- [ ] 19.11 `docs/smoke-test.md`: manual browser checklist (Chromium, Firefox, Safari) with a static SPA at `http://localhost:5173`: signup, Mailpit link, fragment stripped, confirm, login, preflight, wrong-origin block, two-tab refresh, logout, forgot and reset, no cookies in DevTools. The user runs it and the result is recorded in apply-progress.
+- [ ] 19.12 `scripts/login-load.mjs` (plain Node, no new dependency) and the gate: login P95 under 500 ms at pilot load (ADR 12), run manually. Final check: route table is exactly 13 routes and the proposal success criteria are walked through.
+
+## Follow-ups (from U2 review, not scheduled above)
+
+- [ ] F.1 Split liveness (`/live`) from readiness (`/health`) before any orchestrator deployment.
+- [ ] F.2 Support `_FILE`-suffixed env vars for secrets other than the signing keys (ADR 20).
+- [ ] F.3 Phase 2: `SET NOT NULL` migration for the two app email URLs once every row has values (ADR 39).
