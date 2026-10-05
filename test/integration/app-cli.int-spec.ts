@@ -10,8 +10,20 @@ interface AppDbRow {
   redirect_uris: string[];
   allowed_origins: string[];
   email_from: string | null;
+  email_confirmation_url: string | null;
+  password_reset_url: string | null;
   status: string;
 }
+
+const ORIGIN = ['--origin', 'https://a.example'];
+const URLS = [
+  '--email-confirmation-url',
+  'https://a.example/confirm',
+  '--password-reset-url',
+  'https://a.example/reset',
+];
+/** Everything `app create` requires, so a test only spells out what it varies. */
+const REQUIRED = ['--name', 'Shop', ...ORIGIN, ...URLS];
 
 describe('app CLI (integration)', () => {
   let db: TestDatabase;
@@ -51,8 +63,8 @@ describe('app CLI (integration)', () => {
         'https://a.example/cb',
         '--redirect-uri',
         'https://a.example/cb2',
-        '--origin',
-        'https://a.example',
+        ...ORIGIN,
+        ...URLS,
       ]);
 
       expect(run.errors).toEqual([]);
@@ -65,6 +77,8 @@ describe('app CLI (integration)', () => {
         client_secret_hash: null,
         redirect_uris: ['https://a.example/cb', 'https://a.example/cb2'],
         allowed_origins: ['https://a.example'],
+        email_confirmation_url: 'https://a.example/confirm',
+        password_reset_url: 'https://a.example/reset',
         status: 'active',
       });
     });
@@ -79,6 +93,8 @@ describe('app CLI (integration)', () => {
         'confidential',
         '--redirect-uri',
         'https://b.example/cb',
+        ...ORIGIN,
+        ...URLS,
       ]);
 
       expect(run.errors).toEqual([]);
@@ -93,8 +109,65 @@ describe('app CLI (integration)', () => {
     });
 
     it('rejects an unknown --type without persisting', async () => {
-      const run = await cli(['app', 'create', '--name', 'X', '--type', 'weird']);
+      const run = await cli(['app', 'create', '--name', 'X', '--type', 'weird', ...ORIGIN, ...URLS]);
       expect(run.errors.map((e) => e.message)).toEqual(['--type must be "public" or "confidential", got "weird"']);
+      expect(await rows()).toHaveLength(0);
+    });
+
+    it.each([
+      ['--email-confirmation-url', ['--password-reset-url', 'https://a.example/reset']],
+      ['--password-reset-url', ['--email-confirmation-url', 'https://a.example/confirm']],
+    ])('requires %s', async (flag, other) => {
+      const run = await cli(['app', 'create', '--name', 'Shop', ...ORIGIN, ...other]);
+      expect(run.errors.map((e) => e.message)).toEqual([`${flag} is required`]);
+      expect(await rows()).toHaveLength(0);
+    });
+
+    it.each([
+      ['--email-confirmation-url', 'email_confirmation_url', ['--password-reset-url', 'https://a.example/reset']],
+      ['--password-reset-url', 'password_reset_url', ['--email-confirmation-url', 'https://a.example/confirm']],
+    ])('rejects an invalid %s and persists nothing', async (flag, field, other) => {
+      const run = await cli(['app', 'create', '--name', 'Shop', ...ORIGIN, ...other, flag, 'https://a.example/x#token=']);
+      expect(run.errors.map((e) => e.message)).toEqual([expect.stringContaining(`Invalid ${field}`)]);
+      expect(await rows()).toHaveLength(0);
+    });
+
+    it.each([
+      ['--email-confirmation-url', 'email_confirmation_url', ['--password-reset-url', 'https://a.example/reset']],
+      ['--password-reset-url', 'password_reset_url', ['--email-confirmation-url', 'https://a.example/confirm']],
+    ])('rejects %s on an origin that is not allowed and persists nothing', async (flag, field, other) => {
+      const run = await cli(['app', 'create', '--name', 'Shop', ...ORIGIN, ...other, flag, 'https://evil.example/x']);
+      expect(run.errors.map((e) => e.message)).toEqual([
+        expect.stringContaining(`${field} origin "https://evil.example" must be one of the allowed origins`),
+      ]);
+      expect(await rows()).toHaveLength(0);
+    });
+
+    it.each([
+      ['--email-confirmation-url', 'email_confirmation_url', ['--password-reset-url', 'https://a.example/reset']],
+      ['--password-reset-url', 'password_reset_url', ['--email-confirmation-url', 'https://a.example/confirm']],
+    ])('rejects an http://localhost %s in production', async (flag, field, other) => {
+      const run = await cli(['app', 'create', '--name', 'Shop', ...ORIGIN, ...other, flag, 'http://localhost:5173/x'], {
+        isProduction: true,
+      });
+      expect(run.errors.map((e) => e.message)).toEqual([expect.stringContaining(`Invalid ${field}`)]);
+      expect(await rows()).toHaveLength(0);
+    });
+
+    it('rejects the removed --post-reset-redirect-uri option as unknown, exiting with code 1', async () => {
+      // commander itself prints the message and calls process.exit(1) for an unknown option.
+      const exit = jest.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+        throw new Error(`process.exit(${code})`);
+      }) as never);
+      const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      try {
+        const run = await cli(['app', 'create', ...REQUIRED, '--post-reset-redirect-uri', 'https://a.example/login']);
+        expect(run.errors.map((e) => e.message)).toEqual(['process.exit(1)']);
+        expect(stderr).toHaveBeenCalledWith(expect.stringContaining("unknown option '--post-reset-redirect-uri'"));
+      } finally {
+        exit.mockRestore();
+        stderr.mockRestore();
+      }
       expect(await rows()).toHaveLength(0);
     });
 
@@ -107,14 +180,14 @@ describe('app CLI (integration)', () => {
 
   describe('app create client_id', () => {
     it('prints a client_id shaped app_<32 hex>, safe to pass as a CLI argument', async () => {
-      const run = await cli(['app', 'create', '--name', 'Shop']);
+      const run = await cli(['app', 'create', ...REQUIRED]);
       expect(clientIdFrom(run.out)).toMatch(/^app_[0-9a-f]{32}$/);
     });
   });
 
   describe('app create origin and redirect uri validation', () => {
     it('stores origins normalized (lower-case, de-duplicated)', async () => {
-      const run = await cli(['app', 'create', '--name', 'Shop', '--origin', 'HTTPS://A.example', '--origin', 'https://a.example']);
+      const run = await cli(['app', 'create', '--name', 'Shop', '--origin', 'HTTPS://A.example', '--origin', 'https://a.example', ...URLS]);
       expect(run.errors).toEqual([]);
       expect((await rows())[0].allowed_origins).toEqual(['https://a.example']);
     });
@@ -122,7 +195,7 @@ describe('app CLI (integration)', () => {
     it.each(['https://a.example/', 'https://a.example/app', 'null', '*', 'http://a.example'])(
       'rejects the origin %s with a clear error and persists nothing',
       async (origin) => {
-        const run = await cli(['app', 'create', '--name', 'Shop', '--type', 'confidential', '--origin', origin]);
+        const run = await cli(['app', 'create', '--name', 'Shop', '--type', 'confidential', '--origin', origin, ...URLS]);
 
         expect(run.errors).toHaveLength(1);
         expect(run.errors[0].message).toContain(`Invalid allowed origin "${origin}"`);
@@ -132,7 +205,7 @@ describe('app CLI (integration)', () => {
     );
 
     it('rejects an email-from with a display name and persists nothing', async () => {
-      const run = await cli(['app', 'create', '--name', 'Shop', '--email-from', 'Shop <hello@a.example>']);
+      const run = await cli(['app', 'create', ...REQUIRED, '--email-from', 'Shop <hello@a.example>']);
 
       expect(run.errors).toHaveLength(1);
       expect(run.errors[0].message).toContain('Invalid email_from');
@@ -142,7 +215,7 @@ describe('app CLI (integration)', () => {
     it.each(['/cb', 'https://a.example/cb#x', 'http://a.example/cb', 'myapp://cb'])(
       'rejects the redirect uri %s with a clear error and persists nothing',
       async (uri) => {
-        const run = await cli(['app', 'create', '--name', 'Shop', '--redirect-uri', uri]);
+        const run = await cli(['app', 'create', ...REQUIRED, '--redirect-uri', uri]);
 
         expect(run.errors).toHaveLength(1);
         expect(run.errors[0].message).toContain(`Invalid redirect URI "${uri}"`);
@@ -151,7 +224,7 @@ describe('app CLI (integration)', () => {
     );
 
     it('rejects an http localhost origin in production', async () => {
-      const run = await cli(['app', 'create', '--name', 'Dev', '--origin', 'http://localhost:5173'], {
+      const run = await cli(['app', 'create', '--name', 'Dev', '--origin', 'http://localhost:5173', ...URLS], {
         isProduction: true,
       });
       expect(run.errors).toHaveLength(1);
@@ -161,12 +234,12 @@ describe('app CLI (integration)', () => {
 
   describe('app update', () => {
     const createApp = async (extra: string[] = []): Promise<string> => {
-      const run = await cli(['app', 'create', '--name', 'Shop', '--redirect-uri', 'https://a.example/cb', ...extra]);
+      const run = await cli(['app', 'create', ...REQUIRED, '--redirect-uri', 'https://a.example/cb', ...extra]);
       return clientIdFrom(run.out);
     };
 
-    it('updates name, redirect URIs and origins; repeated options replace the list', async () => {
-      const clientId = await createApp(['--origin', 'https://a.example']);
+    it('updates name, redirect URIs, origins and email link URLs; repeated options replace the list', async () => {
+      const clientId = await createApp();
       const run = await cli([
         'app',
         'update',
@@ -177,6 +250,10 @@ describe('app CLI (integration)', () => {
         'https://b.example/cb',
         '--origin',
         'https://b.example',
+        '--email-confirmation-url',
+        'https://b.example/confirm',
+        '--password-reset-url',
+        'https://b.example/reset',
       ]);
 
       expect(run.errors).toEqual([]);
@@ -184,11 +261,36 @@ describe('app CLI (integration)', () => {
         name: 'Renamed',
         redirect_uris: ['https://b.example/cb'],
         allowed_origins: ['https://b.example'],
+        email_confirmation_url: 'https://b.example/confirm',
+        password_reset_url: 'https://b.example/reset',
       });
     });
 
+    it.each([
+      ['--email-confirmation-url', 'email_confirmation_url'],
+      ['--password-reset-url', 'password_reset_url'],
+    ])('rejects clearing %s with an empty value and keeps the stored URL', async (flag, field) => {
+      const clientId = await createApp();
+      const run = await cli(['app', 'update', clientId, '--name', 'Changed', flag, '']);
+
+      expect(run.errors.map((e) => e.message)).toEqual([expect.stringContaining(`Invalid ${field}`)]);
+      expect((await rows())[0]).toMatchObject({
+        name: 'Shop',
+        email_confirmation_url: 'https://a.example/confirm',
+        password_reset_url: 'https://a.example/reset',
+      });
+    });
+
+    it('rejects removing the origin a stored email link URL uses', async () => {
+      const clientId = await createApp();
+      const run = await cli(['app', 'update', clientId, '--origin', 'https://b.example']);
+
+      expect(run.errors.map((e) => e.message)).toEqual([expect.stringContaining('must be one of the allowed origins')]);
+      expect((await rows())[0].allowed_origins).toEqual(['https://a.example']);
+    });
+
     it('rejects an invalid origin or redirect uri and persists no change', async () => {
-      const clientId = await createApp(['--origin', 'https://a.example']);
+      const clientId = await createApp();
 
       const badOrigin = await cli(['app', 'update', clientId, '--name', 'Changed', '--origin', 'https://b.example/']);
       expect(badOrigin.errors.map((e) => e.message)).toEqual([expect.stringContaining('Invalid allowed origin')]);
@@ -209,7 +311,7 @@ describe('app CLI (integration)', () => {
         isProduction: true,
       });
       expect(run.errors).toHaveLength(1);
-      expect((await rows())[0].allowed_origins).toEqual([]);
+      expect((await rows())[0].allowed_origins).toEqual(['https://a.example']);
     });
 
     it('fails for an unknown client_id', async () => {
@@ -221,7 +323,7 @@ describe('app CLI (integration)', () => {
 
   describe('app deactivate', () => {
     it('marks the app inactive', async () => {
-      const created = await cli(['app', 'create', '--name', 'Shop']);
+      const created = await cli(['app', 'create', ...REQUIRED]);
       const clientId = clientIdFrom(created.out);
 
       const run = await cli(['app', 'deactivate', clientId]);

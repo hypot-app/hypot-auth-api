@@ -104,7 +104,11 @@ describe('App changes', () => {
 
   it('update replaces the email link URLs and keeps them when omitted', () => {
     const app = App.restore(
-      props({ emailConfirmationUrl: 'https://a.example/confirm', passwordResetUrl: 'https://a.example/reset' }),
+      props({
+        allowedOrigins: ['https://a.example', 'https://b.example'],
+        emailConfirmationUrl: 'https://a.example/confirm',
+        passwordResetUrl: 'https://a.example/reset',
+      }),
     );
 
     const changed = app.update({ emailConfirmationUrl: 'https://b.example/confirm' }, later);
@@ -114,6 +118,59 @@ describe('App changes', () => {
     const reset = app.update({ passwordResetUrl: 'https://b.example/reset' }, later);
     expect(reset.ok && reset.value.emailConfirmationUrl).toBe('https://a.example/confirm');
     expect(reset.ok && reset.value.passwordResetUrl).toBe('https://b.example/reset');
+  });
+
+  describe('email link URL origin binding', () => {
+    const urls = { emailConfirmationUrl: 'https://a.example/confirm', passwordResetUrl: 'https://a.example/reset' };
+
+    it('accepts URLs whose origin is an allowed origin, compared case-normalized and ignoring path and default port', () => {
+      const result = App.create(
+        props({
+          allowedOrigins: ['https://a.example', 'http://localhost:5173'],
+          emailConfirmationUrl: 'HTTPS://A.Example:443/confirm?x=1',
+          passwordResetUrl: 'http://localhost:5173/reset',
+        }),
+      );
+      expect(result.ok).toBe(true);
+    });
+
+    it.each([
+      ['email_confirmation_url', { emailConfirmationUrl: 'https://evil.example/confirm' }],
+      ['password_reset_url', { passwordResetUrl: 'https://evil.example/reset' }],
+      ['email_confirmation_url', { emailConfirmationUrl: 'https://a.example:8443/confirm' }],
+    ])('rejects a %s whose origin is not allowed', (field, override) => {
+      const result = App.create(props({ ...urls, ...override }));
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe('email_url_origin_not_allowed');
+        expect(result.error.message).toContain(field);
+      }
+    });
+
+    it('update rejects removing an origin that a stored URL uses', () => {
+      const app = App.restore(props({ ...urls, allowedOrigins: ['https://a.example', 'https://b.example'] }));
+      const result = app.update({ allowedOrigins: ['https://b.example'] }, later);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('email_url_origin_not_allowed');
+    });
+
+    it('update accepts changing origins and URLs together when they stay consistent', () => {
+      const app = App.restore(props(urls));
+      const result = app.update(
+        {
+          allowedOrigins: ['https://b.example'],
+          emailConfirmationUrl: 'https://b.example/confirm',
+          passwordResetUrl: 'https://b.example/reset',
+        },
+        later,
+      );
+      expect(result.ok).toBe(true);
+    });
+
+    it('does not apply to a legacy app that has no URLs yet', () => {
+      const result = App.restore(props({ allowedOrigins: [] })).update({ name: 'Renamed' }, later);
+      expect(result.ok).toBe(true);
+    });
   });
 
   it('update rejects a blank name', () => {

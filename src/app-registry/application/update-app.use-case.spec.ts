@@ -106,6 +106,65 @@ describe('UpdateAppUseCase / DeactivateAppUseCase', () => {
     expect(dev.ok).toBe(true);
   });
 
+  describe('email link URLs', () => {
+    beforeEach(async () => {
+      await update.execute({
+        clientId: 'abc',
+        emailConfirmationUrl: 'https://a.example/confirm',
+        passwordResetUrl: 'https://a.example/reset',
+        isProduction: false,
+      });
+    });
+
+    it('replaces them and keeps the other one when omitted', async () => {
+      const result = await update.execute({ clientId: 'abc', passwordResetUrl: 'https://a.example/reset2', isProduction: false });
+      expect(result.ok).toBe(true);
+      const stored = await apps.findByClientId('abc');
+      expect(stored?.passwordResetUrl).toBe('https://a.example/reset2');
+      expect(stored?.emailConfirmationUrl).toBe('https://a.example/confirm');
+    });
+
+    it.each([
+      ['blank', ' '],
+      ['empty', ''],
+      ['null', null as unknown as string],
+      ['relative', '/reset'],
+      ['a fragment', 'https://a.example/reset#token='],
+      ['plain http on a public host', 'http://a.example/reset'],
+    ])('rejects %s (a URL can be replaced, never cleared) and changes nothing', async (_label, value) => {
+      const result = await update.execute({ clientId: 'abc', passwordResetUrl: value, name: 'Changed', isProduction: false });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe('invalid_app_url');
+        expect(result.error.message).toContain('password_reset_url');
+      }
+      const stored = await apps.findByClientId('abc');
+      expect(stored?.passwordResetUrl).toBe('https://a.example/reset');
+      expect(stored?.name).toBe('Shop');
+    });
+
+    it('applies the production rule', async () => {
+      const result = await update.execute({
+        clientId: 'abc',
+        emailConfirmationUrl: 'http://localhost:5173/confirm',
+        isProduction: true,
+      });
+      expect(!result.ok && result.error.code).toBe('invalid_app_url');
+    });
+
+    it('rejects a URL outside the allowed origins and changes nothing', async () => {
+      const result = await update.execute({ clientId: 'abc', emailConfirmationUrl: 'https://evil.example/c', isProduction: false });
+      expect(!result.ok && result.error.code).toBe('email_url_origin_not_allowed');
+      expect((await apps.findByClientId('abc'))?.emailConfirmationUrl).toBe('https://a.example/confirm');
+    });
+
+    it('rejects removing the origin a stored URL uses and changes nothing', async () => {
+      const result = await update.execute({ clientId: 'abc', allowedOrigins: ['https://b.example'], isProduction: false });
+      expect(!result.ok && result.error.code).toBe('email_url_origin_not_allowed');
+      expect((await apps.findByClientId('abc'))?.allowedOrigins).toEqual(['https://a.example']);
+    });
+  });
+
   it('reports app_not_found for an unknown client_id', async () => {
     const result = await update.execute({ clientId: 'zzz', name: 'x', isProduction: false });
     expect(!result.ok && result.error.code).toBe('app_not_found');

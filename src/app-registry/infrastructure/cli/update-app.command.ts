@@ -26,6 +26,8 @@ export class UpdateAppCommand extends AppOptionsCommand {
       redirectUris: options.redirectUri,
       allowedOrigins: options.origin,
       emailFrom: options.emailFrom,
+      emailConfirmationUrl: options.emailConfirmationUrl,
+      passwordResetUrl: options.passwordResetUrl,
       isProduction: this.config.isProduction,
     });
     if (!result.ok) throw new CliError(result.error.message);

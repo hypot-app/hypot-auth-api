@@ -13,6 +13,8 @@ export interface SharedAppOptions {
   redirectUri?: string[];
   origin?: string[];
   emailFrom?: string;
+  emailConfirmationUrl?: string;
+  passwordResetUrl?: string;
 }
 
 /** Options shared by `app create` and `app update`; subclasses add their own. */
@@ -40,6 +42,22 @@ export abstract class AppOptionsCommand extends CommandRunner {
 
   @Option({ flags: '--email-from <address>', description: 'From address that overrides MAIL_FROM for this app' })
   parseEmailFrom(value: string): string {
+    return value;
+  }
+
+  @Option({
+    flags: '--email-confirmation-url <url>',
+    description: 'App URL that confirmation emails link to (required on create; on update replaces, cannot be cleared)',
+  })
+  parseEmailConfirmationUrl(value: string): string {
+    return value;
+  }
+
+  @Option({
+    flags: '--password-reset-url <url>',
+    description: 'App URL that password reset emails link to (required on create; on update replaces, cannot be cleared)',
+  })
+  parsePasswordResetUrl(value: string): string {
     return value;
   }
 }

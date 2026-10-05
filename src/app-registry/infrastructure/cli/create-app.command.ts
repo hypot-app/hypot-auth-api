@@ -33,12 +33,17 @@ export class CreateAppCommand extends AppOptionsCommand {
       throw new CliError(`--type must be "public" or "confidential", got "${clientType}"`);
     }
 
+    if (options.emailConfirmationUrl === undefined) throw new CliError('--email-confirmation-url is required');
+    if (options.passwordResetUrl === undefined) throw new CliError('--password-reset-url is required');
+
     const result = await this.registerApp.execute({
       name: options.name,
       clientType: clientType as ClientType,
       redirectUris: options.redirectUri ?? [],
       allowedOrigins: options.origin ?? [],
       emailFrom: options.emailFrom,
+      emailConfirmationUrl: options.emailConfirmationUrl,
+      passwordResetUrl: options.passwordResetUrl,
       isProduction: this.config.isProduction,
     });
     if (!result.ok) throw new CliError(result.error.message);
