@@ -15,6 +15,16 @@ services:
         condition: service_healthy
     restart: "no"
 
+  # One-shot: creates a dev-only signing key set in the signing_keys volume on first
+  # run and leaves it untouched afterwards. `docker compose down -v` discards it.
+  keygen:
+    image: hypot-api:dev
+    pull_policy: never
+    command: ["dist/token-lifecycle/infrastructure/generate-signing-keys.js", "/keys/signing-keys.json"]
+    volumes:
+      - signing_keys:/keys
+    restart: "no"
+
   api:
     build: .
     image: hypot-api:dev
@@ -30,8 +40,13 @@ services:
       SMTP_PORT: "1025"
       SMTP_SECURE: "false"
       MAIL_FROM: no-reply@hypot.local
+      AUTH_SIGNING_KEYS_FILE: /keys/signing-keys.json
+    volumes:
+      - signing_keys:/keys:ro
     depends_on:
       migrate:
+        condition: service_completed_successfully
+      keygen:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
@@ -62,3 +77,4 @@ services:
 
 volumes:
   postgres_data:
+  signing_keys:

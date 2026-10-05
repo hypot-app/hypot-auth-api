@@ -119,4 +119,23 @@ describe('loadConfig', () => {
     expect(message).toContain('SMTP_USER and SMTP_PASS');
     expect(message).not.toContain('mailer-secret-user');
   });
+
+  describe('signing keys (W2: owned by the token-lifecycle key store, not by config)', () => {
+    it('loads without any signing key variable, so the operator CLI never needs the key set', () => {
+      expect(() => loadConfig(validEnv)).not.toThrow();
+    });
+
+    it('does not retain the raw signing key secret', () => {
+      const config = loadConfig({ ...validEnv, AUTH_SIGNING_KEYS: 'PRIVATE-KEY-MARKER', AUTH_SIGNING_KEYS_FILE: 'x' });
+
+      expect(JSON.stringify(config)).not.toContain('PRIVATE-KEY-MARKER');
+      expect(Object.keys(config)).not.toContain('signingKeysJson');
+    });
+
+    it('never leaks the inline key set when the config is invalid', () => {
+      const act = () => loadConfig({ ...validEnv, AUTH_SIGNING_KEYS: 'PRIVATE-KEY-MARKER', PORT: 'abc' });
+      expect(act).toThrow('PORT');
+      expect(act).not.toThrow('PRIVATE-KEY-MARKER');
+    });
+  });
 });

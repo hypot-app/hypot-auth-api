@@ -96,6 +96,42 @@ backends, not browser SPAs. Enabling it would let any registered origin drive si
 (email bombing, enumeration timing). Revisit only with a product requirement for SPA-native signup, together
 with rate limiting.
 
+### Signing keys and JWKS
+
+Access tokens are RS256 JWTs signed with a key set that is supplied as a secret and never committed
+(ADR 32). The set is one JSON document: `{ "active": <private JWK>, "next": <private JWK>, "retired": [<JWK>] }`
+with a `kid` on every key. Provide it in exactly one of two ways:
+
+- `AUTH_SIGNING_KEYS_FILE`: path of a mounted file (preferred), or
+- `AUTH_SIGNING_KEYS`: the JSON itself.
+
+The service refuses to start when the set is invalid (bad JSON, missing or mismatched private key, duplicate
+`kid`, RSA key under 2048 bits) or when neither or both variables are set. The error names the problem, never
+the key. Only the API process reads these variables: the operator CLI (`npm run cli`) boots without them.
+
+`GET /.well-known/jwks.json` (root, no prefix) publishes the public half of `active`, `next` and the
+non-expired `retired` keys with `Cache-Control: public, max-age=300`. Private parameters are never published.
+
+**Dev keys only.** `npm run keys:generate` and the compose `keygen` service are for development: they write a
+throwaway set (the compose one lives in the `signing_keys` volume; `docker compose down -v` discards it, and
+the generated file is gitignored). Without Docker run `npm run keys:generate`, which leaves an existing file
+untouched, then add `AUTH_SIGNING_KEYS_FILE=.keys/signing-keys.json` to your `.env`. **Production keys come
+from a secret manager** that mounts the JSON at the same kind of path and is pointed to by
+`AUTH_SIGNING_KEYS_FILE`; never run the generator against production.
+
+Rotation is a config change and needs a restart of every instance:
+
+1. Add the new key as `next` and deploy. The timer starts only when ALL instances serve `next`.
+2. Wait at least 15 minutes (1 hour recommended). Consumers cache the JWKS: the endpoint says 5 minutes, but
+   jose's remote JWKS cache defaults to 10 minutes and ignores `Cache-Control`; proxies add more.
+3. Promote: move `next` to `active` and the old `active` to `retired`, adding `"retiredAt": "<ISO timestamp>"`
+   to the retired entry.
+4. The retired key is published until `retiredAt` plus the retention window of 1 hour + 5 s clock tolerance +
+   10 minutes jose cache (4205 s). At the next boot after that it is dropped and a warning names its `kid`;
+   remove the entry from the secret. A retired key without `retiredAt` never expires and logs a boot warning.
+
+Emergency rotation also revokes all refresh tokens.
+
 ## Run locally without Docker
 
 Requires Node 24 (see `.nvmrc`).
@@ -104,6 +140,7 @@ Requires Node 24 (see `.nvmrc`).
 cp .env.example .env               # use localhost hosts: DATABASE_URL @localhost:5432, SMTP_HOST=localhost
 docker compose up -d postgres mailpit
 npm ci
+npm run keys:generate        # dev-only signing keys, then set AUTH_SIGNING_KEYS_FILE in .env (see Signing keys)
 npm run migration:run              # builds, then applies pending migrations
 npm run start:dev                  # recompiles and restarts on changes
 ```
@@ -119,5 +156,6 @@ required variable is missing or invalid (see `.env.example`).
 
 - `GET /` welcome message
 - `GET /health` liveness plus database ping (200, or 503 when the database is down)
+- `GET /.well-known/jwks.json` public signing keys (see Signing keys and JWKS)
 - `POST /api/v1/accounts/signup`, `GET /api/v1/accounts/confirm`, `POST /api/v1/accounts/resend-confirmation`
 - Business routes are served under `/api/v1`; `/`, `/health` and `/.well-known/jwks.json` stay at the root.
