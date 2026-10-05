@@ -53,10 +53,10 @@ The units run sequentially because there is a single writer. Sub-PRs (for exampl
 3. **RESOLVED (round 3).** Duplicate-signup notice email confirmed: identical HTTP response, plus an `account-exists` notice to the existing owner suggesting login or password reset, links from `AUTH_PUBLIC_BASE_URL`. Template added in U4 (task 4.5); spec and design updated.
 4. Generic errors: spec requires generic and equivalent status/body. Design adds an OAuth `invalid_grant` 400 and `/api/v1/me` 401, and is silent on confidential-client auth failure (spec: "rejected"). Proposed: `invalid_client` 401 for it.
 5. **RESOLVED (round 3).** No per-app link base. Links use the global `AUTH_PUBLIC_BASE_URL`; templates stay as files per `client_id`, and `apps.email_from` may override the from address. The transactional-email spec is amended.
-6. Design ADR 11 adds a 72-byte password maximum that specs omit (min 8 only). Proposed: add a spec scenario in U5.
+6. **RESOLVED (U5a).** Design ADR 11 adds a 72-byte password maximum that specs omitted (min 8 only). The user-accounts spec now has a scenario for it, plus one for a NUL character (bcrypt stops reading at one).
 7. Design pre-publishes a `next` key in JWKS; spec says only current and previous. Compatible; add a JWKS scenario in U6.
 
-Status: conflicts 1, 3, and 5 resolved. Conflicts 2, 4, 6, 7 have proposed handling inside the units and need no decision.
+Status: conflicts 1, 3, 5, and 6 resolved. Conflicts 2, 4, 7 have proposed handling inside the units and need no decision.
 
 ## Closed questions (round 3)
 
@@ -128,9 +128,9 @@ Branch `feat/u1b-docker` was branched from 047fff7, which is also the tip of `de
 
 ## U5 user-accounts
 
-- [ ] 5.1 RED: `UserSchema` and `OneTimeTokenSchema` plus migrations `CreateUsers` (`CREATE EXTENSION IF NOT EXISTS citext`, UNIQUE(app_id,email)) and `CreateOneTimeTokens`, each with `down()`; test for the same email across apps; reversibility test
-- [ ] 5.2 GREEN: domain `User` and `OneTimeToken`, mappers with round-trip tests, TypeORM repositories implementing `UserRepository` and `OneTimeTokenRepository`
-- [ ] 5.3 RED/GREEN: `PasswordHasher` bcrypt 12 (min 8 chars, max 72 bytes), dummy compare for timing
+- [x] 5.1 RED: `UserSchema` and `OneTimeTokenSchema` plus migrations `CreateUsers` (`CREATE EXTENSION IF NOT EXISTS citext`, UNIQUE(app_id,email)) and `CreateOneTimeTokens`, each with `down()`; test for the same email across apps; reversibility test
+- [x] 5.2 GREEN: domain `User` and `OneTimeToken`, mappers with round-trip tests, TypeORM repositories implementing `UserRepository` and `OneTimeTokenRepository`
+- [x] 5.3 RED/GREEN: `PasswordHasher` bcrypt 12 (min 8 chars, max 72 bytes), dummy compare for timing (U5a: hasher port with `hash` and `verify`, password policy, email normalization. No dummy compare here: signup hashes the submitted password on both of its paths (5.4), and the login dummy compare belongs to U7)
 - [ ] 5.4 RED/GREEN: `POST /api/v1/accounts/signup`; duplicate gives identical response plus the `account-exists` notice email to the existing owner; invalid input validation
 - [ ] 5.5 RED/GREEN: `GET /api/v1/accounts/confirm` (24h, single-use) plus welcome email; generic invalid-or-expired
 - [ ] 5.6 RED/GREEN: `POST /api/v1/accounts/resend-confirmation` invalidates old tokens, identical response. Commit: `feat(accounts): add signup and confirmation`

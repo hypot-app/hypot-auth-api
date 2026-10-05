@@ -48,6 +48,18 @@ The system MUST expose `POST /api/v1/accounts/signup`, `GET /api/v1/accounts/con
 - WHEN the user registers
 - THEN the service returns a validation error that does not reveal account existence
 
+#### Scenario: Password longer than 72 bytes
+- GIVEN a password whose UTF-8 encoding is longer than 72 bytes (bcrypt ignores everything past byte 72)
+- WHEN the user registers
+- THEN the service returns a validation error stating the 72-byte maximum
+- AND no account is created
+- AND the length is counted in bytes, so 36 two-byte characters pass and 37 do not
+
+#### Scenario: Password with a NUL character
+- GIVEN a password containing a NUL character (bcrypt stops reading at one)
+- WHEN the user registers
+- THEN the service returns a validation error and no account is created
+
 ### Requirement: Email confirmation
 
 The system MUST confirm an account via a single-use link token valid for 24 hours. Tokens MUST be generated with a cryptographically secure RNG (at least 32 bytes) and stored only as a hash. Resending MUST be supported and MUST invalidate previous unused confirmation tokens.
