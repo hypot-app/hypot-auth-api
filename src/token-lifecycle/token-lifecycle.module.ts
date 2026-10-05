@@ -1,17 +1,19 @@
 import { Module } from '@nestjs/common';
-import { APP_CONFIG, type AppConfig } from '../platform/config/app-config';
 import { KEY_STORE } from './domain/key-store';
 import { JwksController } from './http/jwks.controller';
 import { JwkSetKeyStore } from './infrastructure/jwk-set-key-store';
+import { SIGNING_KEYS_SOURCE, signingKeysFromEnv, type SigningKeysSource } from './infrastructure/signing-keys-source';
 
 @Module({
   controllers: [JwksController],
   providers: [
+    // Only this module reads the signing key variables; the CLI never loads it (W2).
+    { provide: SIGNING_KEYS_SOURCE, useValue: (() => signingKeysFromEnv(process.env)) satisfies SigningKeysSource },
     {
       provide: KEY_STORE,
-      inject: [APP_CONFIG],
+      inject: [SIGNING_KEYS_SOURCE],
       // Parsed once at boot: an unusable key set stops the app before it listens.
-      useFactory: (config: AppConfig) => JwkSetKeyStore.fromJson(config.signingKeysJson),
+      useFactory: (source: SigningKeysSource) => JwkSetKeyStore.fromJson(source()),
     },
   ],
   exports: [KEY_STORE],

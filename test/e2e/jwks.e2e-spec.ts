@@ -14,7 +14,7 @@ describe('GET /.well-known/jwks.json (e2e)', () => {
 
   beforeAll(async () => {
     db = await startTestDatabase();
-    app = await createTestApp({ databaseUrl: db.url, config: { signingKeysJson: JSON.stringify(keySet) } });
+    app = await createTestApp({ databaseUrl: db.url, signingKeysJson: JSON.stringify(keySet) });
   }, 180_000);
 
   afterAll(async () => {
