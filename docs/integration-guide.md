@@ -4,7 +4,7 @@ hypot Auth is an API-only authentication service. Your app builds its own login,
 
 > **Status: draft contract, built in parallel with the implementation.**
 > Only part of the API exists today. Check the status of every endpoint before you build against it.
-> The exact paths, bodies and error codes live in [`api-contract.md`](./api-contract.md). The authoritative OpenAPI will be generated from code in U19.
+> The exact paths, bodies and error codes live in [`api-contract.md`](./api-contract.md), which has no open questions. The authoritative OpenAPI will be generated from code in U19.
 
 ## Endpoint status
 
@@ -31,7 +31,7 @@ Two things work differently today and will change:
 
 ## Quick path
 
-1. Ask the operator to register your app (see [Onboarding](#onboarding)). You receive a `client_id` and a JWKS URL.
+1. Ask the operator to register your app (see [Onboarding](#onboarding)). You receive a `client_id`, the issuer string and the JWKS URL.
 2. Build five screens: signup, confirm, login, forgot password and reset password.
 3. Call Auth from the browser. Keep the access token in memory and serialize refreshes.
 4. In your backend, verify access tokens offline against the JWKS (see [Validating access tokens](#validating-access-tokens-in-your-backend)).
@@ -47,6 +47,7 @@ Two things work differently today and will change:
 | No SSO | A session in app A means nothing to app B. A token for A is rejected by B because `aud` differs. |
 | Tokens | Login returns a 1-hour access token (RS256 JWT) and an opaque refresh token. Both arrive in the JSON body. |
 | Sessions | One login is one session. Refresh tokens rotate on every use. A session lasts at most 30 days. |
+| Profiles | Auth stores identity and credentials only (id, email, verified flag, creation time). Your app owns names, avatars and every other profile field, linked to the account by `id` (the `sub` claim). |
 
 ```mermaid
 sequenceDiagram
@@ -74,12 +75,12 @@ Apps are registered by an operator through the CLI. There is no HTTP endpoint fo
 | `password_reset_url` | Your reset screen, for example `https://app.example/reset`. REQUIRED. |
 | Optional | Email template content and a custom from address. |
 
-Rules for the two URLs: absolute, `https` (or `http` for localhost outside production), no userinfo, **no fragment** (Auth appends `#token=...`). Auth takes them only from the app record, never from a request. Without both URLs your app cannot use signup, resend or password reset.
+Rules for the two URLs: absolute, `https` (or `http` for localhost outside production), no userinfo, **no fragment** (Auth appends `#token=...`). The **origin of each URL must be one of your allowed origins**: registration and updates are rejected otherwise, because your confirm and reset screens must be able to call Auth from that page. Auth takes the URLs only from the app record, never from a request. Without both URLs your app cannot use signup, resend or password reset.
 
 You receive:
 
 - `client_id`: public, format `app_` plus 32 lowercase hex characters. It is not a secret.
-- The issuer string and the JWKS URL (`<issuer>/.well-known/jwks.json`) for your backend configuration.
+- The issuer string and the JWKS URL for your backend configuration. The issuer is the operator's `AUTH_PUBLIC_BASE_URL` with no trailing slash (for example `https://auth.example`), it is the exact value of the `iss` claim, and the JWKS URL is `<issuer>/.well-known/jwks.json`.
 
 ### Origin binding
 
@@ -94,8 +95,8 @@ A browser request carries an `Origin` header. Auth allows it only when that orig
 Consequences:
 
 - Add every origin you use, including staging and local development. Changes take up to 30 seconds to apply.
-- The origin of your `email_confirmation_url` and `password_reset_url` must be in your allowed origins, or your confirm and reset screens cannot call Auth from the browser. Auth does not cross-check this at registration, so verify it with the operator.
-- A mismatch returns no CORS headers and an error body. See [Errors and limits](#errors-and-limits).
+- A mismatch returns no CORS headers and the endpoint's generic error. See [Errors and limits](#errors-and-limits).
+- Preflight requests are answered with `Access-Control-Allow-Methods: GET, POST, OPTIONS`, `Access-Control-Allow-Headers: Content-Type, Authorization`, `Access-Control-Max-Age: 600` and `Vary: Origin`. The header list is fixed, so send only `Content-Type` and `Authorization`; any other custom header makes the browser block the call.
 - Requests without `Origin` (native apps, servers) skip the binding. Rate limits still apply.
 - Auth never sends `Access-Control-Allow-Credentials` and never sets cookies. Do not use `credentials: 'include'`.
 
@@ -152,15 +153,16 @@ POST /api/v1/accounts/confirm
 { "token": "<token>" }
 ```
 
-On success the account is confirmed and a welcome email is sent. No tokens are issued: send the user to your login screen.
+On success Auth answers `200 { "message": "Your email address has been confirmed." }`, the account is confirmed and a welcome email is sent. No tokens are issued: send the user to your login screen.
 
 | Case | Response | What to show |
 |------|----------|--------------|
-| Invalid input (bad email, short or too long password, NUL) | `400` with a validation code | Field errors |
+| Malformed body (missing or non-string field) | `400 invalid_request` | A bug in your code |
+| Invalid input (bad email, short or too long password, NUL) | `400 invalid_email` or `400 invalid_password` | Field errors |
 | Unknown or inactive `client_id`, or origin not bound to the app | `400 invalid_client` | A configuration error. This is a bug in your setup, not a user problem. |
 | App has no email URLs configured | `400 unconfigured_client` | Contact the operator |
 | Confirm: invalid, used, expired or unknown token | `400 invalid_or_expired_link` | "This link is invalid or expired", with a resend form |
-| IP rate limit (planned) | `429` with `Retry-After` | Retry later |
+| IP rate limit, on signup or confirm (planned) | `429 rate_limited` with `Retry-After` | Retry later |
 
 ### Resend confirmation
 
@@ -198,7 +200,7 @@ POST /api/v1/auth/login
 
 | Case | Response |
 |------|----------|
-| Malformed body (missing field or non-string) | `400` validation error |
+| Malformed body (missing field or non-string) | `400 invalid_request` |
 | Wrong password, unknown email, unconfirmed or locked account, blocked IP, IP rate limit, unknown or inactive `client_id`, origin not bound | `401 invalid_credentials`. One identical response for all of them. |
 | Limiter store down | `503 temporarily_unavailable` |
 
@@ -223,9 +225,24 @@ Every refresh returns a **new** refresh token and marks the old one used. Replac
 | Case | Response |
 |------|----------|
 | Unknown, expired, wrong-app, used or revoked token | `401 invalid_grant`, identical for all |
-| Used or revoked token | Same `401`, and the whole session is revoked |
+| `Origin` not bound to your `client_id` | The same `401 invalid_grant`, so a response never tells whether a token is valid. If every refresh fails like this, check your allowed origins. |
+| Used or revoked token | Same `401`, and the whole session is revoked (except the grace case below) |
+| Malformed body | `400 invalid_request` |
+| Unknown or inactive `client_id` | `400 invalid_client`. A setup bug. |
+| IP rate limit | `429 rate_limited` with `Retry-After`. **Not** `invalid_grant`: keep the user logged in and retry after the delay. |
 
 On `invalid_grant`, clear your tokens and send the user to login. Lifetimes: a session lasts 30 days from login and rotation does not extend it. A refresh token also expires after 7 days without use. Both values are assumptions that may be configurable, so read `expires_in` and treat any `invalid_grant` as "log in again".
+
+#### Reuse grace window
+
+If a refresh response is lost (the network dropped after Auth processed it), you still hold the old token. Auth forgives one retry of it:
+
+| Retry of the old token | Result |
+|------------------------|--------|
+| About 10 s or less after the rotation, from the same network (same IP, IPv6 /64), first retry | `200` with a fresh pair. The session survives. |
+| Later than the window, from another IP, or a second retry | `401 invalid_grant` and the session is revoked |
+
+The window is a configurable server setting (default 10 s): do not hard-code it. It is meant for lost responses, not for racing tabs, so keep serializing refreshes (see [Serialize refreshes](#serialize-refreshes)).
 
 ### Logout
 
@@ -236,7 +253,7 @@ POST /api/v1/auth/logout
 { "client_id": "app_0123456789abcdef0123456789abcdef", "refresh_token": "Zk3..." }
 ```
 
-`204 No Content` for an active, used, expired, unknown or other-app token alike. It revokes the whole session. Always clear your local tokens, even when the call fails. The access token stays valid until its `exp` (at most 1 hour): there is no denylist.
+`204 No Content` for an active, used, expired, unknown or other-app token alike. It revokes the whole session, but only when the token belongs to your `client_id` and the request comes from an allowed origin of your app: from any other origin it still answers `204` and does nothing. A malformed body is `400 invalid_request`. Always clear your local tokens, even when the call fails. The access token stays valid until its `exp` (at most 1 hour): there is no denylist.
 
 ### Get the profile (`GET /me`)
 
@@ -247,7 +264,14 @@ GET /api/v1/me
 Authorization: Bearer eyJ...
 ```
 
-Returns the profile of the token's account: `sub`, email and confirmation state. The exact field names are not final (see the open questions in the contract). A missing, expired or invalid token, or one whose `aud` is not an active app, returns `401` with one generic error.
+```http
+200 OK
+{ "id": "7f0c...", "email": "ana@example.com", "email_verified": true, "created_at": "2026-10-05T15:04:05.000Z" }
+```
+
+Exactly four keys. `id` is the account id and equals the token's `sub`. A missing, expired or invalid token, or one whose `aud` is not an active app, returns `401 { "error": "invalid_token", ... }` with `WWW-Authenticate: Bearer`, one identical response for every cause. `/me` has no rate limit.
+
+**Profiles are yours.** Auth stores identity and credentials only: there is no name, avatar or other profile data. Keep your own profile table and link each row to the account by `id` (the `sub` claim). Create it on first login or when you confirm the account.
 
 Your own backend does not need `/me` to authenticate users: validate the JWT locally instead.
 
@@ -262,7 +286,7 @@ sequenceDiagram
     participant M as User mailbox
     F->>A: POST /password/forgot {client_id, email}
     A-->>F: 202 generic body
-    A->>M: email with link your-reset-url#token=... (confirmed accounts only)
+    A->>M: reset link your-reset-url#token=... (confirmed account) or confirmation link (unconfirmed)
     M->>F: user opens the link
     F->>F: read token from location.hash, then clear it
     F->>A: POST /password/reset {token, new_password}
@@ -274,7 +298,15 @@ POST /api/v1/password/forgot
 { "client_id": "app_0123456789abcdef0123456789abcdef", "email": "ana@example.com" }
 ```
 
-Always `202` with the same body, whether the account exists, is unconfirmed or belongs to another app. An email is sent only for a confirmed account in your app. Tell the user "If the address is registered, you will receive an email".
+Always `202 { "message": "If an account exists for this address, an email is on its way." }`, the same fixed body whether the account exists, is unconfirmed or belongs to another app. What is sent depends on the account, and you cannot tell which from the response:
+
+| Account in your app | Email |
+|---------------------|-------|
+| Confirmed | A reset email (link to your `password_reset_url`) |
+| Unconfirmed | A **confirmation** email (link to your `email_confirmation_url`) instead of a reset, because a reset could not log the user in. Your confirm screen handles it as usual. |
+| Unknown, or only in another app | Nothing |
+
+Every email sent counts toward the per-account cap (see below). Tell the user "If the address is registered, you will receive an email". Your confirm screen must therefore also work when the user came from "forgot password".
 
 The reset link is `<password_reset_url>#token=<token>`, valid 1 hour, single use. A newer forgot request invalidates earlier links. Read and clear the token exactly as on the confirm screen, then:
 
@@ -288,7 +320,7 @@ POST /api/v1/password/reset
 | Case | Response |
 |------|----------|
 | Invalid, used, expired or superseded token | `400 invalid_or_expired_link` |
-| Weak or invalid new password | `400` validation error. The token stays usable, so let the user retry. |
+| Weak or invalid new password | `400 invalid_password`. The token stays usable, so let the user retry. |
 | IP rate limit | `429` with `Retry-After` |
 
 ### Change password
@@ -301,7 +333,15 @@ Authorization: Bearer eyJ...
 { "current_password": "correct horse", "new_password": "a new long passphrase" }
 ```
 
-`204 No Content`. **All sessions are revoked, including the caller's own.** Drop your tokens and send the user to login with the new password. The current access token stays valid until `exp`. A wrong current password gives the generic invalid-credentials error and counts as a failed login for lockout.
+`204 No Content`. **All sessions are revoked, including the caller's own.** Drop your tokens and send the user to login with the new password. The current access token stays valid until `exp`.
+
+| Case | Response | What to show |
+|------|----------|--------------|
+| Missing, expired or invalid access token | `401 invalid_token` | Refresh once, then log in again |
+| Wrong current password | `400 { "error": "invalid_current_password", ... }` | "Current password is incorrect" on that field |
+| Weak new password | `400 invalid_password` | Field error |
+
+A wrong current password is deliberately a `400`, not a `401`: a `401` would look like an expired token and send a client that refreshes on `401` into a loop. It still counts as a failed login for lockout, so after repeated failures even the correct current password gets the same `400` for a while (see [Lockout](#lockout-what-users-experience)). Do not refresh or log the user out on `invalid_current_password`.
 
 ## Token handling
 
@@ -327,7 +367,7 @@ Rotation limits the damage: if a stolen token and the real client both use it, o
 
 **Rule: at most one refresh in flight per user, across all tabs.**
 
-Auth has no grace window. Presenting a refresh token that was already used is treated as theft: it fails with `invalid_grant` and **revokes the whole session**, including the newly issued token. Two tabs (or two parallel requests) that refresh at the same time send the same token. One wins, the other triggers reuse detection, and the user is logged out.
+Presenting a refresh token that was already used is treated as theft: it fails with `invalid_grant` and **revokes the whole session**, including the newly issued token. The only exception is the short [grace window](#reuse-grace-window) for lost responses (about 10 s, same IP, once per token). It does not make parallel refreshes safe: two tabs (or two parallel requests) that refresh at the same time send the same token. One wins; the other takes the grace path, which revokes the winner's new token, so the winner's next refresh ends the session. Serialize.
 
 ```js
 let inFlight = null;
@@ -358,12 +398,17 @@ export function refreshTokens() {
 
 If tabs do not share storage (memory-only tokens), each tab owns its own session and there is nothing to coordinate.
 
-Known edge case: if the network drops after Auth processed a refresh but before you receive the response, you still hold the old token. Retrying it counts as reuse and ends the session. Do not auto-retry a refresh that failed without an HTTP response. Treat it as "log in again" or confirm the session first with a fresh `/me` call using your current access token.
+**Lost response.** If the network drops after Auth processed a refresh but before you receive the response, you still hold the old token. You MAY retry the refresh **once** with the same token, as soon as the network is back. The retry succeeds only if it happens within the grace window (about 10 s after the rotation) and from the same network (same IP). Rules for the retry:
+
+- Retry at most once per token, only when the first attempt ended without an HTTP response (network error or timeout). Never retry after a `401`, and never retry in a loop.
+- If the retry also fails (`invalid_grant`, or a network error that outlasts the window), treat it as "log in again". A late retry from another network or after the window revokes the session.
+- A `429` is not a lost response: wait for `Retry-After`, then retry the same token.
+- After a successful retry, replace the stored refresh token with the new one, exactly as after a normal refresh.
 
 ### Sessions end when
 
 - The user logs out.
-- A refresh token is reused (see above).
+- A refresh token is reused outside the grace rules (see above).
 - The user resets or changes the password: **all** sessions of the account end.
 - An operator revokes all sessions after a key compromise.
 - The session reaches 30 days, or a refresh token sits unused for 7 days.
@@ -374,10 +419,10 @@ Access tokens are RS256 JWTs. Validate them locally. You do not need to call Aut
 
 | Rule | Why |
 |------|-----|
-| Fetch the JWKS from **one fixed, configured URL** (`<issuer>/.well-known/jwks.json`). | Never use `jku`, `x5u` or `jwk` headers from the token: an attacker controls them. |
+| Fetch the JWKS from **one fixed, configured URL** (`<issuer>/.well-known/jwks.json`, for example `https://auth.example/.well-known/jwks.json`). | Never use `jku`, `x5u` or `jwk` headers from the token: an attacker controls them. |
 | Accept only `RS256`. | Blocks `none` and HS256 key-confusion attacks. |
 | Require `typ: at+jwt`. | Distinguishes access tokens from other JWTs. |
-| Check `iss` equals the configured issuer. | The issuer is exact, copy it from your onboarding message. |
+| Check `iss` equals the configured issuer. | The issuer is exactly Auth's `AUTH_PUBLIC_BASE_URL`, with no trailing slash. Copy it from your onboarding message. |
 | Check `aud` equals **your own** `client_id`. | Tokens from other apps are valid JWTs but are not for you. |
 | Check `exp` (allow a few seconds of clock tolerance). | Auth itself uses 5 seconds. |
 | Pick the key by `kid`. | Several keys are published during rotation. |
@@ -419,18 +464,19 @@ Error bodies have the shape `{ "error": "<code>", "message": "<text>" }`. Branch
 
 | Status | Code | Where | Meaning |
 |--------|------|-------|---------|
-| 400 | `invalid_request` | Body endpoints | Missing or non-string fields |
-| 400 | `invalid_email`, `invalid_password` | Signup, reset, change | Validation failure. Safe to show to the user. |
-| 400 | `invalid_client` | All body endpoints except login | Unknown or inactive `client_id`, or origin not bound to it. This is a setup bug. |
+| 400 | `invalid_request` | Every body endpoint | Missing or non-string fields. A bug in your code. |
+| 400 | `invalid_email`, `invalid_password` | Signup (both), reset and change (`invalid_password`) | Validation failure. Safe to show to the user. |
+| 400 | `invalid_client` | Signup, resend, forgot, refresh | Unknown or inactive `client_id`, or (not refresh) origin not bound to it. This is a setup bug. |
 | 400 | `unconfigured_client` | Signup, resend, forgot | The app has no email URLs. |
-| 400 | `invalid_or_expired_link` | Confirm, reset | Unknown, used, expired or superseded token |
-| 401 | `invalid_credentials` | Login (and change password) | The generic login error |
-| 401 | `invalid_grant` | Refresh | The session is gone. Log in again. |
-| 401 | generic | `/me`, change | Missing, expired or bad access token |
-| 429 | `rate_limited` | Signup, resend, forgot, reset | IP limit. Has `Retry-After`. |
+| 400 | `invalid_or_expired_link` | Confirm, reset | Unknown, used, expired or superseded token, or a wrong origin |
+| 400 | `invalid_current_password` | Change | Wrong current password (also while locked out). Not a session problem. |
+| 401 | `invalid_credentials` | Login | The generic login error |
+| 401 | `invalid_grant` | Refresh | The session is gone, or the origin is not bound. Log in again. |
+| 401 | `invalid_token` | `/me`, change | Missing, expired or bad access token. Has `WWW-Authenticate: Bearer`. |
+| 429 | `rate_limited` | Signup, resend, forgot, reset, confirm, refresh | IP limit. Has `Retry-After` (integer seconds). Never on login. |
 | 503 | `temporarily_unavailable` | Credential endpoints | The limiter store is down. Retry later. |
 
-Codes other than the ones in the first column group are defined in the design, not in the specs, and may still be adjusted before U19.
+These codes are final for the contract. The authoritative list will be generated in the OpenAPI document (U19).
 
 ### The generic login error
 
@@ -443,19 +489,20 @@ Login returns the same `401` for an unknown email, a wrong password, an unconfir
 | 5 failures in 15 minutes from one IP for one account | configurable | That IP is blocked from that account for 15 minutes |
 | 50 failures in 1 hour from any IP for one account | configurable | The account is locked for 15 minutes |
 
-While blocked or locked, even the correct password fails with the same generic `401`. A user may therefore see "incorrect password" with the right password. Suggest "Forgot password" after a few failures.
+While blocked or locked, even the correct password fails with the same generic `401`. A user may therefore see "incorrect password" with the right password. Suggest "Forgot password" after a few failures. The same two counters cover change password: wrong attempts there count too, and while blocked the correct current password gets the same `400 invalid_current_password`.
 
 ### Rate limits and `429`
 
 - **Login never returns `429`.** Limited logins return the generic `401`.
-- Signup, resend, forgot and reset return `429` with a `Retry-After` header (seconds) when the **caller's IP** exceeds its limit. The decision depends only on the IP and the endpoint, never on the account.
-- Handle `429` by disabling the submit button until `Retry-After` expires and showing a neutral message.
+- Signup, resend, forgot, reset, confirm and refresh return `429 rate_limited` with a `Retry-After` header (an integer number of seconds) when the **caller's IP** exceeds its limit. The decision depends only on the IP and the endpoint, never on the account or the token.
+- Handle `429` by disabling the submit button until `Retry-After` expires and showing a neutral message. On refresh, a `429` is not a dead session: keep the tokens and retry the same refresh token after the delay.
 - Users behind a shared NAT can hit these limits together.
-- Refresh, logout, confirm, `/me` and change have no IP limit in the current specs (change counts wrong passwords for lockout).
+- Logout and `/me` have no IP limit. Change has no IP limit either: it counts wrong passwords for lockout.
+- The numeric limits are configurable server defaults (login 100 per 15 min per IP, refresh 60 per 15 min per IP, confirm and reset 20 per hour per IP, signup, resend and forgot 20 per hour per IP). Do not hard-code them: react to `429` and `Retry-After`.
 
 ### The silent per-account email cap
 
-Signup, resend and forgot send at most 3 emails per account per hour (default). Above that, Auth still answers the normal `202` and sends **nothing**. There is no error to detect. Your UI should say "If you do not receive an email, check your spam folder and try again later".
+Signup, resend and forgot send at most 3 emails per account per hour (default), counted together: a confirmation email sent because an unconfirmed user used "forgot password" counts like any other. Above that, Auth still answers the normal `202` and sends **nothing**. There is no error to detect. Your UI should say "If you do not receive an email, check your spam folder and try again later".
 
 ### `503`
 
@@ -469,15 +516,17 @@ If the limiter store is unavailable, credential endpoints fail closed with `503`
 - [ ] Load no third-party scripts on the confirm and reset screens before you have read the token and cleared it.
 - [ ] Read `#token`, then immediately run `history.replaceState` to remove it from the URL.
 - [ ] Keep the access token in memory. Pick the refresh token storage deliberately (see the table above).
-- [ ] Serialize refreshes with a shared promise and `navigator.locks`.
+- [ ] Serialize refreshes with a shared promise and `navigator.locks`. Retry a refresh at most once, and only after a lost response.
+- [ ] Never log out on `429` or on `invalid_current_password`.
+- [ ] Keep your own profile data keyed by the account `id` (`sub`). Auth stores none.
 - [ ] Do not use `credentials: 'include'`. Auth sets no cookies.
 - [ ] On `invalid_grant` or after logout, clear all tokens and caches of user data.
 - [ ] Backend: JWKS from a fixed URL, `RS256` only, `typ`, `iss`, `aud` equal to your `client_id`, `exp`.
 - [ ] Backend: never trust `jku`, `x5u` or an embedded `jwk`.
 - [ ] Backend: do not use `sub` from an unverified token and do not put a token in a URL query string.
 - [ ] Show the same neutral messages as Auth does. Do not add UI that reveals whether an email exists.
-- [ ] Register every origin you use (including staging) and confirm the origins of your email URLs are included.
+- [ ] Register every origin you use (including staging). The origins of your email URLs must be among them (Auth enforces this at registration).
 
 ## Next step
 
-Read [`api-contract.md`](./api-contract.md) for the per-endpoint contract and the list of open questions. Report any difference between this guide and the running service: it is a bug in one of them.
+Read [`api-contract.md`](./api-contract.md) for the per-endpoint contract. Report any difference between this guide and the running service: it is a bug in one of them.
