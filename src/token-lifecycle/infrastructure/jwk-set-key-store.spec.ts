@@ -116,6 +116,7 @@ describe('JwkSetKeyStore', () => {
   describe('rejects an invalid configuration without echoing key material', () => {
     const publicOnly = { kty: 'RSA', n: set.active.n, e: set.active.e, kid: set.active.kid };
     const weak = generateKeyPairSync('rsa', { modulusLength: 1024 }).privateKey.export({ format: 'jwk' });
+    const retiredPublic = { ...publicOnly, kid: 'retired-pub', retiredAt: new Date().toISOString() };
     const { d, p, q, dp, dq, qi } = retiredSet.active;
     const mismatchedPrivate = { d, p, q, dp, dq, qi };
     const cases: [string, unknown, string][] = [
@@ -128,6 +129,23 @@ describe('JwkSetKeyStore', () => {
       ['a duplicate kid', { active: set.active, next: set.active }, 'duplicate'],
       ['a private key that does not match the public key', { active: { ...set.active, ...mismatchedPrivate } }, 'valid RSA'],
       ['a key shorter than 2048 bits', { active: { ...weak, kid: 'short-key' } }, '2048'],
+      [
+        'a next key that does not match its public key',
+        { active: set.active, next: { ...set.next, ...mismatchedPrivate } },
+        'next key is not a valid RSA private key',
+      ],
+      ['a next key without private parameters', { active: set.active, next: { ...publicOnly, kid: 'next-pub' } }, 'next key'],
+      ['a next key shorter than 2048 bits', { active: set.active, next: { ...weak, kid: 'short-next' } }, 'next key must be'],
+      [
+        'a retired key that is not RSA',
+        { active: set.active, retired: [{ ...retiredPublic, kty: 'EC' }] },
+        'retired.0.kty',
+      ],
+      [
+        'a retired key shorter than 2048 bits',
+        { active: set.active, retired: [{ ...weak, kid: 'short-retired', retiredAt: new Date().toISOString() }] },
+        'retired key must be',
+      ],
     ];
 
     it.each(cases)('%s', (_label, value, needle) => {
