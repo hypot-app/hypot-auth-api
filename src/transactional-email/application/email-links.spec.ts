@@ -1,4 +1,5 @@
 import { App } from '../../app-registry/domain/app';
+import { AppUrl } from '../../app-registry/domain/app-url';
 import { accountExistsLink, confirmationLink, passwordResetLink, UnconfiguredLink } from './email-links';
 
 const appWith = (urls: { confirm: string | null; reset: string | null }): App =>
@@ -32,6 +33,18 @@ describe('email links', () => {
   it('keeps an existing query string and puts the token after it, in the fragment', () => {
     const withQuery = appWith({ confirm: 'https://a.example/confirm?lang=en', reset: null });
     expect(confirmationLink(withQuery, 'tok_123')).toBe('https://a.example/confirm?lang=en#token=tok_123');
+  });
+
+  it('links correctly from a normalized bare-origin URL', () => {
+    const normalized = (raw: string): string => {
+      const result = AppUrl.create(raw, { isProduction: false });
+      if (!result.ok) throw new Error('expected a valid URL');
+      return result.value.value;
+    };
+    const bare = appWith({ confirm: normalized('HTTPS://A.Example'), reset: normalized('https://bücher.example') });
+    expect(confirmationLink(bare, 'tok_123')).toBe('https://a.example/#token=tok_123');
+    expect(passwordResetLink(bare, 'tok_123')).toBe('https://xn--bcher-kva.example/#token=tok_123');
+    expect(accountExistsLink(bare)).toBe('https://xn--bcher-kva.example/');
   });
 
   it('percent-encodes the token so it cannot add fragment parameters', () => {
