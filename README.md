@@ -23,6 +23,14 @@ With `NODE_ENV=production` the service refuses to start unless `AUTH_PUBLIC_BASE
 (case-sensitive scheme). The image sets `NODE_ENV=production`, so the compose `api` service overrides it with
 `NODE_ENV=development` to keep serving on `http://localhost:3000`.
 
+`compose.yaml` is dev-only (http base URL, `NODE_ENV=development`, non-Secure cookies, dev secrets, dev keygen)
+and must not be used to deploy. Also note that `docker compose run api dist/cli.js` inherits development, so it
+accepts `http://localhost` app URLs.
+
+Stale `dist/`: `npm run build` and `npm run start:dev` now remove `dist/` first. If you ran a migration from a
+stale `dist/` that applied `CreateAuthorizationCodes` (a discarded branch), recreate the local database with
+`docker compose down -v`.
+
 ### Migrations in containers
 
 The runtime image is distroless (no npm, no shell), so `npm run migration:*` is not available
@@ -42,8 +50,7 @@ runs with the image's own node (it needs the same environment variables as the a
 
 ```bash
 docker compose run --rm api dist/cli.js app create --name "My SPA" \
-  --redirect-uri https://spa.example/cb --origin https://spa.example \
-  --post-reset-redirect-uri https://spa.example/login
+  --redirect-uri https://spa.example/cb --origin https://spa.example
 docker compose run --rm api dist/cli.js app create --name "Backend" --type confidential
 docker compose run --rm api dist/cli.js app update <client_id> --name "New name"
 docker compose run --rm api dist/cli.js app deactivate <client_id>
