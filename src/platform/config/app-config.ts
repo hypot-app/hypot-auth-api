@@ -23,8 +23,8 @@ const envSchema = z
     MAIL_FROM: z.string().min(1),
   })
   .superRefine((env, ctx) => {
-    // Case-sensitive on purpose: the base rule already refuses any other spelling of the scheme.
-    if (env.NODE_ENV === 'production' && !env.AUTH_PUBLIC_BASE_URL.startsWith('https://')) {
+    // Parsed, so this guard does not depend on the base rule's scheme regex.
+    if (env.NODE_ENV === 'production' && new URL(env.AUTH_PUBLIC_BASE_URL).protocol !== 'https:') {
       ctx.addIssue({
         code: 'custom',
         path: ['AUTH_PUBLIC_BASE_URL'],
