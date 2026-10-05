@@ -1,22 +1,18 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Inject, Injectable, type NestMiddleware } from '@nestjs/common';
 import { IsOriginAllowedUseCase } from '../application/is-origin-allowed.use-case';
-
-/** Removes the allow header so a browser cannot read a response to an origin not bound to the app. */
-export function withdrawCorsAllow(res: ServerResponse): void {
-  res.removeHeader('Access-Control-Allow-Origin');
-}
+import type { CorsRequest } from './cors-grant';
 
 const ALLOWED_METHODS = 'GET, POST, OPTIONS';
 const ALLOWED_HEADERS = 'Content-Type, Authorization';
 const PREFLIGHT_MAX_AGE_SECONDS = '600';
 
 /**
- * CORS headers layer (ADR 29, 38): a request's `Origin` is accepted when ANY active app registers
- * exactly that origin, so preflights (which carry no body) work. The per-app binding of the actual
- * request is the application layer's job (`ResolveClientUseCase` with `origin`): an endpoint that
- * rejects the binding removes the allow header with `withdrawCorsAllow`. Unknown origins get no
- * CORS headers, so the browser blocks the response. Never answers with `*` or credentials.
+ * CORS headers layer (ADR 29, 38), fail-closed. A preflight is answered here for any active app's
+ * origin (it carries no body). On an actual request this only sets `Vary: Origin` and stashes the
+ * candidate origin (an active app's origin) on the request: `Access-Control-Allow-Origin` itself is
+ * granted later by `CorsGrant`, and only by code that decided the browser may read the response.
+ * Never answers with `*` or credentials.
  */
 @Injectable()
 export class AppCorsMiddleware implements NestMiddleware {
@@ -32,8 +28,8 @@ export class AppCorsMiddleware implements NestMiddleware {
 
       if (!(await this.isOriginAllowed.execute(origin))) return next();
 
-      res.setHeader('Access-Control-Allow-Origin', origin);
       if (req.method === 'OPTIONS') {
+        res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Access-Control-Allow-Methods', ALLOWED_METHODS);
         // Fixed list, never echoed from the request (ADR 38).
         res.setHeader('Access-Control-Allow-Headers', ALLOWED_HEADERS);
@@ -42,6 +38,7 @@ export class AppCorsMiddleware implements NestMiddleware {
         res.end();
         return;
       }
+      (req as CorsRequest).corsCandidateOrigin = origin;
       next();
     } catch (error) {
       next(error);
