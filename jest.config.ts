@@ -6,8 +6,8 @@ const config: Config = {
   roots: ['<rootDir>/src', '<rootDir>/test'],
   testRegex: '.*\\.(spec|e2e-spec|int-spec)\\.ts$',
   moduleFileExtensions: ['ts', 'js', 'json'],
-  // @nestjs/typeorm ships ESM only; compile it to CommonJS for Jest.
-  transformIgnorePatterns: ['/node_modules/(?!@nestjs/typeorm/)'],
+  // @nestjs/typeorm and jose ship ESM only; compile them to CommonJS for Jest.
+  transformIgnorePatterns: ['/node_modules/(?!(@nestjs/typeorm|jose)/)'],
   transform: {
     '^.+\\.js$': ['@swc/jest', { module: { type: 'commonjs' } }],
     '^.+\\.ts$': [

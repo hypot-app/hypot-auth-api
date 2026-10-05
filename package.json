@@ -30,6 +30,7 @@
     "@nestjs/typeorm": "^12.0.2",
     "bcrypt": "^6.0.0",
     "handlebars": "^4.7.9",
+    "jose": "^6.2.12",
     "nest-commander": "^3.21.0",
     "nodemailer": "^10.0.14",
     "pg": "^8.23.1",
