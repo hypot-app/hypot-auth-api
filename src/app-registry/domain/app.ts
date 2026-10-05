@@ -130,12 +130,13 @@ function urlOutsideAllowedOrigins(props: AppProps): DomainError | null {
   ] as const;
   for (const [field, url] of links) {
     if (url === null) continue;
-    const origin = URL.canParse(url) ? new URL(url).origin : url;
+    if (props.allowedOrigins.length === 0) {
+      return new DomainError('allowed_origin_required', 'at least one allowed origin is required');
+    }
+    // AppUrl already validated `url`, so it parses; `.origin` is the normalized form stored in allowedOrigins.
+    const origin = new URL(url).origin;
     if (!props.allowedOrigins.includes(origin)) {
-      return new DomainError(
-        'email_url_origin_not_allowed',
-        `${field} origin "${origin}" must be one of the allowed origins (--origin)`,
-      );
+      return new DomainError('email_url_origin_not_allowed', `${field} origin "${origin}" must be one of the allowed origins`);
     }
   }
   return null;

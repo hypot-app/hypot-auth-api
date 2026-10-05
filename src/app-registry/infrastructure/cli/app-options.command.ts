@@ -8,6 +8,13 @@ export class CliError extends Error {
   }
 }
 
+/** Maps a domain error to an operator message, adding the CLI flag the domain does not know about. */
+export function toCliError(error: { code: string; message: string }): CliError {
+  if (error.code === 'allowed_origin_required') return new CliError('at least one --origin is required');
+  if (error.code === 'email_url_origin_not_allowed') return new CliError(`${error.message} (add it with --origin)`);
+  return new CliError(error.message);
+}
+
 export interface SharedAppOptions {
   name?: string;
   redirectUri?: string[];

@@ -81,7 +81,7 @@ Registration validates app fields and rejects bad input with a non-zero exit and
 - `--email-confirmation-url` and `--password-reset-url` are required on `create`: the pages of the app that the
   emails link to (the token is appended as `#token=...`). Same rules as redirect URIs (https, or `http` on localhost
   outside production, no credentials, no fragment), and the **origin of each URL must be one of the app's `--origin`
-  values** (compared after normalization). `update` can replace them but never clear them, and it also fails if it
+  values** (compared after normalization), so `create` needs at least one `--origin`. `update` can replace them but never clear them, and it also fails if it
   removes an origin that a stored URL still uses. An unknown option, such as the removed
   `--post-reset-redirect-uri`, exits non-zero.
 

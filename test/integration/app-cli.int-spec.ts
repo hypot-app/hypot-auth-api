@@ -132,8 +132,14 @@ describe('app CLI (integration)', () => {
     it('rejects an email link URL on an origin that is not allowed and persists nothing', async () => {
       const run = await cli(['app', 'create', ...REQUIRED, '--email-confirmation-url', 'https://evil.example/x']);
       expect(run.errors.map((e) => e.message)).toEqual([
-        expect.stringContaining('email_confirmation_url origin "https://evil.example" must be one of the allowed origins'),
+        'email_confirmation_url origin "https://evil.example" must be one of the allowed origins (add it with --origin)',
       ]);
+      expect(await rows()).toHaveLength(0);
+    });
+
+    it('requires at least one --origin, before checking the URL origins', async () => {
+      const run = await cli(['app', 'create', '--name', 'Shop', ...URLS]);
+      expect(run.errors.map((e) => e.message)).toEqual(['at least one --origin is required']);
       expect(await rows()).toHaveLength(0);
     });
 

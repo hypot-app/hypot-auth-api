@@ -143,6 +143,16 @@ describe('App changes', () => {
       if (!result.ok) {
         expect(result.error.code).toBe('email_url_origin_not_allowed');
         expect(result.error.message).toContain(field);
+        expect(result.error.message).not.toContain('--');
+      }
+    });
+
+    it('requires at least one allowed origin once a URL is set, with its own error', () => {
+      const result = App.create(props({ ...urls, allowedOrigins: [] }));
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.code).toBe('allowed_origin_required');
+        expect(result.error.message).toBe('at least one allowed origin is required');
       }
     });
 
