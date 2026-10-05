@@ -64,6 +64,36 @@ describe('loadConfig', () => {
     expect(config.authPublicBaseUrl).toBe('http://localhost:3000');
   });
 
+  describe('AUTH_PUBLIC_BASE_URL in production', () => {
+    it.each(['http://auth.example.com', 'http://localhost:3000', 'http://auth.example.com:8080/prefix'])(
+      'rejects %s',
+      (value) => {
+        const env = { ...validEnv, NODE_ENV: 'production', AUTH_PUBLIC_BASE_URL: value };
+        expect(() => loadConfig(env)).toThrow(ConfigError);
+        expect(() => loadConfig(env)).toThrow('AUTH_PUBLIC_BASE_URL: must be an https URL in production');
+      },
+    );
+
+    it('rejects a mixed-case scheme in every environment', () => {
+      const env = { ...validEnv, NODE_ENV: 'production', AUTH_PUBLIC_BASE_URL: 'HTTPS://auth.example.com' };
+      expect(() => loadConfig(env)).toThrow('AUTH_PUBLIC_BASE_URL: must be an absolute http(s) URL');
+    });
+
+    it('accepts an https URL', () => {
+      const config = loadConfig({ ...validEnv, NODE_ENV: 'production' });
+      expect(config.authPublicBaseUrl).toBe('https://auth.example.com');
+    });
+
+    it.each(['development', 'test'])('accepts an http URL when NODE_ENV is %s', (nodeEnv) => {
+      const config = loadConfig({
+        ...validEnv,
+        NODE_ENV: nodeEnv,
+        AUTH_PUBLIC_BASE_URL: 'http://localhost:3000',
+      });
+      expect(config.authPublicBaseUrl).toBe('http://localhost:3000');
+    });
+  });
+
   it('rejects an unknown NODE_ENV and a non-numeric PORT', () => {
     expect(() => loadConfig({ ...validEnv, NODE_ENV: 'staging' })).toThrow('NODE_ENV');
     expect(() => loadConfig({ ...validEnv, PORT: 'abc' })).toThrow('PORT');

@@ -23,6 +23,14 @@ const envSchema = z
     MAIL_FROM: z.string().min(1),
   })
   .superRefine((env, ctx) => {
+    // Case-sensitive on purpose: the base rule already refuses any other spelling of the scheme.
+    if (env.NODE_ENV === 'production' && !env.AUTH_PUBLIC_BASE_URL.startsWith('https://')) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['AUTH_PUBLIC_BASE_URL'],
+        message: 'must be an https URL in production',
+      });
+    }
     if ((env.SMTP_USER === undefined) !== (env.SMTP_PASS === undefined)) {
       ctx.addIssue({
         code: 'custom',

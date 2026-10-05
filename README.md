@@ -17,6 +17,12 @@ OLD code. `docker compose run --rm migrate` fails if the image was never built, 
 
 To stop and remove containers and volumes: `docker compose down -v`.
 
+### Production notes
+
+With `NODE_ENV=production` the service refuses to start unless `AUTH_PUBLIC_BASE_URL` is an `https://` URL
+(case-sensitive scheme). The image sets `NODE_ENV=production`, so the compose `api` service overrides it with
+`NODE_ENV=development` to keep serving on `http://localhost:3000`.
+
 ### Migrations in containers
 
 The runtime image is distroless (no npm, no shell), so `npm run migration:*` is not available
