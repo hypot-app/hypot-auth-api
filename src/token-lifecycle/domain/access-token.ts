@@ -35,12 +35,17 @@ export interface AccessTokenIssuer {
   issue(input: IssueAccessTokenInput): Promise<IssuedAccessToken>;
 }
 
+/** The `client_id`(s) a verifier accepts as `aud`: one id, or a non-empty list. */
+export type ExpectedAudience = string | readonly [string, ...string[]];
+
 /**
  * Port: validates access tokens against every published key, by `kid`. Failure is always
  * the same `invalid_token` error, so a caller cannot learn why a token was refused.
+ * The expected audience is mandatory: a token for app A must never verify for app B.
+ * A missing or empty audience is a programming error and throws a `TypeError`.
  */
 export interface AccessTokenVerifier {
-  verify(token: string, options?: { audience?: string }): Promise<Result<AccessTokenClaims, DomainError>>;
+  verify(token: string, options: { audience: ExpectedAudience }): Promise<Result<AccessTokenClaims, DomainError>>;
 }
 
 export const ACCESS_TOKEN_ISSUER = Symbol('AccessTokenIssuer');

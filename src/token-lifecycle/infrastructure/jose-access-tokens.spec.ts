@@ -11,6 +11,7 @@ import { generateKeySet, type KeySetJson } from './signing-key-generator';
 const ISSUER = 'https://auth.example.com';
 const START = new Date('2026-01-01T00:00:00Z');
 const START_SECONDS = START.getTime() / 1000;
+const AUD = { audience: 'app_a' };
 
 const storeOf = (set: KeySetJson): KeyStore => JwkSetKeyStore.fromJson(JSON.stringify(set));
 
@@ -111,7 +112,7 @@ describe('JoseAccessTokenVerifier', () => {
     const { issuer, verifier } = build(set);
     const { token } = await issuer.issue({ accountId: 'account-1', clientId: 'app_a' });
 
-    const result = await verifier.verify(token);
+    const result = await verifier.verify(token, AUD);
 
     expect(result).toEqual({
       ok: true,
@@ -134,21 +135,46 @@ describe('JoseAccessTokenVerifier', () => {
     expectInvalid(await verifier.verify(token, { audience: 'app_b' }));
   });
 
+  describe('audience is required (W4)', () => {
+    const { verifier } = build(set);
+    const tokenFor = (aud: string) => forge({ key: signingKey.privateKey, kid: signingKey.kid, aud });
+
+    it('rejects a token issued for app A when verifying for app B', async () => {
+      expectInvalid(await verifier.verify(await tokenFor('app_a'), { audience: 'app_b' }));
+    });
+
+    it('accepts a token whose audience is any entry of a non-empty expected list', async () => {
+      expect((await verifier.verify(await tokenFor('app_b'), { audience: ['app_a', 'app_b'] })).ok).toBe(true);
+      expectInvalid(await verifier.verify(await tokenFor('app_c'), { audience: ['app_a', 'app_b'] }));
+    });
+
+    it.each([
+      ['no options', undefined],
+      ['no audience', {}],
+      ['an empty audience', { audience: '' }],
+      ['an empty audience list', { audience: [] }],
+    ])('refuses to verify with %s instead of skipping the audience check', async (_label, options) => {
+      const token = await tokenFor('app_a');
+
+      await expect(verifier.verify(token, options as never)).rejects.toThrow(TypeError);
+    });
+  });
+
   describe('explicit typing (RFC 9068, RFC 8725 3.11)', () => {
     const { verifier } = build(set);
 
     it('accepts a token typed at+jwt', async () => {
       const token = await forge({ key: signingKey.privateKey, kid: signingKey.kid, typ: 'at+jwt' });
 
-      expect((await verifier.verify(token)).ok).toBe(true);
+      expect((await verifier.verify(token, AUD)).ok).toBe(true);
     });
 
     it('rejects a token without typ', async () => {
-      expectInvalid(await verifier.verify(await forge({ key: signingKey.privateKey, kid: signingKey.kid, typ: null })));
+      expectInvalid(await verifier.verify(await forge({ key: signingKey.privateKey, kid: signingKey.kid, typ: null }), AUD));
     });
 
     it('rejects a token of another type signed by the same key (id+jwt)', async () => {
-      expectInvalid(await verifier.verify(await forge({ key: signingKey.privateKey, kid: signingKey.kid, typ: 'id+jwt' })));
+      expectInvalid(await verifier.verify(await forge({ key: signingKey.privateKey, kid: signingKey.kid, typ: 'id+jwt' }), AUD));
     });
   });
 
@@ -163,7 +189,7 @@ describe('JoseAccessTokenVerifier', () => {
       const signer = build(signerSet);
       const { token } = await signer.issuer.issue({ accountId: 'account-1', clientId: 'app_a' });
 
-      const result = await build(verifierSet as KeySetJson).verifier.verify(token);
+      const result = await build(verifierSet as KeySetJson).verifier.verify(token, AUD);
 
       expect(result.ok).toBe(true);
     });
@@ -171,7 +197,7 @@ describe('JoseAccessTokenVerifier', () => {
     it('rejects a token signed by a key that is no longer published', async () => {
       const { token } = await build(oldKeys).issuer.issue({ accountId: 'account-1', clientId: 'app_a' });
 
-      expectInvalid(await build(set).verifier.verify(token));
+      expectInvalid(await build(set).verifier.verify(token, AUD));
     });
   });
 
@@ -201,7 +227,7 @@ describe('JoseAccessTokenVerifier', () => {
     ];
 
     it.each(cases)('%s', async (_label, makeToken) => {
-      expectInvalid(await verifier.verify(await makeToken()));
+      expectInvalid(await verifier.verify(await makeToken(), AUD));
     });
 
     it('pins RS256 itself, not only through the alg hint in the JWKS entry', async () => {
@@ -212,13 +238,13 @@ describe('JoseAccessTokenVerifier', () => {
       };
       const lenient = new JoseAccessTokenVerifier({ keyStore: withoutAlgHint, clock: new FixedClock(START), issuer: ISSUER });
 
-      expectInvalid(await lenient.verify(await forge({ key: signingKey.privateKey, kid: signingKey.kid, alg: 'RS384' })));
+      expectInvalid(await lenient.verify(await forge({ key: signingKey.privateKey, kid: signingKey.kid, alg: 'RS384' }), AUD));
     });
 
     it('a token without kid, even when only one key is published', async () => {
       const single = build({ active: set.active });
 
-      expectInvalid(await single.verifier.verify(await forge({ key: signingKey.privateKey, kid: null })));
+      expectInvalid(await single.verifier.verify(await forge({ key: signingKey.privateKey, kid: null }), AUD));
     });
 
     it('accepts an expired token within the 5 second tolerance and rejects it after', async () => {
@@ -226,10 +252,10 @@ describe('JoseAccessTokenVerifier', () => {
       const token = await forge({ key: signingKey.privateKey, kid: signingKey.kid, exp: START_SECONDS + 3600 });
 
       clock.advanceMs((3600 + 4) * 1000);
-      expect((await verifier.verify(token)).ok).toBe(true);
+      expect((await verifier.verify(token, AUD)).ok).toBe(true);
 
       clock.advanceMs(2000);
-      expectInvalid(await verifier.verify(token));
+      expectInvalid(await verifier.verify(token, AUD));
     });
   });
 });
