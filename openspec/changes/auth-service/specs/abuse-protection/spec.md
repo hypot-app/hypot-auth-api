@@ -15,7 +15,7 @@ The system MUST track failed logins with two counters, following NIST SP 800-63B
 | Pair | (app, account, client IP) | 5 failures / 15 min | That IP is blocked from that account for 15 min |
 | Global | (app, account) | 50 failures / 1 h from any IP | The account is locked for 15 min |
 
-Every threshold, window and block duration MUST be configurable by environment settings with these defaults. Counters MUST also be kept for unknown emails (keyed by email hash), so lockout cannot reveal whether an account exists. While blocked or locked, even the correct password MUST fail, and attempts made during a block MUST NOT extend it. A successful login MUST reset the pair counter and MUST NOT reset the global counter (assumption).
+Every threshold, window and block duration MUST be configurable by environment settings with these defaults. Counters MUST also be kept for unknown emails (keyed by email hash), so lockout cannot reveal whether an account exists. While blocked or locked, even the correct password MUST fail, and attempts made during a block MUST NOT extend it. The same counters apply to `POST /password/change`: a wrong current password is a failed login for both counters, and while the (account, IP) pair is blocked or the account is locked, change MUST fail with the same `invalid_current_password` error even for the correct password, without running bcrypt. A successful login MUST reset the pair counter and MUST NOT reset the global counter (assumption).
 
 #### Scenario: Pair block
 - GIVEN IP X made 5 failed logins for account U in 15 minutes
@@ -45,7 +45,7 @@ Every threshold, window and block duration MUST be configurable by environment s
 
 ### Requirement: Per-IP rate limits
 
-The system MUST apply a per-client-IP rate limit to each of: login, signup, resend-confirmation, forgot-password and reset. Each limit and window MUST be configurable. Email-sending endpoints (signup, resend-confirmation, forgot-password) MUST also be limited per target account (assumption: 3 per hour), to stop email bombing from many IPs.
+The system MUST apply a per-client-IP rate limit to each of: login, signup, resend-confirmation, forgot-password, reset, refresh and confirm. Each limit and window MUST be configurable, and the defaults MUST be documented in the design (ADR 36). Refresh and confirm are token-guessing surfaces; they are limited per IP only, and the check MUST run before any token lookup. `GET /me` and logout have no limiter: bearer verification is a local signature check with no database access, and logout is idempotent. Email-sending endpoints (signup, resend-confirmation, forgot-password) MUST also be limited per target account (assumption: 3 per hour), to stop email bombing from many IPs. Every email a forgot-password request sends counts toward that cap, whether it is a reset email or a confirmation email for an unconfirmed account.
 
 #### Scenario: Login IP limit
 - GIVEN an IP exceeded the login limit
@@ -60,12 +60,30 @@ The system MUST apply a per-client-IP rate limit to each of: login, signup, rese
 
 ### Requirement: Limited response on non-login endpoints
 
-When a per-IP limit is hit on signup, resend-confirmation, forgot-password or reset, the system MUST return 429 with a `Retry-After` header and a generic body. The decision MUST depend only on the caller's IP and the endpoint, never on account state, so it cannot enumerate accounts. Per-account caps MUST NOT produce 429; they silently suppress the email and return the normal generic response. Login MUST NOT return 429 (it returns the generic login failure).
+When a per-IP limit is hit on signup, resend-confirmation, forgot-password, reset, refresh or confirm, the system MUST return 429 with a `Retry-After` header (an integer number of seconds until the window ends) and the generic body `{ "error": "rate_limited", "message": "Too many requests. Try again later." }`. The decision MUST depend only on the caller's IP and the endpoint, never on account state, so it cannot enumerate accounts. Per-account caps MUST NOT produce 429; they silently suppress the email and return the normal generic response. Login MUST NOT return 429 (it returns the generic login failure).
 
 #### Scenario: Signup flood
 - GIVEN an IP exceeded the signup limit
 - WHEN it posts a signup for a new or an existing email
 - THEN the response is 429 with `Retry-After`, identical for both
+
+#### Scenario: Refresh flood
+- GIVEN an IP exceeded the refresh limit
+- WHEN it posts refresh with a valid or an invalid token
+- THEN the response is 429 with an integer `Retry-After`, identical for both
+- AND no token is looked up or consumed
+
+#### Scenario: Confirm flood
+- GIVEN an IP exceeded the confirm limit
+- WHEN it posts confirm with a valid or an invalid token
+- THEN the response is 429 with an integer `Retry-After`, identical for both
+- AND no token is looked up or consumed
+
+#### Scenario: Forgot for an unconfirmed account counts toward the cap
+- GIVEN 3 emails were sent for an unconfirmed account in an hour (confirmation emails from signup, resend or forgot)
+- WHEN a forgot-password request for it arrives
+- THEN the generic 202 is returned
+- AND no email is sent
 
 ### Requirement: Client IP derivation
 

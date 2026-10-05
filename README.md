@@ -1,5 +1,16 @@
 # hypot-auth-api
 
+An API-only authentication service. It serves JSON endpoints and no pages: each consuming app builds its own
+login, signup, confirm and reset screens and calls Auth directly from the browser with its `client_id`. There is
+no hosted UI, no cookie and no redirect.
+
+- Integrating an app: [`docs/integration-guide.md`](docs/integration-guide.md)
+- Endpoint contract (paths, bodies, status and error codes): [`docs/api-contract.md`](docs/api-contract.md)
+- Design and specs: `openspec/changes/auth-service/`
+
+Only part of the API is implemented so far (see the status badges in the contract). Sections below that describe
+planned behaviour say so.
+
 ## Run locally with Docker
 
 ```bash
@@ -68,16 +79,29 @@ Registration validates app fields and rejects bad input with a non-zero exit and
   production). No path, query, fragment, trailing slash, `null` or wildcard. Scheme and host are lower-cased.
 - `--redirect-uri` must be an absolute `https` URL (or `http` on localhost outside production) without a fragment.
 
-CORS for the API allows a request's `Origin` when it exactly matches `--origin` of any active app. No
-`client_id` is needed, so preflights and bearer-only calls such as `/api/v1/me` work. Answers are cached
-for 30 seconds, so deactivating an app or changing its origins can take that long to apply.
+CORS is bound to the calling app. A preflight is answered (`204`) when the origin belongs to any active app,
+with `Access-Control-Allow-Methods: GET, POST, OPTIONS`, `Access-Control-Allow-Headers: Content-Type, Authorization`,
+`Access-Control-Max-Age: 600` and `Vary: Origin`. The actual request is allowed only when its `Origin` exactly
+matches `--origin` of the app it identifies (body `client_id`, the token's owner for confirm and reset, the
+access token's `aud` for `/api/v1/me` and password change). Auth never sends credentials headers or cookies.
+Answers are cached for 30 seconds, so deactivating an app or changing its origins can take that long to apply.
+The binding and the preflight header set land in U11c and U17a (planned); today the middleware still allows any
+active app's origin on the legacy route list.
+
+The origin of an app's `email_confirmation_url` and `password_reset_url` must be one of its allowed origins,
+otherwise its confirm and reset screens could not call Auth. The CLI enforces this on create and update (planned,
+U11b).
 
 ### Transactional email
 
 Emails go through a Postgres outbox and a background worker started by `main.ts`. Delivery uses plain SMTP
 (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`/`SMTP_PASS`, `MAIL_FROM`); an app's `--email-from` overrides
-`MAIL_FROM`. In the Compose stack mail is caught by Mailpit: open http://localhost:8025. Every link is
-`AUTH_PUBLIC_BASE_URL` + `/api/v1/...`. Default templates live in `src/transactional-email/templates/default/`;
+`MAIL_FROM`. In the Compose stack mail is caught by Mailpit: open http://localhost:8025. Links point to the
+app's own screens, never to a page hosted by Auth: `<email_confirmation_url>#token=<token>` and
+`<password_reset_url>#token=<token>`, with the token in the fragment so it never reaches servers or logs. The
+account-exists notice links to `password_reset_url` with no token. `AUTH_PUBLIC_BASE_URL` is only the token issuer
+(`iss`) and the base of the JWKS URL. Until U12 lands, emails still link to `AUTH_PUBLIC_BASE_URL` + `/api/v1/...`.
+Default templates live in `src/transactional-email/templates/default/`;
 put files with the same names in `templates/<client_id>/` to override them for one app. The build copies the
 templates into `dist/`.
 
@@ -92,22 +116,24 @@ Accounts are per app: unique on `(app_id, email)`, email stored lowercase. Passw
 
 ```bash
 curl -X POST localhost:3000/api/v1/accounts/signup -H 'content-type: application/json'   -d '{"client_id":"app_...","email":"ana@example.com","password":"correct horse"}'   # 202, email in Mailpit
-curl 'localhost:3000/api/v1/accounts/confirm?token=<token from the email>'                   # 200 once, then 400
 curl -X POST localhost:3000/api/v1/accounts/resend-confirmation -H 'content-type: application/json'   -d '{"client_id":"app_...","email":"ana@example.com"}'                                   # 202 always
+# Confirm is a POST with the token from the email link fragment (planned, U17a). The current
+# GET /api/v1/accounts/confirm?token=... is being replaced and will return 404:
+#   curl -X POST localhost:3000/api/v1/accounts/confirm -H 'content-type: application/json' -d '{"token":"<token>"}'   # 200 {"message"} once, then 400
 ```
 
-Signup and resend answer the same body whether or not the address is registered. A duplicate signup sends the
-owner an `account-exists` notice (no token) instead of a confirmation. Confirmation links last 24 hours, work
-once, and a resend invalidates the previous one. Unconfirmed accounts cannot log in (login arrives in U7).
+Signup and resend answer the same fixed body whether or not the address is registered. A duplicate signup sends
+the owner an `account-exists` notice (no token) instead of a confirmation. Confirmation links last 24 hours, work
+once, and a resend invalidates the previous one. Unconfirmed accounts cannot log in (login is planned, U14c).
 Residual timing difference: signup always hashes (so both paths cost one bcrypt); resend does a few more
 database writes for an unconfirmed account than for an unknown one (milliseconds), and a new signup does
 three more writes and one random-token call than a duplicate (about 3-10 ms against the 250 ms hash). Both
-gaps are accepted until Phase 2 rate limiting.
+gaps are accepted and bounded by the per-IP and per-account limits (planned, U13 and U17b).
 
-`/api/v1/accounts/*` intentionally has no CORS: signup, confirm and resend go through the hosted UI or app
-backends, not browser SPAs. Enabling it would let any registered origin drive signup and resend from browsers
-(email bombing, enumeration timing). Revisit only with a product requirement for SPA-native signup, together
-with rate limiting.
+Signup, confirm and resend are called by app frontends from the browser, so they follow the origin-bound CORS
+rules above (planned, U17a). They are rate limited per IP (`429` with `Retry-After`) and per target account
+(silent cap, 3 emails per hour). The "no CORS on accounts" rule of the hosted-UI design is gone: Auth has no
+hosted UI.
 
 ### Signing keys and JWKS
 
@@ -121,6 +147,9 @@ with a `kid` on every key. Provide it in exactly one of two ways:
 The service refuses to start when the set is invalid (bad JSON, missing or mismatched private key, duplicate
 `kid`, RSA key under 2048 bits) or when neither or both variables are set. The error names the problem, never
 the key. Only the API process reads these variables: the operator CLI (`npm run cli`) boots without them.
+
+The JWKS URL is `${AUTH_PUBLIC_BASE_URL}/.well-known/jwks.json` and `iss` is exactly `AUTH_PUBLIC_BASE_URL`, so
+set it without a trailing slash (for example `https://auth.example`).
 
 `GET /.well-known/jwks.json` (root, no prefix) publishes the public half of `active`, `next` and the
 non-expired `retired` keys with `Cache-Control: public, max-age=300`. Private parameters are never published.
@@ -177,5 +206,9 @@ required variable is missing or invalid (see `.env.example`).
 - `GET /` welcome message
 - `GET /health` liveness plus database ping (200, or 503 when the database is down)
 - `GET /.well-known/jwks.json` public signing keys (see Signing keys and JWKS)
-- `POST /api/v1/accounts/signup`, `GET /api/v1/accounts/confirm`, `POST /api/v1/accounts/resend-confirmation`
+- Implemented: `POST /api/v1/accounts/signup`, `POST /api/v1/accounts/resend-confirmation`, and the legacy
+  `GET /api/v1/accounts/confirm` (being replaced by `POST /api/v1/accounts/confirm`)
+- Planned: `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`, `GET /api/v1/me`,
+  `POST /api/v1/password/forgot`, `POST /api/v1/password/reset`, `POST /api/v1/password/change`. Full list and
+  contract: [`docs/api-contract.md`](docs/api-contract.md).
 - Business routes are served under `/api/v1`; `/`, `/health` and `/.well-known/jwks.json` stay at the root.

@@ -8,7 +8,13 @@ Keys, JWKS publication, and RS256 access-token issue and verification. Refresh t
 
 ### Requirement: Access token format
 
-Access tokens MUST be RS256-signed JWTs with a 1-hour lifetime. Claims MUST include `iss` (the Auth issuer URL), `aud` (the app's `client_id`), `sub` (the account id), `iat`, `exp`, and `jti`. The JWT header MUST include `kid` and `typ: at+jwt`. Tokens MUST NOT carry roles or permissions. Verifiers MUST require RS256 and `typ: at+jwt`.
+Access tokens MUST be RS256-signed JWTs with a 1-hour lifetime. Claims MUST include `iss` (the Auth issuer URL), `aud` (the app's `client_id`), `sub` (the account id), `iat`, `exp`, and `jti`. The JWT header MUST include `kid` and `typ: at+jwt`. Tokens MUST NOT carry roles or permissions. Verifiers MUST require RS256 and `typ: at+jwt`. The issuer string MUST be exactly the configured `AUTH_PUBLIC_BASE_URL` (an absolute `https` URL with no trailing slash, no query and no fragment in production), and the JWKS URL MUST be `${iss}/.well-known/jwks.json`. Auth does not normalize the value at runtime: what the operator configures is what appears in `iss`.
+
+#### Scenario: Issuer and JWKS URL
+- GIVEN `AUTH_PUBLIC_BASE_URL` is `https://auth.example`
+- WHEN a token is issued
+- THEN `iss` is exactly `https://auth.example`
+- AND the JWKS is served at `https://auth.example/.well-known/jwks.json`
 
 #### Scenario: Token claims
 - GIVEN a successful login for app A
