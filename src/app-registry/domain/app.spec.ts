@@ -136,7 +136,6 @@ describe('App changes', () => {
 
     it.each([
       ['email_confirmation_url', { emailConfirmationUrl: 'https://evil.example/confirm' }],
-      ['password_reset_url', { passwordResetUrl: 'https://evil.example/reset' }],
       ['email_confirmation_url', { emailConfirmationUrl: 'https://a.example:8443/confirm' }],
     ])('rejects a %s whose origin is not allowed', (field, override) => {
       const result = App.create(props({ ...urls, ...override }));

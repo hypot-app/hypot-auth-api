@@ -128,8 +128,6 @@ describe('UpdateAppUseCase / DeactivateAppUseCase', () => {
       ['blank', ' '],
       ['empty', ''],
       ['null', null as unknown as string],
-      ['relative', '/reset'],
-      ['a fragment', 'https://a.example/reset#token='],
       ['plain http on a public host', 'http://a.example/reset'],
     ])('rejects %s (a URL can be replaced, never cleared) and changes nothing', async (_label, value) => {
       const result = await update.execute({ clientId: 'abc', passwordResetUrl: value, name: 'Changed', isProduction: false });

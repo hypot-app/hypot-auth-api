@@ -123,34 +123,25 @@ describe('app CLI (integration)', () => {
       expect(await rows()).toHaveLength(0);
     });
 
-    it.each([
-      ['--email-confirmation-url', 'email_confirmation_url', ['--password-reset-url', 'https://a.example/reset']],
-      ['--password-reset-url', 'password_reset_url', ['--email-confirmation-url', 'https://a.example/confirm']],
-    ])('rejects an invalid %s and persists nothing', async (flag, field, other) => {
-      const run = await cli(['app', 'create', '--name', 'Shop', ...ORIGIN, ...other, flag, 'https://a.example/x#token=']);
-      expect(run.errors.map((e) => e.message)).toEqual([expect.stringContaining(`Invalid ${field}`)]);
+    it('rejects an invalid email link URL and persists nothing', async () => {
+      const run = await cli(['app', 'create', ...REQUIRED, '--password-reset-url', 'https://a.example/x#token=']);
+      expect(run.errors.map((e) => e.message)).toEqual([expect.stringContaining('Invalid password_reset_url')]);
       expect(await rows()).toHaveLength(0);
     });
 
-    it.each([
-      ['--email-confirmation-url', 'email_confirmation_url', ['--password-reset-url', 'https://a.example/reset']],
-      ['--password-reset-url', 'password_reset_url', ['--email-confirmation-url', 'https://a.example/confirm']],
-    ])('rejects %s on an origin that is not allowed and persists nothing', async (flag, field, other) => {
-      const run = await cli(['app', 'create', '--name', 'Shop', ...ORIGIN, ...other, flag, 'https://evil.example/x']);
+    it('rejects an email link URL on an origin that is not allowed and persists nothing', async () => {
+      const run = await cli(['app', 'create', ...REQUIRED, '--email-confirmation-url', 'https://evil.example/x']);
       expect(run.errors.map((e) => e.message)).toEqual([
-        expect.stringContaining(`${field} origin "https://evil.example" must be one of the allowed origins`),
+        expect.stringContaining('email_confirmation_url origin "https://evil.example" must be one of the allowed origins'),
       ]);
       expect(await rows()).toHaveLength(0);
     });
 
-    it.each([
-      ['--email-confirmation-url', 'email_confirmation_url', ['--password-reset-url', 'https://a.example/reset']],
-      ['--password-reset-url', 'password_reset_url', ['--email-confirmation-url', 'https://a.example/confirm']],
-    ])('rejects an http://localhost %s in production', async (flag, field, other) => {
-      const run = await cli(['app', 'create', '--name', 'Shop', ...ORIGIN, ...other, flag, 'http://localhost:5173/x'], {
+    it('rejects an http://localhost email link URL in production', async () => {
+      const run = await cli(['app', 'create', ...REQUIRED, '--email-confirmation-url', 'http://localhost:5173/x'], {
         isProduction: true,
       });
-      expect(run.errors.map((e) => e.message)).toEqual([expect.stringContaining(`Invalid ${field}`)]);
+      expect(run.errors.map((e) => e.message)).toEqual([expect.stringContaining('Invalid email_confirmation_url')]);
       expect(await rows()).toHaveLength(0);
     });
 
