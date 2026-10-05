@@ -1,17 +1,17 @@
 import { join } from 'node:path';
 import { App } from '../../app-registry/domain/app';
-import { EmailLinks } from '../application/email-links';
 import { buildEmailVariables } from '../application/email-variables';
 import { EMAIL_TEMPLATES, type EmailTemplate } from '../domain/email-template';
 import { HandlebarsTemplateRenderer } from './handlebars-template-renderer';
 
-const BASE_URL = 'https://auth.example.com';
+const CONFIRM_URL = 'https://shop.example/confirm';
+const RESET_URL = 'https://shop.example/reset';
+const AUTH_BASE_URL = 'https://auth.example.com';
 const CLIENT_ID = 'app_0123456789abcdef0123456789abcdef';
 const TOKEN = 'Tok3n_0123456789abcdefghijklmnopqrstuvwxyzAB';
 const PASSWORD = 'S3cretPassw0rd!';
 
 const renderer = new HandlebarsTemplateRenderer(join(__dirname, '..', 'templates'));
-const links = new EmailLinks(BASE_URL);
 
 const app = (name: string) =>
   App.restore({
@@ -23,8 +23,8 @@ const app = (name: string) =>
     redirectUris: [],
     allowedOrigins: [],
     emailFrom: null,
-    emailConfirmationUrl: null,
-    passwordResetUrl: null,
+    emailConfirmationUrl: CONFIRM_URL,
+    passwordResetUrl: RESET_URL,
     status: 'active',
     createdAt: new Date(0),
     updatedAt: new Date(0),
@@ -34,7 +34,7 @@ const app = (name: string) =>
 async function renderDefault(template: EmailTemplate, appName = 'Shop') {
   // The payload carries a password a buggy caller might have put there; no template may print it.
   const payload = { token: TOKEN, password: PASSWORD, passwordHash: '$2b$12$hashhashhash' };
-  const variables = buildEmailVariables({ template, payload, app: app(appName), links });
+  const variables = buildEmailVariables({ template, payload, app: app(appName) });
   if (!variables.ok) throw new Error(variables.error);
   return renderer.render({ template, clientId: CLIENT_ID, variables: variables.value });
 }
@@ -49,32 +49,33 @@ describe('default email templates', () => {
     expect(subject).toContain('Shop');
     expect(text).toContain('Shop');
     for (const output of [subject, text]) {
+      expect(output).not.toContain(AUTH_BASE_URL);
       expect(output).not.toContain(PASSWORD);
       expect(output).not.toContain('$2b$12$');
     }
   });
 
-  it('confirmation: one link to the confirm endpoint on AUTH_PUBLIC_BASE_URL, with the token and nothing else', async () => {
+  it('confirmation: one link: the app confirmation URL with the token in the fragment', async () => {
     const { subject, text } = await renderDefault('confirmation');
 
     expect(subject).toBe('Confirm your email for Shop');
-    expect(urlsIn(text)).toEqual([`${BASE_URL}/api/v1/accounts/confirm?token=${TOKEN}`]);
+    expect(urlsIn(text)).toEqual([`${CONFIRM_URL}#token=${TOKEN}`]);
     expect(text).toContain('24 hours');
   });
 
-  it('password-reset: one link to the reset page with the token and the app client_id', async () => {
+  it('password-reset: one link: the app reset URL with the token in the fragment', async () => {
     const { subject, text } = await renderDefault('password-reset');
 
     expect(subject).toBe('Reset your Shop password');
-    expect(urlsIn(text)).toEqual([`${BASE_URL}/api/v1/password/reset?token=${TOKEN}&client_id=${CLIENT_ID}`]);
+    expect(urlsIn(text)).toEqual([`${RESET_URL}#token=${TOKEN}`]);
     expect(text).toContain('1 hour');
   });
 
-  it('account-exists: links to the hosted forgot-password page for the app and carries no token', async () => {
+  it('account-exists: links to the app reset URL with no fragment and carries no token', async () => {
     const { subject, text } = await renderDefault('account-exists');
 
     expect(subject).toBe('Sign-up attempt for your Shop account');
-    expect(urlsIn(text)).toEqual([`${BASE_URL}/api/v1/password/forgot?client_id=${CLIENT_ID}`]);
+    expect(urlsIn(text)).toEqual([RESET_URL]);
     expect(text).not.toContain(TOKEN);
     expect(text).not.toContain('token');
     expect(text).toMatch(/someone tried to create/i);

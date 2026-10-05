@@ -140,10 +140,10 @@ Real forks: none. Items 8 and 9 are the closest; both follow the specs, and the 
 
 **U12** `feat/u12-email-app-links` (315-360 lines)
 
-- [ ] 12.1 RED: `EmailLinks` unit: confirmation link `https://a.example/confirm#token=<percent-encoded>`; reset link likewise; a null URL throws `UnconfiguredLink`; no output contains `AUTH_PUBLIC_BASE_URL`. GREEN: rewrite `src/transactional-email/application/email-links.ts` from the app record.
-- [ ] 12.2 RED/GREEN: `OutboxWorker` builds links at send time from the current app (`findById`); a null URL marks the row `failed` at once with the payload purged and no token in logs. Update existing worker tests.
-- [ ] 12.3 RED/GREEN: templates `confirmation`, `reset` use the built link; `account-exists` links to `password_reset_url` with no token and no `#`; `welcome` and `password-changed` unchanged. Renderer tests: no password, no `AUTH_PUBLIC_BASE_URL` anywhere, `account-exists` has no token.
-- [ ] 12.4 RED/GREEN: update `email-pipeline.int-spec` (Mailpit): the delivered mail carries `app URL + #token=`. Mutation: build from `AUTH_PUBLIC_BASE_URL`, the pipeline and link tests fail. Update the README TTL TODO and ADR 30 payload note if they mention link bases.
+- [x] 12.1 RED: `EmailLinks` unit: confirmation link `https://a.example/confirm#token=<percent-encoded>`; reset link likewise; a null URL throws `UnconfiguredLink`; no output contains `AUTH_PUBLIC_BASE_URL`. GREEN: rewrite `src/transactional-email/application/email-links.ts` from the app record.
+- [x] 12.2 RED/GREEN: `OutboxWorker` builds links at send time from the current app (`findById`); a null URL marks the row `failed` at once with the payload purged and no token in logs. Update existing worker tests.
+- [x] 12.3 RED/GREEN: templates `confirmation`, `reset` use the built link; `account-exists` links to `password_reset_url` with no token and no `#`; `welcome` and `password-changed` unchanged. Renderer tests: no password, no `AUTH_PUBLIC_BASE_URL` anywhere, `account-exists` has no token.
+- [x] 12.4 RED/GREEN: update `email-pipeline.int-spec` (Mailpit): the delivered mail carries `app URL + #token=`. Mutation: build from `AUTH_PUBLIC_BASE_URL`, the pipeline and link tests fail. Update the README TTL TODO and ADR 30 payload note if they mention link bases.
 
 ## U13 Abuse protection (all of it lands before any bcrypt path)
 

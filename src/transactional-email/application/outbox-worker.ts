@@ -4,7 +4,6 @@ import type { EmailOutbox } from '../domain/email-outbox';
 import type { EmailSender } from '../domain/email-sender';
 import { MAX_ERROR_LENGTH, OutboxEmail } from '../domain/outbox-email';
 import type { TemplateRenderer } from '../domain/template-renderer';
-import type { EmailLinks } from './email-links';
 import { buildEmailVariables } from './email-variables';
 
 export interface WorkerLogger {
@@ -31,7 +30,6 @@ export interface OutboxWorkerDeps {
   sender: EmailSender;
   renderer: TemplateRenderer;
   clock: Clock;
-  links: EmailLinks;
   /** MAIL_FROM: used when the app has no `email_from`. */
   defaultFrom: string;
   logger: WorkerLogger;
@@ -75,11 +73,11 @@ export class OutboxWorker {
 
   /** Sends the email and returns its next state. Never stores anything itself. */
   private async deliver(email: OutboxEmail): Promise<OutboxEmail> {
-    const { apps, links, renderer, sender } = this.deps;
+    const { apps, renderer, sender } = this.deps;
     const app = await apps.findById(email.appId);
     if (app === null) return this.failPermanently(email, 'app not found');
 
-    const variables = buildEmailVariables({ template: email.template, payload: email.payload, app, links });
+    const variables = buildEmailVariables({ template: email.template, payload: email.payload, app });
     if (!variables.ok) return this.failPermanently(email, variables.error);
 
     try {

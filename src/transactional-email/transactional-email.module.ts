@@ -5,7 +5,6 @@ import { AppRegistryModule } from '../app-registry/app-registry.module';
 import { APP_REPOSITORY, type AppRepository } from '../app-registry/domain/app.repository';
 import { APP_CONFIG, type AppConfig } from '../platform/config/app-config';
 import { CLOCK, type Clock } from '../shared-kernel/clock';
-import { EmailLinks } from './application/email-links';
 import { OutboxWorker } from './application/outbox-worker';
 import { EMAIL_OUTBOX, type EmailOutbox } from './domain/email-outbox';
 import { EMAIL_SENDER, type EmailSender } from './domain/email-sender';
@@ -53,7 +52,6 @@ const MAX_DELIVERY_ATTEMPTS = 8;
           sender,
           renderer,
           clock,
-          links: new EmailLinks(config.authPublicBaseUrl),
           defaultFrom: config.mailFrom,
           logger: new Logger('EmailOutbox'),
           maxAttempts: MAX_DELIVERY_ATTEMPTS,
