@@ -29,12 +29,41 @@ describe('AppUrl', () => {
     ['http localhost lookalike', 'http://localhost.evil.example/login', false],
     ['http localhost in production', 'http://localhost:3000/login', true],
     ['http 127.0.0.1 in production', 'http://127.0.0.1:3000/login', true],
+    ['trailing newline', 'https://a.example/login\n', false],
+    ['leading space', ' https://a.example/login', false],
+    ['embedded space', 'https://a.example/lo gin', false],
+    ['tab', 'https://a.example/\tlogin', false],
+    ['control character', 'https://a.example/\u0001login', false],
   ];
 
   it.each(rejected)('rejects %s', (_label, raw, isProduction) => {
     const result = AppUrl.create(raw, { isProduction });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('invalid_app_url');
+  });
+
+  it('does not echo a rejected input in the message', () => {
+    const result = AppUrl.create('https://a.example/secret value', { isProduction: false });
+    expect(!result.ok && result.error.message).toBe('Invalid app URL: must not contain whitespace or control characters');
+  });
+
+  describe('normalization', () => {
+    const stored = (raw: string): string | undefined => {
+      const result = AppUrl.create(raw, { isProduction: false });
+      return result.ok ? result.value.value : undefined;
+    };
+
+    it('stores an IDN host as punycode', () => {
+      expect(stored('https://bücher.example/login')).toBe('https://xn--bcher-kva.example/login');
+    });
+
+    it('stores the scheme and host lowercased', () => {
+      expect(stored('HTTPS://A.Example/Login')).toBe('https://a.example/Login');
+    });
+
+    it('stores a bare origin with the trailing slash the URL parser adds', () => {
+      expect(stored('https://a.example')).toBe('https://a.example/');
+    });
   });
 
   it('names the field in the message when given a label, and falls back to a generic one', () => {

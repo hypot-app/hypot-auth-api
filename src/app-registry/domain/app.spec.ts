@@ -134,6 +134,17 @@ describe('App changes', () => {
       expect(result.ok).toBe(true);
     });
 
+    it('accepts a normalized bare-origin URL (stored with its trailing slash) on its own origin', () => {
+      const result = App.create(
+        props({
+          allowedOrigins: ['https://a.example'],
+          emailConfirmationUrl: 'https://a.example/',
+          passwordResetUrl: 'https://a.example/',
+        }),
+      );
+      expect(result.ok).toBe(true);
+    });
+
     it.each([
       ['email_confirmation_url', { emailConfirmationUrl: 'https://evil.example/confirm' }],
       ['email_confirmation_url', { emailConfirmationUrl: 'https://a.example:8443/confirm' }],
