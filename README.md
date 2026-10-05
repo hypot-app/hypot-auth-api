@@ -76,12 +76,16 @@ templates hard-code "24 hours" and "1 hour" while the real TTLs live in U5/U6.
 Requires Node 24 (see `.nvmrc`).
 
 ```bash
-cp .env.example .env   # then start Postgres (e.g. docker compose up -d postgres mailpit)
+cp .env.example .env               # use localhost hosts: DATABASE_URL @localhost:5432, SMTP_HOST=localhost
+docker compose up -d postgres mailpit
 npm ci
-npm run build
-npm run migration:run   # apply pending migrations (uses DATABASE_URL)
-node --env-file=.env dist/main.js
+npm run migration:run              # builds, then applies pending migrations
+npm run start:dev                  # recompiles and restarts on changes
 ```
+
+`npm start`, `npm run cli` and the `migration:*` scripts load `.env` automatically when it exists
+(`node --env-file-if-exists`). In Docker and CI no `.env` is needed; variables are injected.
+`start:dev` recompiles TypeScript on change; editing `.hbs` templates requires restarting it.
 
 The service validates its environment at startup and exits with a clear error when a
 required variable is missing or invalid (see `.env.example`).
