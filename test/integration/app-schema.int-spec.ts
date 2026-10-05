@@ -94,9 +94,8 @@ describe('apps table (integration)', () => {
     it('is reversible: up -> down -> up', async () => {
       expect(await tableExists()).toBe(true);
 
-      // email_outbox (a later migration) references apps, so it is undone first.
-      await db.dataSource.undoLastMigration();
-      await db.dataSource.undoLastMigration();
+      // Later migrations reference apps, so they are undone first.
+      await db.revertThrough('CreateApps');
       expect(await tableExists()).toBe(false);
       expect(await typeCount()).toBe(0);
 

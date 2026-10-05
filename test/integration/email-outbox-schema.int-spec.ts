@@ -86,7 +86,7 @@ describe('email_outbox table (integration)', () => {
     it('is reversible: up -> down -> up', async () => {
       expect(await state()).toEqual({ table: true, types: 1 });
 
-      await db.dataSource.undoLastMigration();
+      await db.revertThrough('CreateEmailOutbox');
       expect(await state()).toEqual({ table: false, types: 0 });
       // The apps table from the earlier migration must survive the down.
       const apps: { exists: boolean }[] = await db.dataSource.query(`SELECT to_regclass('public.apps') IS NOT NULL AS exists`);
