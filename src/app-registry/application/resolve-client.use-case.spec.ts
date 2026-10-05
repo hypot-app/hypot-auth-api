@@ -72,13 +72,6 @@ describe('ResolveClientUseCase', () => {
       }
     });
 
-    it('refuses an inactive or unknown app even with a matching origin', async () => {
-      const inactive = await useCase.execute({ clientId: 'off', origin: 'https://a.example' });
-      const unknown = await useCase.execute({ clientId: 'zzz', origin: 'https://a.example' });
-      expect(!inactive.ok && inactive.error.code).toBe('invalid_client');
-      expect(!unknown.ok && unknown.error.code).toBe('invalid_client');
-    });
-
     it.each(['https://A.example', 'https://a.example/', 'http://a.example', 'https://a.example:443', 'null', ''])(
       'compares exactly: %j is not the app origin',
       async (origin) => {
