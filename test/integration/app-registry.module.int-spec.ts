@@ -33,32 +33,29 @@ describe('AppRegistryModule wiring (integration)', () => {
       clientType: 'confidential',
       redirectUris: ['https://a.example/cb'],
       allowedOrigins: ['https://a.example'],
-      postResetRedirectUri: 'https://a.example/login',
       isProduction: false,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const secret = result.value.clientSecret as string;
 
-    const rows: { client_secret_hash: Buffer; post_reset_redirect_uri: string }[] = await db.dataSource.query(
-      'SELECT client_secret_hash, post_reset_redirect_uri FROM apps WHERE client_id = $1',
+    const rows: { client_secret_hash: Buffer }[] = await db.dataSource.query(
+      'SELECT client_secret_hash FROM apps WHERE client_id = $1',
       [result.value.app.clientId],
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].client_secret_hash.equals(hashToken(secret))).toBe(true);
-    expect(rows[0].post_reset_redirect_uri).toBe('https://a.example/login');
 
     const dump = JSON.stringify(await db.dataSource.query('SELECT * FROM apps'));
     expect(dump).not.toContain(secret);
   });
 
-  it('persists nothing when the post-reset URI is invalid', async () => {
+  it('persists nothing when an allowed origin is invalid', async () => {
     const result = await register.execute({
       name: 'Shop',
       clientType: 'public',
       redirectUris: [],
-      allowedOrigins: [],
-      postResetRedirectUri: 'http://a.example/login',
+      allowedOrigins: ['http://a.example'],
       isProduction: false,
     });
     expect(result.ok).toBe(false);

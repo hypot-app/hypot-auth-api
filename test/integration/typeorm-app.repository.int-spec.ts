@@ -16,7 +16,8 @@ function props(overrides: Partial<AppProps> = {}): AppProps {
     redirectUris: ['https://a.example/cb'],
     allowedOrigins: ['https://a.example'],
     emailFrom: null,
-    postResetRedirectUri: null,
+    emailConfirmationUrl: null,
+    passwordResetUrl: null,
     status: 'active',
     createdAt: NOW,
     updatedAt: NOW,
@@ -44,7 +45,13 @@ describe('TypeOrmAppRepository (integration)', () => {
   });
 
   it('saves an app and finds it by client_id as a domain App', async () => {
-    const app = App.restore(props({ clientId: 'abc', postResetRedirectUri: 'https://a.example/login' }));
+    const app = App.restore(
+      props({
+        clientId: 'abc',
+        emailConfirmationUrl: 'https://a.example/confirm',
+        passwordResetUrl: 'https://a.example/reset',
+      }),
+    );
     await repository.save(app);
 
     const found = await repository.findByClientId('abc');

@@ -12,7 +12,8 @@ function props(overrides: Partial<AppProps> = {}): AppProps {
     redirectUris: ['https://a.example/cb'],
     allowedOrigins: ['https://a.example'],
     emailFrom: null,
-    postResetRedirectUri: null,
+    emailConfirmationUrl: null,
+    passwordResetUrl: null,
     status: 'active',
     createdAt: NOW,
     updatedAt: NOW,
@@ -92,14 +93,27 @@ describe('App changes', () => {
     expect(app.name).toBe('Shop');
   });
 
-  it('update can set and clear nullable fields', () => {
-    const app = App.restore(props({ postResetRedirectUri: 'https://a.example/login', emailFrom: 'x@a.example' }));
-    const cleared = app.update({ postResetRedirectUri: null, emailFrom: null }, later);
-    expect(cleared.ok && cleared.value.postResetRedirectUri).toBeNull();
+  it('update can set and clear email_from', () => {
+    const app = App.restore(props({ emailFrom: 'x@a.example' }));
+    const cleared = app.update({ emailFrom: null }, later);
     expect(cleared.ok && cleared.value.emailFrom).toBeNull();
 
     const unchanged = app.update({}, later);
-    expect(unchanged.ok && unchanged.value.postResetRedirectUri).toBe('https://a.example/login');
+    expect(unchanged.ok && unchanged.value.emailFrom).toBe('x@a.example');
+  });
+
+  it('update replaces the email link URLs and keeps them when omitted', () => {
+    const app = App.restore(
+      props({ emailConfirmationUrl: 'https://a.example/confirm', passwordResetUrl: 'https://a.example/reset' }),
+    );
+
+    const changed = app.update({ emailConfirmationUrl: 'https://b.example/confirm' }, later);
+    expect(changed.ok && changed.value.emailConfirmationUrl).toBe('https://b.example/confirm');
+    expect(changed.ok && changed.value.passwordResetUrl).toBe('https://a.example/reset');
+
+    const reset = app.update({ passwordResetUrl: 'https://b.example/reset' }, later);
+    expect(reset.ok && reset.value.emailConfirmationUrl).toBe('https://a.example/confirm');
+    expect(reset.ok && reset.value.passwordResetUrl).toBe('https://b.example/reset');
   });
 
   it('update rejects a blank name', () => {

@@ -9,7 +9,7 @@ Revision 2 (2026-10-05). U1-U6 are DONE and merged into `develop`; their entries
 | Estimated changed lines | 6,850-7,860 (additions + deletions, excludes `package-lock.json`). Raw feature estimates multiplied by 3.75 (the proposal's 3.5-4x), tests included. Round 11 amendment added about 140-165 raw lines (about 525-620 changed lines): grace window, `refresh_ip` and `confirm_ip` limits, `/me` fields, change-password `400`, forgot for unconfirmed accounts, preflight headers, email URL origin rule (U11b note). The integration guide and API contract now ship from `docs/` ahead of U19d, which shrinks. |
 | 400-line budget risk | High |
 | Chained PRs recommended | Yes |
-| Suggested split | 23 stacked PRs across 9 units (a/b/c/d per unit below), each targeting <=400 lines. Two PRs may exceed 400 and are pre-flagged `size:exception`: U14c and U19b. U15c and U16 sit at the 400 edge after round 11 and must be trimmed or split if they measure over. |
+| Suggested split | 23 stacked PRs across 9 units (a/b/c/d per unit below), each targeting <=400 lines. Three PRs exceed 400 and are flagged `size:exception`: U11a (570 actual, merged), U14c and U19b. U15c and U16 sit at the 400 edge after round 11 and must be trimmed or split if they measure over. |
 | Delivery strategy | ask-on-risk, resolved as chained PRs |
 | Chain strategy | stacked-to-develop (every PR targets `develop`) |
 
@@ -33,7 +33,7 @@ Every PR targets `develop`, never `main`. The next branch starts from the update
 
 | Unit | Goal | Est. lines (3.5-4x) | Depends on | Splits (each its own PR) |
 |------|------|--------------------:|------------|--------------------------|
-| U11 | Config https rule, app email URLs (`AppUrl`), CORS origin binding | 770-880 | U6 | a config + `AppUrl` + migration (260-300) / b use cases + CLI (280-320) / c origin binding + CORS routes (230-260) |
+| U11 | Config https rule, app email URLs (`AppUrl`), CORS origin binding | about 920-1,030 (a: 541 actual) | U6 | a config + `AppUrl` + migration (actual 541, `size:exception`: removing the old post-reset code was pulled forward from b) / b use cases + CLI (about 150-190 after the pull-forward) / c origin binding + CORS routes (230-260) |
 | U12 | transactional-email: links from app URLs with `#token` | 315-360 | U11 | single PR |
 | U13 | abuse-protection: IP, config, counters, limiter, sweeper (all before bcrypt) | 930-1,060 | U12 | a domain + config + trust proxy (335-380, includes `refresh_ip` and `confirm_ip` scopes) / b table + store (280-320) / c guard + sweeper (315-360) |
 | U14 | session-auth A: sessions, refresh-token storage, login | 955-1,085 | U13 | a migration + schemas (275-305, includes the grace columns) / b repository (300-340) / c login (385-440, `size:exception` pre-flagged) |
@@ -113,17 +113,17 @@ Real forks: none. Items 8 and 9 are the closest; both follow the specs, and the 
 
 ## U11 Config, app registry URLs, CORS binding
 
-**U11a** `feat/u11a-config-app-urls` (260-300 lines)
+**U11a** `feat/u11a-config-app-urls` (541 lines actual, `size:exception`; forecast was 260-300)
 
-- [ ] 11.1 RED: `app-config.spec.ts` cases: `NODE_ENV=production` + `http://` `AUTH_PUBLIC_BASE_URL` throws `ConfigError` naming the variable; production + `https://` passes; development + `http://` passes. GREEN: case-sensitive `https://` prefix refine in `src/platform/config/app-config.ts`. Mutation: remove the refine, the production case fails. Add a README production note.
-- [ ] 11.2 RED/GREEN/REFACTOR: `git mv` `PostResetRedirectUri` to `AppUrl` (`src/app-registry/domain/app-url.ts`) with the same table-driven rules (https, localhost http outside production, no userinfo, no fragment, relative/`javascript:`/`ftp:` rejected). Tests move with it and stay green.
-- [ ] 11.3 RED: migration `1760000004000-AppEmailLinkUrls` int test: up adds nullable `email_confirmation_url` and `password_reset_url` and drops `post_reset_redirect_uri`; down restores it and drops both; up, down, up. Fix the `CreateApps` reversibility test for the new head. GREEN: migration, `AppRow`, `AppSchema`, `AppMapper` and domain `App` (`string | null`, round-trip including null).
+- [x] 11.1 RED: `app-config.spec.ts` cases: `NODE_ENV=production` + `http://` `AUTH_PUBLIC_BASE_URL` throws `ConfigError` naming the variable; production + `https://` passes; development + `http://` passes. GREEN: case-sensitive `https://` prefix refine in `src/platform/config/app-config.ts`. Mutation: remove the refine, the production case fails. Add a README production note. (Also: compose `api` sets `NODE_ENV=development`, because the image defaults to production.)
+- [x] 11.2 RED/GREEN/REFACTOR: `git mv` `PostResetRedirectUri` to `AppUrl` (`src/app-registry/domain/app-url.ts`) with the same table-driven rules (https, localhost http outside production, no userinfo, no fragment, relative/`javascript:`/`ftp:` rejected). Tests move with it and stay green. (Pulled in from U11b because the VO and column go away here: the `PostResetRedirectUri` use-case inputs, the CLI flags `--post-reset-redirect-uri` and `--clear-post-reset-redirect-uri`, their tests and README mentions are removed in U11a; U11b adds the new inputs.)
+- [x] 11.3 RED: migration `1760000004000-AppEmailLinkUrls` int test: up adds nullable `email_confirmation_url` and `password_reset_url` and drops `post_reset_redirect_uri`; down restores it and drops both; up, down, up. Fix the `CreateApps` reversibility test for the new head. GREEN: migration, `AppRow`, `AppSchema`, `AppMapper` and domain `App` (`string | null`, round-trip including null).
 
-**U11b** `feat/u11b-app-url-cli` (280-320 lines)
+**U11b** `feat/u11b-app-url-cli` (150-190 lines; the removal of the post-reset use-case inputs, CLI flags, tests and README mentions already landed in U11a)
 
 - [ ] 11.4 RED/GREEN: register requires both URLs validated through `AppUrl` (`isProduction` from config); update replaces but rejects clear or blank; invalid input persists nothing. Mutation: skip validation on update, the clear/blank test fails.
-- [ ] 11.5 RED/GREEN/REFACTOR: CLI `--email-confirmation-url` and `--password-reset-url` (required on create, optional on update). Remove `--post-reset-redirect-uri`, `--clear-post-reset-redirect-uri` and their use-case code and tests; unknown option exits non-zero. Assert the specific `CliError` messages and that `NODE_ENV=production` rejects `http://localhost`. REFACTOR shared option parsing.
-- [ ] 11.6 Docs: README CLI examples, a note that existing dev apps need one `app update` with both URLs before signup or forgot works.
+- [ ] 11.5 RED/GREEN/REFACTOR: CLI `--email-confirmation-url` and `--password-reset-url` (required on create, optional on update). Assert that an unknown option such as `--post-reset-redirect-uri` exits non-zero, and assert the specific `CliError` messages. Re-add the CLI test that `NODE_ENV=production` rejects `http://localhost` for both URLs (verify S1, dropped with the old post-reset tests in U11a). REFACTOR shared option parsing. (Flag and use-case removal already done in 11.2.)
+- [ ] 11.6 Docs: README `app create` / `app update` examples with both new flags (the `--post-reset-redirect-uri` mentions are already gone), a note that existing dev apps need one `app update` with both URLs before signup or forgot works.
 
 **U11c** `feat/u11c-origin-binding` (230-260 lines)
 

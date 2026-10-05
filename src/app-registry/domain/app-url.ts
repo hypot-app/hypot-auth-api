@@ -2,35 +2,24 @@ import { DomainError } from '../../shared-kernel/domain-error';
 import { err, ok, type Result } from '../../shared-kernel/result';
 import { LOCAL_HOSTS, type UrlRuleOptions } from './local-hosts';
 
-export type PostResetRedirectUriOptions = UrlRuleOptions;
-
 /**
- * Fixed URL where Auth sends the user after a successful password reset (ADR 27).
+ * A URL on the consuming app that Auth links to from its emails (email confirmation, password reset).
  * Pure: the production rule arrives as an input, never read from config here.
  */
-export class PostResetRedirectUri {
+export class AppUrl {
   private constructor(readonly value: string) {}
 
-  static create(raw: string, options: PostResetRedirectUriOptions): Result<PostResetRedirectUri, DomainError> {
+  static create(raw: string, options: UrlRuleOptions): Result<AppUrl, DomainError> {
     const reason = rejectionReason(raw, options);
-    return reason === null ? ok(new PostResetRedirectUri(raw)) : err(invalid(reason));
-  }
-
-  /** A missing value is valid and means "no redirect" (null). */
-  static optional(
-    raw: string | null | undefined,
-    options: PostResetRedirectUriOptions,
-  ): Result<PostResetRedirectUri | null, DomainError> {
-    if (raw === null || raw === undefined) return ok(null);
-    return PostResetRedirectUri.create(raw, options);
+    return reason === null ? ok(new AppUrl(raw)) : err(invalid(reason));
   }
 }
 
 function invalid(reason: string): DomainError {
-  return new DomainError('invalid_post_reset_redirect_uri', `Invalid post-reset redirect URI: ${reason}`);
+  return new DomainError('invalid_app_url', `Invalid app URL: ${reason}`);
 }
 
-function rejectionReason(raw: string, { isProduction }: PostResetRedirectUriOptions): string | null {
+function rejectionReason(raw: string, { isProduction }: UrlRuleOptions): string | null {
   if (!URL.canParse(raw)) return 'must be an absolute URL';
   const url = new URL(raw);
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return 'scheme must be https';
