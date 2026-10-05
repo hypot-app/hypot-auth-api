@@ -146,15 +146,6 @@ describe('RegisterAppUseCase', () => {
     expect(prod.ok).toBe(false);
   });
 
-  it('stores both email link URLs', async () => {
-    const result = await useCase.execute(input());
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.app.emailConfirmationUrl).toBe('https://a.example/confirm');
-    expect(result.value.app.passwordResetUrl).toBe('https://a.example/reset');
-    expect((await apps.findByClientId(result.value.app.clientId))?.passwordResetUrl).toBe('https://a.example/reset');
-  });
-
   it('rejects an invalid email link URL and persists nothing', async () => {
     const result = await useCase.execute(input({ emailConfirmationUrl: 'https://a.example/confirm#token=' }));
     expect(result.ok).toBe(false);

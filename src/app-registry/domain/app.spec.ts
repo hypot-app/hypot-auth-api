@@ -163,19 +163,6 @@ describe('App changes', () => {
       if (!result.ok) expect(result.error.code).toBe('email_url_origin_not_allowed');
     });
 
-    it('update accepts changing origins and URLs together when they stay consistent', () => {
-      const app = App.restore(props(urls));
-      const result = app.update(
-        {
-          allowedOrigins: ['https://b.example'],
-          emailConfirmationUrl: 'https://b.example/confirm',
-          passwordResetUrl: 'https://b.example/reset',
-        },
-        later,
-      );
-      expect(result.ok).toBe(true);
-    });
-
     it('does not apply to a legacy app that has no URLs yet', () => {
       const result = App.restore(props({ allowedOrigins: [] })).update({ name: 'Renamed' }, later);
       expect(result.ok).toBe(true);

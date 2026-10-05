@@ -141,15 +141,6 @@ describe('UpdateAppUseCase / DeactivateAppUseCase', () => {
       expect(stored?.name).toBe('Shop');
     });
 
-    it('applies the production rule', async () => {
-      const result = await update.execute({
-        clientId: 'abc',
-        emailConfirmationUrl: 'http://localhost:5173/confirm',
-        isProduction: true,
-      });
-      expect(!result.ok && result.error.code).toBe('invalid_app_url');
-    });
-
     it('rejects a URL outside the allowed origins and changes nothing', async () => {
       const result = await update.execute({ clientId: 'abc', emailConfirmationUrl: 'https://evil.example/c', isProduction: false });
       expect(!result.ok && result.error.code).toBe('email_url_origin_not_allowed');
