@@ -109,9 +109,11 @@ Real forks: none. Items 8 and 9 are the closest; both follow the specs, and the 
 
 **U11b** `feat/u11b-app-url-cli` (150-190 lines; the removal of the post-reset use-case inputs, CLI flags, tests and README mentions already landed in U11a)
 
-- [ ] 11.4 RED/GREEN: register requires both URLs validated through `AppUrl` (`isProduction` from config); update replaces but rejects clear or blank; invalid input persists nothing. Mutation: skip validation on update, the clear/blank test fails.
-- [ ] 11.5 RED/GREEN/REFACTOR: CLI `--email-confirmation-url` and `--password-reset-url` (required on create, optional on update). Assert that an unknown option such as `--post-reset-redirect-uri` exits non-zero, and assert the specific `CliError` messages. Re-add the CLI test that `NODE_ENV=production` rejects `http://localhost` for both URLs (verify S1, dropped with the old post-reset tests in U11a). REFACTOR shared option parsing. (Flag and use-case removal already done in 11.2.)
-- [ ] 11.6 Docs: README `app create` / `app update` examples with both new flags (the `--post-reset-redirect-uri` mentions are already gone), a note that existing dev apps need one `app update` with both URLs before signup or forgot works.
+- [x] 11.4 RED/GREEN: register requires both URLs validated through `AppUrl` (`isProduction` from config); update replaces but rejects clear or blank; invalid input persists nothing. Mutation: skip validation on update, the clear/blank test fails.
+- [x] 11.5 RED/GREEN/REFACTOR: CLI `--email-confirmation-url` and `--password-reset-url` (required on create, optional on update). Assert that an unknown option such as `--post-reset-redirect-uri` exits non-zero, and assert the specific `CliError` messages. Re-add the CLI test that `NODE_ENV=production` rejects `http://localhost` for both URLs (verify S1, dropped with the old post-reset tests in U11a). REFACTOR shared option parsing. (Flag and use-case removal already done in 11.2.)
+- [x] 11.6 Docs: README `app create` / `app update` examples with both new flags (the `--post-reset-redirect-uri` mentions are already gone), a note that existing dev apps need one `app update` with both URLs before signup or forgot works.
+
+Addition approved by the user in the contract review (spec amendment lands later in a docs PR): the origin of both `email_confirmation_url` and `password_reset_url` must be one of the app's `allowed_origins`. Enforced as an `App` invariant (`email_url_origin_not_allowed`), so it holds on create and on update, including an update that removes an origin a stored URL uses. Comparison uses the normalized origin (`URL.origin`), consistent with `AllowedOrigin`. An app therefore needs at least one allowed origin. `AppUrl.create` also takes an optional label so errors name the field (`Invalid email_confirmation_url: ...`).
 
 **U11c** `feat/u11c-origin-binding` (230-260 lines)
 

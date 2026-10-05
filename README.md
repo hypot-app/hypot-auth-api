@@ -67,6 +67,15 @@ Registration validates app fields and rejects bad input with a non-zero exit and
 - `--origin` must be an origin only: `https://host[:port]` (or `http://localhost` / `http://127.0.0.1` outside
   production). No path, query, fragment, trailing slash, `null` or wildcard. Scheme and host are lower-cased.
 - `--redirect-uri` must be an absolute `https` URL (or `http` on localhost outside production) without a fragment.
+- `--email-confirmation-url` and `--password-reset-url` are required on `create`: the pages of the app that the
+  emails link to (the token is appended as `#token=...`). Same rules as redirect URIs (https, or `http` on localhost
+  outside production, no credentials, no fragment), and the **origin of each URL must be one of the app's `--origin`
+  values** (compared after normalization). `update` can replace them but never clear them, and it also fails if it
+  removes an origin that a stored URL still uses. An unknown option, such as the removed
+  `--post-reset-redirect-uri`, exits non-zero.
+
+Apps created before these URLs existed need one `app update <client_id> --email-confirmation-url ... --password-reset-url ...`
+(with both origins already in `--origin`) before signup or forgot-password works for them.
 
 CORS for the API allows a request's `Origin` when it exactly matches `--origin` of any active app. No
 `client_id` is needed, so preflights and bearer-only calls such as `/api/v1/me` work. Answers are cached
