@@ -1,10 +1,8 @@
 import type { App } from '../../app-registry/domain/app';
 import { err, ok, type Result } from '../../shared-kernel/result';
+import { isWellFormedToken } from '../../shared-kernel/token-generator';
 import { isEmailTemplate, type EmailTemplate } from '../domain/email-template';
 import type { EmailLinks } from './email-links';
-
-/** Tokens come from TokenGenerator (base64url). The payload is read back from storage, so it is still checked. */
-const TOKEN_PATTERN = /^[A-Za-z0-9_-]{16,256}$/;
 
 type Builder = (input: { payload: Readonly<Record<string, string>>; app: App; links: EmailLinks }) => Record<string, string> | null;
 
@@ -12,7 +10,8 @@ const withToken =
   (link: (links: EmailLinks, token: string, app: App) => string): Builder =>
   ({ payload, app, links }) => {
     const token = payload['token'];
-    if (token === undefined || !TOKEN_PATTERN.test(token)) return null;
+    // The payload is read back from storage, so the token is still checked.
+    if (!isWellFormedToken(token)) return null;
     return { appName: app.name, link: link(links, token, app) };
   };
 

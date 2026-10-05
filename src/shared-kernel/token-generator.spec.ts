@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { CryptoTokenGenerator, hashToken } from './token-generator';
+import { CryptoTokenGenerator, hashToken, isWellFormedToken } from './token-generator';
 
 describe('CryptoTokenGenerator', () => {
   const generator = new CryptoTokenGenerator();
@@ -36,5 +36,22 @@ describe('hashToken', () => {
 
   it('differs for different inputs', () => {
     expect(hashToken('abc').equals(hashToken('abd'))).toBe(false);
+  });
+});
+
+describe('isWellFormedToken', () => {
+  it('accepts what the generator produces', () => {
+    expect(isWellFormedToken(new CryptoTokenGenerator().generate().token)).toBe(true);
+  });
+
+  it.each([
+    ['a non-string', 42],
+    ['an array', ['a'.repeat(43)]],
+    ['too short', 'a'.repeat(15)],
+    ['too long', 'a'.repeat(257)],
+    ['characters outside base64url', `${'a'.repeat(20)}+/=`],
+    ['a line break', `${'a'.repeat(20)}\n`],
+  ])('rejects %s', (_label, value) => {
+    expect(isWellFormedToken(value)).toBe(false);
   });
 });
