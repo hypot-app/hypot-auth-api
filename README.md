@@ -45,7 +45,7 @@ docker compose run --rm api dist/cli.js app create --name "My SPA" \
   --redirect-uri https://spa.example/cb --origin https://spa.example \
   --post-reset-redirect-uri https://spa.example/login
 docker compose run --rm api dist/cli.js app create --name "Backend" --type confidential
-docker compose run --rm api dist/cli.js app update <client_id> --clear-post-reset-redirect-uri
+docker compose run --rm api dist/cli.js app update <client_id> --name "New name"
 docker compose run --rm api dist/cli.js app deactivate <client_id>
 ```
 
