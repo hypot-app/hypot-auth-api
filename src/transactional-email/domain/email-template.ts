@@ -8,3 +8,7 @@ export const EMAIL_TEMPLATES = [
 ] as const;
 
 export type EmailTemplate = (typeof EMAIL_TEMPLATES)[number];
+
+export function isEmailTemplate(name: string): name is EmailTemplate {
+  return (EMAIL_TEMPLATES as readonly string[]).includes(name);
+}

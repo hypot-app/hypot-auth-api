@@ -3,7 +3,6 @@ export interface EmailMessage {
   from: string;
   subject: string;
   text: string;
-  html?: string;
 }
 
 /** Port: delivers one message. Throws when the provider rejects or is unreachable. */

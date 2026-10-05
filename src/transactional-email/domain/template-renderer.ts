@@ -1,7 +1,6 @@
 export interface RenderedEmail {
   subject: string;
   text: string;
-  html?: string;
 }
 
 /** Port: turns a template name and its variables into subject and body. */

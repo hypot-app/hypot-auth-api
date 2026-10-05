@@ -59,17 +59,33 @@ CORS for the API allows a request's `Origin` when it exactly matches `--origin` 
 `client_id` is needed, so preflights and bearer-only calls such as `/api/v1/me` work. Answers are cached
 for 30 seconds, so deactivating an app or changing its origins can take that long to apply.
 
+### Transactional email
+
+Emails go through a Postgres outbox and a background worker started by `main.ts`. Delivery uses plain SMTP
+(`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`/`SMTP_PASS`, `MAIL_FROM`); an app's `--email-from` overrides
+`MAIL_FROM`. In the Compose stack mail is caught by Mailpit: open http://localhost:8025. Every link is
+`AUTH_PUBLIC_BASE_URL` + `/api/v1/...`. Default templates live in `src/transactional-email/templates/default/`;
+put files with the same names in `templates/<client_id>/` to override them for one app. The build copies the
+templates into `dist/`.
+
+TODO(U5/U6): pass the token TTL to the templates as a variable. The default confirmation and password-reset
+templates hard-code "24 hours" and "1 hour" while the real TTLs live in U5/U6.
+
 ## Run locally without Docker
 
 Requires Node 24 (see `.nvmrc`).
 
 ```bash
-cp .env.example .env   # then start Postgres (e.g. docker compose up -d postgres mailpit)
+cp .env.example .env               # use localhost hosts: DATABASE_URL @localhost:5432, SMTP_HOST=localhost
+docker compose up -d postgres mailpit
 npm ci
-npm run build
-npm run migration:run   # apply pending migrations (uses DATABASE_URL)
-node --env-file=.env dist/main.js
+npm run migration:run              # builds, then applies pending migrations
+npm run start:dev                  # recompiles and restarts on changes
 ```
+
+`npm start`, `npm run cli` and the `migration:*` scripts load `.env` automatically when it exists
+(`node --env-file-if-exists`). In Docker and CI no `.env` is needed; variables are injected.
+`start:dev` recompiles TypeScript on change; editing `.hbs` templates requires restarting it.
 
 The service validates its environment at startup and exits with a clear error when a
 required variable is missing or invalid (see `.env.example`).

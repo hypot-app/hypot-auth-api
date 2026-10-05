@@ -18,6 +18,8 @@ services:
   api:
     build: .
     image: hypot-api:dev
+    # Shutdown waits for an email being sent, which is bounded by the 60 s send deadline.
+    stop_grace_period: 70s
     ports:
       - "3000:3000"
     environment:

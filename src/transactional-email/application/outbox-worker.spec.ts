@@ -147,6 +147,15 @@ describe('OutboxWorker', () => {
     expect([...outbox.emails.values()].map((e) => e.status)).toEqual(['sent', 'sent', 'sent']);
   });
 
+  it('drain stops after the current email once told to stop', async () => {
+    const { worker, sender, enqueue } = setup();
+    await enqueue(appWith('a1', null), 'welcome', {}, 'one@example.com');
+    await enqueue(appWith('a2', null), 'welcome', {}, 'two@example.com');
+
+    expect(await worker.drain(10, () => sender.sent.length >= 1)).toBe(1);
+    expect(sender.sent.map((m) => m.to)).toEqual(['one@example.com']);
+  });
+
   describe('provider failure', () => {
     it('keeps the email pending with its payload, counts the attempt and backs off', async () => {
       const { worker, sender, outbox, enqueue, clock } = setup();

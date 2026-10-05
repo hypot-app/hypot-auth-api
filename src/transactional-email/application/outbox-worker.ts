@@ -62,10 +62,14 @@ export class OutboxWorker {
     return true;
   }
 
-  /** Handles due emails until none is left or `limit` is reached. Returns how many were handled. */
-  async drain(limit: number): Promise<number> {
+  /**
+   * Handles due emails until none is left, `limit` is reached or `isStopped` says so
+   * (checked between emails, so a send in progress always finishes). Returns how many
+   * were handled.
+   */
+  async drain(limit: number, isStopped: () => boolean = () => false): Promise<number> {
     let handled = 0;
-    while (handled < limit && (await this.processNext())) handled++;
+    while (handled < limit && !isStopped() && (await this.processNext())) handled++;
     return handled;
   }
 

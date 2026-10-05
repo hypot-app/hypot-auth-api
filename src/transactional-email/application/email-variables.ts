@@ -1,6 +1,6 @@
 import type { App } from '../../app-registry/domain/app';
 import { err, ok, type Result } from '../../shared-kernel/result';
-import type { EmailTemplate } from '../domain/email-template';
+import { isEmailTemplate, type EmailTemplate } from '../domain/email-template';
 import type { EmailLinks } from './email-links';
 
 /** Tokens come from TokenGenerator (base64url). The payload is read back from storage, so it is still checked. */
@@ -24,10 +24,6 @@ const BUILDERS: Record<EmailTemplate, Builder> = {
   'password-changed': ({ app }) => ({ appName: app.name }),
 };
 
-function isTemplate(name: string): name is EmailTemplate {
-  return Object.hasOwn(BUILDERS, name);
-}
-
 /**
  * Turns a stored payload into the variables a template renders. Only the fields
  * a template needs are read; anything else in the payload is dropped.
@@ -38,7 +34,7 @@ export function buildEmailVariables(input: {
   app: App;
   links: EmailLinks;
 }): Result<Record<string, string>, string> {
-  if (!isTemplate(input.template)) return err('unknown template');
+  if (!isEmailTemplate(input.template)) return err('unknown template');
   const variables = BUILDERS[input.template](input);
   return variables === null ? err(`invalid payload for template ${input.template}`) : ok(variables);
 }
