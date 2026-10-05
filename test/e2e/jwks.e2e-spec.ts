@@ -10,7 +10,7 @@ describe('GET /.well-known/jwks.json (e2e)', () => {
   let app: INestApplication;
   const current = generateKeySet(); // active + next
   const previous = generateKeySet({ next: false });
-  const keySet = { ...current, retired: [previous.active] };
+  const keySet = { ...current, retired: [{ ...previous.active, retiredAt: new Date().toISOString() }] };
 
   beforeAll(async () => {
     db = await startTestDatabase();
