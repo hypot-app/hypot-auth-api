@@ -1,7 +1,9 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Post, Query, Res } from '@nestjs/common';
+import type { ServerResponse } from 'node:http';
 import { z } from 'zod';
 import type { DomainError } from '../../shared-kernel/domain-error';
 import type { Result } from '../../shared-kernel/result';
+import { withdrawCorsAllow } from '../../app-registry/http/app-cors.middleware';
 import { ConfirmEmailUseCase } from '../application/confirm-email.use-case';
 import { ResendConfirmationUseCase } from '../application/resend-confirmation.use-case';
 import { SignupUseCase } from '../application/signup.use-case';
@@ -25,8 +27,13 @@ function parseBody<T>(schema: z.ZodType<T>, body: unknown, description: string):
   return parsed.data;
 }
 
-/** Every use case failure here is the caller's input: a 400 with the stable code and message. */
-function unwrap(result: Result<void, DomainError>): void {
+/**
+ * Every use case failure here is the caller's input: a 400 with the stable code and message.
+ * An `invalid_client` (unknown, inactive or origin not bound to the app) also drops the CORS
+ * allow header, so the browser cannot read the answer (ADR 38).
+ */
+function unwrap(result: Result<void, DomainError>, res?: ServerResponse): void {
+  if (res !== undefined && !result.ok && result.error.code === 'invalid_client') withdrawCorsAllow(res);
   if (!result.ok) throw new BadRequestException({ error: result.error.code, message: result.error.message });
 }
 
@@ -40,9 +47,21 @@ export class AccountsController {
 
   @Post('signup')
   @HttpCode(202)
-  async signup(@Body() body: unknown): Promise<typeof SIGNUP_ACCEPTED> {
+  async signup(
+    @Body() body: unknown,
+    @Headers('origin') origin: string | undefined,
+    @Res({ passthrough: true }) res: ServerResponse,
+  ): Promise<typeof SIGNUP_ACCEPTED> {
     const input = parseBody(signupBody, body, 'client_id, email and password');
-    unwrap(await this.signupUseCase.execute({ clientId: input.client_id, email: input.email, password: input.password }));
+    unwrap(
+      await this.signupUseCase.execute({
+        clientId: input.client_id,
+        email: input.email,
+        password: input.password,
+        origin,
+      }),
+      res,
+    );
     return SIGNUP_ACCEPTED;
   }
 
@@ -54,9 +73,13 @@ export class AccountsController {
 
   @Post('resend-confirmation')
   @HttpCode(202)
-  async resend(@Body() body: unknown): Promise<typeof RESEND_ACCEPTED> {
+  async resend(
+    @Body() body: unknown,
+    @Headers('origin') origin: string | undefined,
+    @Res({ passthrough: true }) res: ServerResponse,
+  ): Promise<typeof RESEND_ACCEPTED> {
     const input = parseBody(resendBody, body, 'client_id and email');
-    unwrap(await this.resendUseCase.execute({ clientId: input.client_id, email: input.email }));
+    unwrap(await this.resendUseCase.execute({ clientId: input.client_id, email: input.email, origin }), res);
     return RESEND_ACCEPTED;
   }
 }

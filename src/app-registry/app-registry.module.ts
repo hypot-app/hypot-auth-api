@@ -58,7 +58,21 @@ const CORS_ORIGIN_CACHE_TTL_MS = 30_000;
 })
 export class AppRegistryModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    // Paths get the global `api/v1` prefix. Only the browser-facing API routes need CORS.
-    consumer.apply(AppCorsMiddleware).forRoutes('oauth/token', 'oauth/revoke', 'me');
+    // Paths get the global `api/v1` prefix. The 10 browser-facing API routes of ADR 38; routes
+    // that are not built yet simply never match. Preflights are answered here, before routing.
+    consumer
+      .apply(AppCorsMiddleware)
+      .forRoutes(
+        'auth/login',
+        'auth/refresh',
+        'auth/logout',
+        'accounts/signup',
+        'accounts/confirm',
+        'accounts/resend-confirmation',
+        'password/forgot',
+        'password/reset',
+        'password/change',
+        'me',
+      );
   }
 }
