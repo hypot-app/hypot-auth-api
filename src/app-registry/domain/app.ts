@@ -76,6 +76,8 @@ export class App implements AppProps {
     if (props.clientType === 'confidential' && props.clientSecretHash === null) {
       return err(invalidApp('a confidential app must have a client secret'));
     }
+    const outside = urlOutsideAllowedOrigins(props);
+    if (outside) return err(outside);
     return ok(new App(props));
   }
 
@@ -114,6 +116,30 @@ export class App implements AppProps {
   allowsRedirectUri(uri: string): boolean {
     return this.redirectUris.includes(uri);
   }
+}
+
+/**
+ * Both email link URLs must sit on one of the app's allowed origins. `update` rebuilds through `create`,
+ * so changing the origins while a stored URL still uses a removed one fails here too.
+ * `URL.origin` is lower-cased, like the stored (normalized) allowed origins.
+ */
+function urlOutsideAllowedOrigins(props: AppProps): DomainError | null {
+  const links = [
+    ['email_confirmation_url', props.emailConfirmationUrl],
+    ['password_reset_url', props.passwordResetUrl],
+  ] as const;
+  for (const [field, url] of links) {
+    if (url === null) continue;
+    if (props.allowedOrigins.length === 0) {
+      return new DomainError('allowed_origin_required', 'at least one allowed origin is required');
+    }
+    // AppUrl already validated `url`, so it parses; `.origin` is the normalized form stored in allowedOrigins.
+    const origin = new URL(url).origin;
+    if (!props.allowedOrigins.includes(origin)) {
+      return new DomainError('email_url_origin_not_allowed', `${field} origin "${origin}" must be one of the allowed origins`);
+    }
+  }
+  return null;
 }
 
 function invalidApp(reason: string): DomainError {

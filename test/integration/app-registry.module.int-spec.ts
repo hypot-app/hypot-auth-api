@@ -33,6 +33,8 @@ describe('AppRegistryModule wiring (integration)', () => {
       clientType: 'confidential',
       redirectUris: ['https://a.example/cb'],
       allowedOrigins: ['https://a.example'],
+      emailConfirmationUrl: 'https://a.example/confirm',
+      passwordResetUrl: 'https://a.example/reset',
       isProduction: false,
     });
     expect(result.ok).toBe(true);
@@ -56,6 +58,8 @@ describe('AppRegistryModule wiring (integration)', () => {
       clientType: 'public',
       redirectUris: [],
       allowedOrigins: ['http://a.example'],
+      emailConfirmationUrl: 'https://a.example/confirm',
+      passwordResetUrl: 'https://a.example/reset',
       isProduction: false,
     });
     expect(result.ok).toBe(false);
@@ -67,7 +71,9 @@ describe('AppRegistryModule wiring (integration)', () => {
       name: 'Shop',
       clientType: 'public',
       redirectUris: ['https://a.example/cb'],
-      allowedOrigins: [],
+      allowedOrigins: ['https://a.example'],
+      emailConfirmationUrl: 'https://a.example/confirm',
+      passwordResetUrl: 'https://a.example/reset',
       isProduction: false,
     });
     if (!registered.ok) throw registered.error;

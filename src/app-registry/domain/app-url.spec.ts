@@ -36,4 +36,11 @@ describe('AppUrl', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('invalid_app_url');
   });
+
+  it('names the field in the message when given a label, and falls back to a generic one', () => {
+    const labelled = AppUrl.create('/x', { isProduction: false }, 'password_reset_url');
+    expect(!labelled.ok && labelled.error.message).toBe('Invalid password_reset_url: must be an absolute URL');
+    const generic = AppUrl.create('/x', { isProduction: false });
+    expect(!generic.ok && generic.error.message).toBe('Invalid app URL: must be an absolute URL');
+  });
 });

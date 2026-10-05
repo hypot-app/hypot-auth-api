@@ -9,14 +9,15 @@ import { LOCAL_HOSTS, type UrlRuleOptions } from './local-hosts';
 export class AppUrl {
   private constructor(readonly value: string) {}
 
-  static create(raw: string, options: UrlRuleOptions): Result<AppUrl, DomainError> {
+  /** `label` names the field in the error message so an operator knows which URL to fix. */
+  static create(raw: string, options: UrlRuleOptions, label = 'app URL'): Result<AppUrl, DomainError> {
     const reason = rejectionReason(raw, options);
-    return reason === null ? ok(new AppUrl(raw)) : err(invalid(reason));
+    return reason === null ? ok(new AppUrl(raw)) : err(invalid(label, reason));
   }
 }
 
-function invalid(reason: string): DomainError {
-  return new DomainError('invalid_app_url', `Invalid app URL: ${reason}`);
+function invalid(label: string, reason: string): DomainError {
+  return new DomainError('invalid_app_url', `Invalid ${label}: ${reason}`);
 }
 
 function rejectionReason(raw: string, { isProduction }: UrlRuleOptions): string | null {

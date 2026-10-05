@@ -2,7 +2,7 @@ import { Inject } from '@nestjs/common';
 import { SubCommand } from 'nest-commander';
 import { APP_CONFIG, type AppConfig } from '../../../platform/config/app-config';
 import { UpdateAppUseCase } from '../../application/update-app.use-case';
-import { AppOptionsCommand, CliError, type SharedAppOptions } from './app-options.command';
+import { AppOptionsCommand, toCliError, type SharedAppOptions } from './app-options.command';
 import { CLI_OUTPUT, type CliOutput } from './cli-output';
 
 @SubCommand({
@@ -26,9 +26,11 @@ export class UpdateAppCommand extends AppOptionsCommand {
       redirectUris: options.redirectUri,
       allowedOrigins: options.origin,
       emailFrom: options.emailFrom,
+      emailConfirmationUrl: options.emailConfirmationUrl,
+      passwordResetUrl: options.passwordResetUrl,
       isProduction: this.config.isProduction,
     });
-    if (!result.ok) throw new CliError(result.error.message);
+    if (!result.ok) throw toCliError(result.error);
 
     this.output.out(`updated: ${result.value.clientId}`);
   }

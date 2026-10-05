@@ -3,7 +3,7 @@ import { Option, SubCommand } from 'nest-commander';
 import { APP_CONFIG, type AppConfig } from '../../../platform/config/app-config';
 import { RegisterAppUseCase } from '../../application/register-app.use-case';
 import type { ClientType } from '../../domain/app';
-import { AppOptionsCommand, CliError, type SharedAppOptions } from './app-options.command';
+import { AppOptionsCommand, CliError, toCliError, type SharedAppOptions } from './app-options.command';
 import { CLI_OUTPUT, type CliOutput } from './cli-output';
 
 interface CreateOptions extends SharedAppOptions {
@@ -33,15 +33,20 @@ export class CreateAppCommand extends AppOptionsCommand {
       throw new CliError(`--type must be "public" or "confidential", got "${clientType}"`);
     }
 
+    if (options.emailConfirmationUrl === undefined) throw new CliError('--email-confirmation-url is required');
+    if (options.passwordResetUrl === undefined) throw new CliError('--password-reset-url is required');
+
     const result = await this.registerApp.execute({
       name: options.name,
       clientType: clientType as ClientType,
       redirectUris: options.redirectUri ?? [],
       allowedOrigins: options.origin ?? [],
       emailFrom: options.emailFrom,
+      emailConfirmationUrl: options.emailConfirmationUrl,
+      passwordResetUrl: options.passwordResetUrl,
       isProduction: this.config.isProduction,
     });
-    if (!result.ok) throw new CliError(result.error.message);
+    if (!result.ok) throw toCliError(result.error);
 
     this.output.out(`client_id: ${result.value.app.clientId}`);
     if (result.value.clientSecret !== null) {

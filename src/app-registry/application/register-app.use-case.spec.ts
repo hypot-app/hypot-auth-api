@@ -24,6 +24,8 @@ describe('RegisterAppUseCase', () => {
     clientType: 'public',
     redirectUris: ['https://a.example/cb'],
     allowedOrigins: ['https://a.example'],
+    emailConfirmationUrl: 'https://a.example/confirm',
+    passwordResetUrl: 'https://a.example/reset',
     isProduction: false,
     ...overrides,
   });
@@ -93,7 +95,11 @@ describe('RegisterAppUseCase', () => {
 
   it('normalizes allowed origins (lower-case, de-duplicated) before storing them', async () => {
     const result = await useCase.execute(
-      input({ allowedOrigins: ['HTTPS://Shop.Example', 'https://shop.example', 'http://localhost:5173'] }),
+      input({
+        allowedOrigins: ['HTTPS://Shop.Example', 'https://shop.example', 'http://localhost:5173'],
+        emailConfirmationUrl: 'https://shop.example/confirm',
+        passwordResetUrl: 'https://shop.example/reset',
+      }),
     );
     expect(result.ok && result.value.app.allowedOrigins).toEqual(['https://shop.example', 'http://localhost:5173']);
   });
@@ -138,6 +144,36 @@ describe('RegisterAppUseCase', () => {
     expect(dev.ok).toBe(true);
     const prod = await useCase.execute(input({ redirectUris: ['http://localhost:3000/cb'], isProduction: true }));
     expect(prod.ok).toBe(false);
+  });
+
+  it('rejects an invalid email link URL and persists nothing', async () => {
+    const result = await useCase.execute(input({ emailConfirmationUrl: 'https://a.example/confirm#token=' }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('invalid_app_url');
+    expect(apps.apps.size).toBe(0);
+  });
+
+  it('applies the production rule to the email link URLs', async () => {
+    const dev = await useCase.execute(
+      input({ allowedOrigins: ['http://localhost:5173'], passwordResetUrl: 'http://localhost:5173/reset', emailConfirmationUrl: 'http://localhost:5173/c' }),
+    );
+    expect(dev.ok).toBe(true);
+    const prod = await useCase.execute(
+      input({
+        allowedOrigins: ['https://a.example'],
+        passwordResetUrl: 'http://localhost:5173/reset',
+        isProduction: true,
+      }),
+    );
+    expect(prod.ok).toBe(false);
+    if (!prod.ok) expect(prod.error.code).toBe('invalid_app_url');
+  });
+
+  it('rejects an email link URL outside the allowed origins and persists nothing', async () => {
+    const result = await useCase.execute(input({ passwordResetUrl: 'https://evil.example/reset' }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe('email_url_origin_not_allowed');
+    expect(apps.apps.size).toBe(0);
   });
 
   it('rejects a blank name and persists nothing', async () => {

@@ -7,6 +7,7 @@ import type { AppRepository } from '../domain/app.repository';
 import { AllowedOrigin } from '../domain/allowed-origin';
 import { AppEmailFrom } from '../domain/app-email-from';
 import { AppRedirectUri } from '../domain/app-redirect-uri';
+import { AppUrl } from '../domain/app-url';
 
 export interface UpdateAppInput {
   clientId: string;
@@ -14,6 +15,9 @@ export interface UpdateAppInput {
   redirectUris?: string[];
   allowedOrigins?: string[];
   emailFrom?: string | null;
+  /** Replaced when given; there is no way to clear it. The origin must be one of the app's allowed origins. */
+  emailConfirmationUrl?: string;
+  passwordResetUrl?: string;
   isProduction: boolean;
 }
 
@@ -53,12 +57,28 @@ export class UpdateAppUseCase {
       emailFrom = validated.value;
     }
 
+    let emailConfirmationUrl: string | undefined;
+    if (input.emailConfirmationUrl !== undefined) {
+      const validated = AppUrl.create(input.emailConfirmationUrl, rules, 'email_confirmation_url');
+      if (!validated.ok) return err(validated.error);
+      emailConfirmationUrl = validated.value.value;
+    }
+
+    let passwordResetUrl: string | undefined;
+    if (input.passwordResetUrl !== undefined) {
+      const validated = AppUrl.create(input.passwordResetUrl, rules, 'password_reset_url');
+      if (!validated.ok) return err(validated.error);
+      passwordResetUrl = validated.value.value;
+    }
+
     const updated = app.update(
       {
         name: input.name,
         redirectUris,
         allowedOrigins,
         emailFrom,
+        emailConfirmationUrl,
+        passwordResetUrl,
       },
       this.deps.clock.now(),
     );

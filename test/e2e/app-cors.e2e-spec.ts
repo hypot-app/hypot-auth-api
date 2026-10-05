@@ -34,6 +34,8 @@ describe('CORS origin allowlist (e2e)', () => {
         clientType: 'public',
         redirectUris: [],
         allowedOrigins: origins,
+        emailConfirmationUrl: `${origins[0]}/confirm`,
+        passwordResetUrl: `${origins[0]}/reset`,
         isProduction: false,
       });
       if (!result.ok) throw result.error;
