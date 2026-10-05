@@ -142,6 +142,14 @@ Branch `feat/u1b-docker` was branched from 047fff7, which is also the tip of `de
 - [x] 6.2 RED/GREEN (U6b): `AccessTokenIssuer` with `jose` (RS256, `kid`, iss/aud/sub/iat/exp 3600/jti, no roles), plus `AccessTokenVerifier` (published keys by `kid`, RS256 pinned, iss/aud/exp, 5 s tolerance)
 - [x] 6.3 RED/GREEN (U6a): `GET /.well-known/jwks.json` (served at the root, excluded from the prefix; max-age 300, public keys only, rotation overlap). Commit: `feat(tokens): add key store, issuer, jwks`
 
+U6 review fixes (verify report), all done with RED first:
+
+- [x] 6.R1 (u6a) W2: the signing key xor check and file read moved from `loadConfig` to the key store factory; `AppConfig` no longer holds the secret; `npm run cli` boots without any signing key variable (`cli-boot.int-spec.ts`).
+- [x] 6.R2 (u6a) W3: optional `retiredAt` on retired keys; expired ones are dropped at boot (retention 4205 s = 1 h + 5 s + 10 min jose cache) with a kid-only warning; keys without `retiredAt` stay and warn.
+- [x] 6.R3 (u6a) S1: key store rows for a bad `next` and bad `retired` keys. S7 + S6: README and ADR 32 say keygen is dev-only and document the rotation timing.
+- [x] 6.R4 (u6b) W1: `typ: at+jwt` set by the issuer and required by the verifier (mutation-checked).
+- [x] 6.R5 (u6b) W4: `audience` is required on `AccessTokenVerifier.verify` (id or non-empty list; empty throws); ADR 32 records how U8 `/me` must obtain and pass it. S2: forged HS256 and `none` tokens carry full valid claims.
+
 ## U7 authorization-flow
 
 - [ ] 7.1 RED: `AuthorizationCodeSchema` plus migration `CreateAuthorizationCodes` with `down()`; mapper round-trip test; TypeORM repository implementing `AuthorizationCodeRepository`; integration test
