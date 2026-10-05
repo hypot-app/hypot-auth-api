@@ -10,7 +10,6 @@ interface AppDbRow {
   redirect_uris: string[];
   allowed_origins: string[];
   email_from: string | null;
-  post_reset_redirect_uri: string | null;
   status: string;
 }
 
@@ -66,7 +65,6 @@ describe('app CLI (integration)', () => {
         client_secret_hash: null,
         redirect_uris: ['https://a.example/cb', 'https://a.example/cb2'],
         allowed_origins: ['https://a.example'],
-        post_reset_redirect_uri: null,
         status: 'active',
       });
     });
@@ -161,66 +159,6 @@ describe('app CLI (integration)', () => {
     });
   });
 
-  describe('app create --post-reset-redirect-uri', () => {
-    it('stores a valid https value as given', async () => {
-      const run = await cli(['app', 'create', '--name', 'Shop', '--post-reset-redirect-uri', 'https://a.example/login']);
-      expect(run.errors).toEqual([]);
-      expect((await rows())[0].post_reset_redirect_uri).toBe('https://a.example/login');
-    });
-
-    it('stores null when the option is omitted', async () => {
-      await cli(['app', 'create', '--name', 'Shop']);
-      expect((await rows())[0].post_reset_redirect_uri).toBeNull();
-    });
-
-    it.each([
-      '/login',
-      'javascript:alert(1)',
-      'ftp://a.example/x',
-      'https://u:p@a.example/x',
-      'https://a.example/x#f',
-      'http://a.example/login',
-    ])('rejects %s with a validation error and persists nothing', async (uri) => {
-      const run = await cli([
-        'app',
-        'create',
-        '--name',
-        'Shop',
-        '--type',
-        'confidential',
-        '--post-reset-redirect-uri',
-        uri,
-      ]);
-
-      expect(run.errors).toHaveLength(1);
-      expect(run.errors[0].message).toMatch(/post-reset redirect URI/i);
-      expect(run.out.join('\n')).not.toMatch(/client_secret/);
-      expect(await rows()).toHaveLength(0);
-    });
-
-    it('accepts http://localhost outside production', async () => {
-      const run = await cli([
-        'app',
-        'create',
-        '--name',
-        'Dev',
-        '--post-reset-redirect-uri',
-        'http://localhost:3000/login',
-      ]);
-      expect(run.errors).toEqual([]);
-      expect((await rows())[0].post_reset_redirect_uri).toBe('http://localhost:3000/login');
-    });
-
-    it('rejects http://localhost when NODE_ENV=production', async () => {
-      const run = await cli(
-        ['app', 'create', '--name', 'Dev', '--post-reset-redirect-uri', 'http://localhost:3000/login'],
-        { isProduction: true },
-      );
-      expect(run.errors).toHaveLength(1);
-      expect(await rows()).toHaveLength(0);
-    });
-  });
-
   describe('app update', () => {
     const createApp = async (extra: string[] = []): Promise<string> => {
       const run = await cli(['app', 'create', '--name', 'Shop', '--redirect-uri', 'https://a.example/cb', ...extra]);
@@ -249,41 +187,6 @@ describe('app CLI (integration)', () => {
       });
     });
 
-    it('sets a new post-reset redirect URI', async () => {
-      const clientId = await createApp(['--post-reset-redirect-uri', 'https://a.example/login']);
-      await cli(['app', 'update', clientId, '--post-reset-redirect-uri', 'https://a.example/welcome']);
-      expect((await rows())[0].post_reset_redirect_uri).toBe('https://a.example/welcome');
-    });
-
-    it('leaves the post-reset redirect URI alone when the option is omitted', async () => {
-      const clientId = await createApp(['--post-reset-redirect-uri', 'https://a.example/login']);
-      await cli(['app', 'update', clientId, '--name', 'Renamed']);
-      expect((await rows())[0].post_reset_redirect_uri).toBe('https://a.example/login');
-    });
-
-    it('clears it with --clear-post-reset-redirect-uri', async () => {
-      const clientId = await createApp(['--post-reset-redirect-uri', 'https://a.example/login']);
-      const run = await cli(['app', 'update', clientId, '--clear-post-reset-redirect-uri']);
-      expect(run.errors).toEqual([]);
-      expect((await rows())[0].post_reset_redirect_uri).toBeNull();
-    });
-
-    it('rejects an invalid value and persists no change at all', async () => {
-      const clientId = await createApp(['--post-reset-redirect-uri', 'https://a.example/login']);
-      const run = await cli([
-        'app',
-        'update',
-        clientId,
-        '--name',
-        'Changed',
-        '--post-reset-redirect-uri',
-        'http://a.example/login',
-      ]);
-
-      expect(run.errors).toHaveLength(1);
-      expect((await rows())[0]).toMatchObject({ name: 'Shop', post_reset_redirect_uri: 'https://a.example/login' });
-    });
-
     it('rejects an invalid origin or redirect uri and persists no change', async () => {
       const clientId = await createApp(['--origin', 'https://a.example']);
 
@@ -302,25 +205,11 @@ describe('app CLI (integration)', () => {
 
     it('rejects http://localhost in production', async () => {
       const clientId = await createApp();
-      const run = await cli(['app', 'update', clientId, '--post-reset-redirect-uri', 'http://localhost:3000/login'], {
+      const run = await cli(['app', 'update', clientId, '--origin', 'http://localhost:5173'], {
         isProduction: true,
       });
       expect(run.errors).toHaveLength(1);
-      expect((await rows())[0].post_reset_redirect_uri).toBeNull();
-    });
-
-    it('rejects combining the set and clear options', async () => {
-      const clientId = await createApp(['--post-reset-redirect-uri', 'https://a.example/login']);
-      const run = await cli([
-        'app',
-        'update',
-        clientId,
-        '--post-reset-redirect-uri',
-        'https://a.example/new',
-        '--clear-post-reset-redirect-uri',
-      ]);
-      expect(run.errors).toHaveLength(1);
-      expect((await rows())[0].post_reset_redirect_uri).toBe('https://a.example/login');
+      expect((await rows())[0].allowed_origins).toEqual([]);
     });
 
     it('fails for an unknown client_id', async () => {

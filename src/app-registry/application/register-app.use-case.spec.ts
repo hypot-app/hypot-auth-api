@@ -73,16 +73,6 @@ describe('RegisterAppUseCase', () => {
     expect(a.ok && b.ok && a.value.clientSecret !== b.value.clientSecret).toBe(true);
   });
 
-  it('stores a valid post_reset_redirect_uri as given', async () => {
-    const result = await useCase.execute(input({ postResetRedirectUri: 'https://a.example/login' }));
-    expect(result.ok && result.value.app.postResetRedirectUri).toBe('https://a.example/login');
-  });
-
-  it('stores null when the post_reset_redirect_uri is omitted', async () => {
-    const result = await useCase.execute(input());
-    expect(result.ok && result.value.app.postResetRedirectUri).toBeNull();
-  });
-
   it('keeps the optional email_from', async () => {
     const result = await useCase.execute(input({ emailFrom: 'no-reply@a.example' }));
     expect(result.ok && result.value.app.emailFrom).toBe('no-reply@a.example');
@@ -99,31 +89,6 @@ describe('RegisterAppUseCase', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('invalid_email_from');
     expect(apps.apps.size).toBe(0);
-  });
-
-  it.each([
-    ['relative', '/login'],
-    ['javascript scheme', 'javascript:alert(1)'],
-    ['plain http on a public host', 'http://a.example/login'],
-    ['userinfo', 'https://u:p@a.example/login'],
-    ['fragment', 'https://a.example/login#x'],
-  ])('rejects an invalid post_reset_redirect_uri (%s) and persists nothing', async (_label, uri) => {
-    const result = await useCase.execute(input({ postResetRedirectUri: uri, clientType: 'confidential' }));
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.code).toBe('invalid_post_reset_redirect_uri');
-    expect(apps.apps.size).toBe(0);
-  });
-
-  it('accepts http://localhost outside production and rejects it in production', async () => {
-    const dev = await useCase.execute(input({ postResetRedirectUri: 'http://localhost:3000/login' }));
-    expect(dev.ok).toBe(true);
-
-    const prod = await useCase.execute(
-      input({ postResetRedirectUri: 'http://localhost:3000/login', isProduction: true }),
-    );
-    expect(prod.ok).toBe(false);
-    expect(apps.apps.size).toBe(1);
   });
 
   it('normalizes allowed origins (lower-case, de-duplicated) before storing them', async () => {

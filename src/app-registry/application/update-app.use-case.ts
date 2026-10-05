@@ -7,7 +7,6 @@ import type { AppRepository } from '../domain/app.repository';
 import { AllowedOrigin } from '../domain/allowed-origin';
 import { AppEmailFrom } from '../domain/app-email-from';
 import { AppRedirectUri } from '../domain/app-redirect-uri';
-import { PostResetRedirectUri } from '../domain/post-reset-redirect-uri';
 
 export interface UpdateAppInput {
   clientId: string;
@@ -15,8 +14,6 @@ export interface UpdateAppInput {
   redirectUris?: string[];
   allowedOrigins?: string[];
   emailFrom?: string | null;
-  /** `undefined` keeps the stored value, `null` clears it, a string replaces it after validation. */
-  postResetRedirectUri?: string | null;
   isProduction: boolean;
 }
 
@@ -56,20 +53,12 @@ export class UpdateAppUseCase {
       emailFrom = validated.value;
     }
 
-    let postResetRedirectUri: string | null | undefined;
-    if (input.postResetRedirectUri !== undefined) {
-      const validated = PostResetRedirectUri.optional(input.postResetRedirectUri, rules);
-      if (!validated.ok) return err(validated.error);
-      postResetRedirectUri = validated.value?.value ?? null;
-    }
-
     const updated = app.update(
       {
         name: input.name,
         redirectUris,
         allowedOrigins,
         emailFrom,
-        postResetRedirectUri,
       },
       this.deps.clock.now(),
     );

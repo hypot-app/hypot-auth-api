@@ -39,7 +39,6 @@ export class CreateAppCommand extends AppOptionsCommand {
       redirectUris: options.redirectUri ?? [],
       allowedOrigins: options.origin ?? [],
       emailFrom: options.emailFrom,
-      postResetRedirectUri: options.postResetRedirectUri,
       isProduction: this.config.isProduction,
     });
     if (!result.ok) throw new CliError(result.error.message);

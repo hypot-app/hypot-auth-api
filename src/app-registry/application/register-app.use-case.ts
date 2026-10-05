@@ -8,7 +8,6 @@ import type { AppRepository } from '../domain/app.repository';
 import { AllowedOrigin } from '../domain/allowed-origin';
 import { AppEmailFrom } from '../domain/app-email-from';
 import { AppRedirectUri } from '../domain/app-redirect-uri';
-import { PostResetRedirectUri } from '../domain/post-reset-redirect-uri';
 import type { IdGenerator } from './id-generator';
 
 export interface RegisterAppInput {
@@ -17,7 +16,6 @@ export interface RegisterAppInput {
   redirectUris: string[];
   allowedOrigins: string[];
   emailFrom?: string | null;
-  postResetRedirectUri?: string | null;
   /** From validated config, supplied by the composition root (ADR 27). */
   isProduction: boolean;
 }
@@ -41,8 +39,6 @@ export class RegisterAppUseCase {
 
   async execute(input: RegisterAppInput): Promise<Result<RegisteredApp, DomainError>> {
     const rules = { isProduction: input.isProduction };
-    const postReset = PostResetRedirectUri.optional(input.postResetRedirectUri, rules);
-    if (!postReset.ok) return err(postReset.error);
     const emailFrom = AppEmailFrom.optional(input.emailFrom);
     if (!emailFrom.ok) return err(emailFrom.error);
     const redirectUris = AppRedirectUri.createAll(input.redirectUris, rules);
@@ -61,7 +57,7 @@ export class RegisterAppUseCase {
       redirectUris: redirectUris.value.map((uri) => uri.value),
       allowedOrigins: allowedOrigins.value.map((origin) => origin.value),
       emailFrom: emailFrom.value,
-      postResetRedirectUri: postReset.value?.value ?? null,
+      postResetRedirectUri: null,
       status: 'active',
       createdAt: now,
       updatedAt: now,

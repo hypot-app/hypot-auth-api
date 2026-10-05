@@ -27,7 +27,7 @@ describe('UpdateAppUseCase / DeactivateAppUseCase', () => {
         redirectUris: ['https://a.example/cb'],
         allowedOrigins: ['https://a.example'],
         emailFrom: null,
-        postResetRedirectUri: 'https://a.example/login',
+        postResetRedirectUri: null,
         status: 'active',
         createdAt: CREATED,
         updatedAt: CREATED,
@@ -41,30 +41,7 @@ describe('UpdateAppUseCase / DeactivateAppUseCase', () => {
     const stored = await apps.findByClientId('abc');
     expect(stored?.name).toBe('Renamed');
     expect(stored?.updatedAt).toEqual(NOW);
-    expect(stored?.postResetRedirectUri).toBe('https://a.example/login');
   });
-
-  it('replaces the post-reset URI with a valid new one', async () => {
-    await update.execute({ clientId: 'abc', postResetRedirectUri: 'https://a.example/new', isProduction: true });
-    expect((await apps.findByClientId('abc'))?.postResetRedirectUri).toBe('https://a.example/new');
-  });
-
-  it('clears the post-reset URI with null', async () => {
-    await update.execute({ clientId: 'abc', postResetRedirectUri: null, isProduction: true });
-    expect((await apps.findByClientId('abc'))?.postResetRedirectUri).toBeNull();
-  });
-
-  it.each(['/login', 'ftp://a.example/x', 'http://a.example/login', 'https://u:p@a.example/x', 'https://a.example/x#f'])(
-    'rejects the invalid post-reset URI %s and keeps the stored value',
-    async (uri) => {
-      const result = await update.execute({ clientId: 'abc', postResetRedirectUri: uri, name: 'Changed', isProduction: false });
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.error.code).toBe('invalid_post_reset_redirect_uri');
-      const stored = await apps.findByClientId('abc');
-      expect(stored?.postResetRedirectUri).toBe('https://a.example/login');
-      expect(stored?.name).toBe('Shop');
-    },
-  );
 
   it.each(['Shop <hello@a.example>', 'hello@a.example\r\nBcc: x@evil.example', 'hello'])(
     'rejects the invalid email_from %j and changes nothing',
@@ -122,9 +99,9 @@ describe('UpdateAppUseCase / DeactivateAppUseCase', () => {
   );
 
   it('rejects http localhost in production and accepts it otherwise', async () => {
-    const prod = await update.execute({ clientId: 'abc', postResetRedirectUri: 'http://localhost:3000/l', isProduction: true });
+    const prod = await update.execute({ clientId: 'abc', redirectUris: ['http://localhost:3000/cb'], isProduction: true });
     expect(prod.ok).toBe(false);
-    const dev = await update.execute({ clientId: 'abc', postResetRedirectUri: 'http://localhost:3000/l', isProduction: false });
+    const dev = await update.execute({ clientId: 'abc', redirectUris: ['http://localhost:3000/cb'], isProduction: false });
     expect(dev.ok).toBe(true);
   });
 
