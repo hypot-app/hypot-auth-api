@@ -6,6 +6,8 @@ The service is one NestJS 11 app on Node 24 (`engines: ">=24 <25"`, `.nvmrc: 24`
 
 **Revision 2 (2026-10-05, API-only).** Auth serves no pages. App frontends call JSON endpoints directly with their `client_id`: `POST /api/v1/auth/login` returns an access token and an opaque refresh token in the body (ADR 34, 35). Postgres counters rate-limit and lock out before bcrypt runs (ADR 36, 37). CORS origins are bound to the calling app (ADR 38). Email links point to per-app URLs with the token in the fragment (ADR 39). U1–U6 are built and merged and stay valid; the hosted-UI and PKCE decisions are marked superseded below, not deleted. Read **Revision 2 ADRs** first.
 
+**Revision 3 (2026-10-05, contract amendment, round 11).** Closes the gaps found while writing `docs/api-contract.md`: ADR 35 gains a refresh reuse grace window (about 10 s, same client IP), ADR 36 gains `refresh_ip` and `confirm_ip` limits, ADR 38 fixes origin-mismatch outcomes and preflight headers, ADR 39 requires email URL origins to be allowed origins, and the new ADR 43 fixes the shared response rules (error body, `/me` fields, change-password error, forgot for unconfirmed accounts, issuer and JWKS URL).
+
 > Size note: this design exceeds the 800-word budget because the project is greenfield and every stack choice is decided here.
 
 ## Architecture Decisions (ADRs)
@@ -94,8 +96,9 @@ Sources: `decisions-round8` (API-only), `round9` (limits in Phase 1), `round10` 
 | Session = family | `auth_sessions` row; its `id` is the family id. Bound to `app_id` and `user_id`. Absolute `expires_at` = login + 30 d |
 | Token | One `refresh_tokens` row per issued token: `session_id`, `consumed_at`, `expires_at` = min(now + idle TTL 7 d, session expiry) |
 | Rotation | Every refresh consumes the token and issues a successor in the same session, in one `UnitOfWork` |
-| Reuse | Presenting a consumed token revokes the whole session (`revoked_reason = 'reuse_detected'`) |
-| Binding | Consume requires the session's `app_id` = the app of `client_id`. A mismatch is plain invalid, with no revoke |
+| Reuse | Presenting a consumed token revokes the whole session (`revoked_reason = 'reuse_detected'`), except inside the grace window below |
+| Grace window | Round 11. A rotated token presented again within `REFRESH_REUSE_GRACE_SECONDS` (default 10, `0` disables) of its rotation, from the same `ClientIp` as the rotation, once per rotated token, while its successor is unused: the successor is revoked and a fresh pair is issued in the same session. Details and tradeoffs below |
+| Binding | Consume requires the session's `app_id` = the app of `client_id`. A mismatch is plain invalid, with no revoke. An `Origin` not bound to that app gives the same `401 invalid_grant` before any consume (ADR 38) |
 | Transport | JSON body in and out. Never a cookie, never `Access-Control-Allow-Credentials` (round 10) |
 | Logout | `POST /auth/logout {client_id, refresh_token}` revokes that token's session (consumed or not). Always `204`: idempotent, no oracle |
 | Password reset or change | Revokes every active session of the account in the same transaction as the password write |
@@ -104,27 +107,50 @@ Sources: `decisions-round8` (API-only), `round9` (limits in Phase 1), `round10` 
 Atomic consume, one statement, no `SELECT … FOR UPDATE`:
 
 ```sql
-UPDATE refresh_tokens t SET consumed_at = $now
+UPDATE refresh_tokens t
+SET consumed_at = $now, replaced_by_hash = $successorHash, consumed_ip_hash = $ipHash
 FROM auth_sessions s
-WHERE t.token_hash = $hash AND t.consumed_at IS NULL AND t.expires_at > $now
+WHERE t.token_hash = $hash AND t.consumed_at IS NULL AND t.revoked_at IS NULL AND t.expires_at > $now
   AND s.id = t.session_id AND s.app_id = $appId
   AND s.revoked_at IS NULL AND s.expires_at > $now
 RETURNING t.session_id, s.user_id, s.expires_at;
 ```
 
-When zero rows match, one `SELECT` by hash decides: a consumed token of the same app revokes its session; anything else is plain invalid. Every failure returns one `401 invalid_grant` (the code the session-auth spec names).
+The successor token is generated before the statement so its hash can be stored with the consume; the successor row is inserted in the same `UnitOfWork`. When zero rows match, one `SELECT` by hash decides: a consumed or revoked token of the same app goes to the grace check below (a revoked one is never eligible), and anything else is plain invalid. Every failure returns one `401 invalid_grant` (the code the session-auth spec names).
 
 Two tables instead of a `family_id` column: revocation is a one-row update, the absolute expiry is stored once, and Phase 3 session management can list sessions without scanning tokens. Cost: one join per refresh.
 
-**Concurrency.** Under READ COMMITTED, a second concurrent `UPDATE` on the same token waits for the row lock, re-checks `consumed_at IS NULL`, matches nothing, and falls into reuse. The session is revoked, including the winner's new token. Two tabs refreshing at once therefore log the user out.
+**Reuse grace window (round 11, supersedes the earlier "no grace window" choice).** The goal is to avoid logouts when a refresh response is lost on a flaky network (the client retries the token it still holds). It follows the "reuse interval" of Auth0 and Okta.
+
+Columns added to `refresh_tokens` (folded into the unmerged `CreateAuthSessions` migration, U14a):
+
+| Column | Meaning |
+|--------|---------|
+| `replaced_by_hash bytea NULL` | SHA-256 of the successor issued when this token was consumed. A hash, never the raw token (ADR 13) |
+| `consumed_ip_hash bytea NULL` | SHA-256 of the normalized `ClientIp` of the request that consumed it (pseudonymous, as in ADR 36) |
+| `grace_used_at timestamptz NULL` | Set once, when this rotated token has used its grace |
+| `revoked_at timestamptz NULL` | Set on a successor revoked by a grace reuse |
+
+Flow, when the atomic consume matches zero rows and the follow-up `SELECT` finds a token of the same app that is consumed:
+
+1. Eligible when `now - consumed_at <= grace`, `consumed_ip_hash` equals the hash of the request's `ClientIp`, `grace_used_at IS NULL` and the session is active. Anything else: revoke the session (`reuse_detected`), as before.
+2. In one `UnitOfWork`: claim the grace with `UPDATE refresh_tokens SET grace_used_at = $now WHERE token_hash = $hash AND grace_used_at IS NULL RETURNING replaced_by_hash`. Zero rows (a concurrent claim won) means second reuse: revoke the session.
+3. Revoke the successor with `UPDATE refresh_tokens SET revoked_at = $now WHERE token_hash = $replacedBy AND consumed_at IS NULL AND revoked_at IS NULL`. Zero rows means the successor was already used or revoked (the real client moved on): roll back and revoke the session.
+4. Insert a fresh successor R3 (new CSPRNG token, stored as a hash, same session). Sign a new access token. Respond 200. The session is untouched, and its absolute expiry is unchanged.
+5. A token with `revoked_at` set that is presented later is a reuse like any other: it revokes the session. Presenting a token with `revoked_at` never takes the grace path.
+
+Properties: the raw successor is never stored or re-issued; grace is at most once per rotated token; a thief on another IP or outside the window kills the session as before. Residual risk, accepted: a thief on the SAME IP (/64) inside 10 s of a rotation can obtain a live token instead of ending the session. Misconfigured `TRUST_PROXY` makes every client share one IP and widens this window to "anyone inside 10 s", so operators must set `TRUST_PROXY` correctly (ADR 37; for limits this fails safe, for grace it does not). Measured from `consumed_at`; `now` comes from the injected `Clock`.
+
+**Concurrency.** Under READ COMMITTED, a second concurrent `UPDATE` on the same token waits for the row lock, re-checks `consumed_at IS NULL`, matches nothing, and takes the path above: from the same IP it is a first grace reuse (the winner's successor is revoked and the second caller gets a fresh pair); a third concurrent caller is a second reuse and revokes the session. The winner of the rotation then holds a revoked successor, and using it revokes the session. Two tabs refreshing at once therefore still lose the session on their next refresh, only later: the grace is for lost responses, not for racing tabs, and clients must keep serializing refreshes.
 
 | Option | Tradeoff | Decision |
 |--------|----------|----------|
-| No grace window; clients serialize refresh | A benign race logs out; the reuse signal stays exact | **Chosen** |
-| Grace window (about 10 s) that mints a sibling token | Fewer logouts. It branches the family, a thief racing inside the window keeps a live token, and it adds states to test | Rejected for Phase 1. Revisit only if pilot logs show `reuse_detected` false positives |
+| Grace window, ~10 s, same IP, revoke the successor and mint a fresh token in the same session | Fewer logouts on flaky networks, no raw token at rest, one extra state per rotated token. A same-IP thief inside the window keeps access | **Chosen** (round 11) |
+| No grace window; clients serialize refresh | A lost response logs out; the reuse signal stays exact | Superseded |
+| Grace window that mints a sibling token (successor kept alive) | Branches the family and leaves two live tokens | Rejected |
 | Grace window that returns the same successor | Requires storing the successor recoverably (a raw token at rest) | Rejected |
 
-**Client guidance (SDK and README):** run at most one refresh at a time per page (one shared in-flight promise). When tabs share storage, wrap the refresh in `navigator.locks.request('hypot-refresh:<client_id>', …)` and re-read the stored refresh token after acquiring the lock, because another tab may have rotated it. Refresh shortly before `expires_in` runs out, not on every 401.
+**Client guidance (SDK and README):** run at most one refresh at a time per page (one shared in-flight promise). When tabs share storage, wrap the refresh in `navigator.locks.request('hypot-refresh:<client_id>', …)` and re-read the stored refresh token after acquiring the lock, because another tab may have rotated it. Refresh shortly before `expires_in` runs out, not on every 401. If a refresh response is lost, the app MAY retry once with the same token, within the grace window and from the same network; a second retry, or a retry after the window, ends the session.
 
 ### ADR 36: Abuse protection with Postgres counters
 
@@ -136,14 +162,18 @@ Two tables instead of a `family_id` column: revocation is a one-row update, the 
 | `login_account_ip` | client + email + IP | password mismatches | 5 / 15 min | That IP is blocked 15 min for that account |
 | `login_account` | client + email | password mismatches from any IP | 50 / 1 h | The account is blocked 15 min |
 | `email_ip` | client + IP | signup, resend, forgot requests | 20 / 1 h | `429` with `Retry-After` (see below) |
-| `reset_ip` | client + IP | reset requests | 20 / 1 h | `429` with `Retry-After` |
+| `reset_ip` | IP | reset requests | 20 / 1 h | `429` with `Retry-After` |
+| `confirm_ip` | IP | confirm requests (round 11) | 20 / 1 h | `429` with `Retry-After` |
+| `refresh_ip` | client + IP | refresh requests (round 11) | 60 / 15 min | `429` with `Retry-After` |
 | `email_account` | client + email | signup, resend, forgot requests | 3 / 1 h | Normal generic response; the email is silently not queued |
 
-Counters run for unknown emails too, so they reveal nothing about existence. `POST /password/change` checks and records the two lockout counters on a wrong current password. Keys are SHA-256 of the composite; this is pseudonymous, not anonymous (emails are guessable), and rows are short-lived. The `email_account` default is 3 / 1 h, as in the abuse-protection spec (an earlier draft said 5).
+`reset_ip` and `confirm_ip` are keyed by IP alone: those bodies carry no `client_id`, and the check must run before any token lookup, so the app is not known yet. `refresh_ip` is keyed by client and IP and runs before the token lookup. `GET /me` has no limiter: verifying a bearer is a local signature check with no database access (the active-app lookup is cached, ADR 29), so there is nothing to protect that needs a counter. Logout has no limiter: it is idempotent and reveals nothing. The `refresh_ip` default allows a NAT of many users (each refreshes about once an hour, plus retries); all numbers are configurable.
+
+Counters run for unknown emails too, so they reveal nothing about existence. `POST /password/change` checks the two lockout counters before bcrypt and records them on a wrong current password. While blocked, change returns the same `400 invalid_current_password` as a wrong password, even for the correct one (ADR 43). Every email that `forgot` sends, including a confirmation email for an unconfirmed account, counts toward `email_account`. Keys are SHA-256 of the composite; this is pseudonymous, not anonymous (emails are guessable), and rows are short-lived. The `email_account` default is 3 / 1 h, as in the abuse-protection spec (an earlier draft said 5).
 
 **Response rules (the abuse-protection spec wins).**
 - **Login never returns `429`.** Limited, blocked and locked logins return the same generic `401` as a failed login.
-- **Limits keyed only by IP on the other endpoints** (`email_ip`, `reset_ip`) return `429` with `Retry-After` (seconds until the window ends) and a generic body. The decision depends only on the caller's IP and the endpoint group, never on account state, so it cannot enumerate accounts.
+- **Limits keyed only by IP on the other endpoints** (`email_ip`, `reset_ip`, `confirm_ip`, `refresh_ip`) return `429` with `Retry-After` (an integer number of seconds until the window ends, at least 1) and the generic body `{ "error": "rate_limited", "message": "Too many requests. Try again later." }`. A `429` on refresh is never `invalid_grant`, so a client does not log the user out. The decision depends only on the caller's IP and the endpoint group, never on account state, so it cannot enumerate accounts.
 - **Per-account email caps** (`email_account`) never return `429`. They return the normal generic response and send nothing. For signup the account is still created; only the email is suppressed.
 - Tradeoff: a legitimate user behind a shared NAT can see `429` on signup or forgot, which is why the IP defaults are generous. The `429` body code is `rate_limited` (the spec only says "generic body").
 
@@ -199,11 +229,11 @@ The `503` is raised before any account lookup, so it reveals nothing about accou
 
 **Two layers:**
 
-1. **Headers (ADR 29, unchanged).** `AppCorsMiddleware` sets `Access-Control-Allow-Origin` when `Origin` belongs to any active app, with the 30 s cache kept. It answers preflights and never sets credentials.
+1. **Headers (ADR 29, unchanged).** `AppCorsMiddleware` sets `Access-Control-Allow-Origin` when `Origin` belongs to any active app, with the 30 s cache kept. It answers preflights and never sets credentials. **Preflight answer (round 11):** `204` with `Access-Control-Allow-Origin: <origin>`, `Access-Control-Allow-Methods: GET, POST, OPTIONS`, `Access-Control-Allow-Headers: Content-Type, Authorization` (fixed list, no longer echoed from the request), `Access-Control-Max-Age: 600` and `Vary: Origin`; no `Access-Control-Allow-Credentials`. Every CORS response carries `Vary: Origin`.
 2. **Binding (new, application layer).** `ResolveClientUseCase.execute(clientId, { origin })` returns `invalid_client` when an `Origin` header is present and is not in that app's `allowed_origins`.
    - Body endpoints pass the body `client_id`.
    - Token-in-body endpoints (`accounts/confirm`, `password/reset`) carry no `client_id` (the specs take `{token}` alone): a read-only lookup finds the app that owns the token, then the origin is bound to that app before the consume runs. An unknown token, or a known token from the wrong origin, gives the same generic `invalid_or_expired_link`, so the origin check is not a token oracle.
-   - On `auth/login` any client failure is the generic login `401` (ADR 34); on the other body endpoints it is `400 invalid_client`.
+   - On `auth/login` any client failure is the generic login `401` (ADR 34). **Amended in round 11 for the token endpoints:** on `auth/refresh` an origin not bound to the app of `client_id` gives the same `401 invalid_grant` as an invalid token, so a response never reveals whether a token is valid (an unknown or inactive `client_id` is still `400 invalid_client`: it is a public identifier and a setup bug); on `auth/logout` it is still `204`, with NO effect (nothing is revoked) and no allow header. On signup, resend and forgot it stays `400 invalid_client`.
    - Bearer endpoints (`/me`, `/password/change`) use the token's `aud`, resolved as in ADR 32: decode `aud`, require an active app, verify with that audience, then bind the origin to that app.
    - Requests with no `Origin` (native apps, servers) skip the binding; the limits still apply.
 
@@ -228,6 +258,14 @@ The `503` is raised before any account lookup, so it reveals nothing about accou
 | Nullable column, required by the use cases | Runs on any database; legacy dev apps need one `app update`; the database does not enforce it | **Chosen** |
 | `NOT NULL` with a placeholder backfill | Would put fake URLs into real emails | Rejected |
 | `NOT NULL` that fails when rows exist | Forces manual deletes before migrating and breaks dev databases mid-chain | Rejected now. Follow-up: a Phase 2 `SET NOT NULL` migration once every row has values |
+
+**Email URL origin rule (round 11).** The origin of `email_confirmation_url` and `password_reset_url` must equal one of the app's `allowed_origins` (compared after the same normalization as `AllowedOrigin`). Otherwise the app's confirm and reset pages could receive the email link but could not call Auth from the browser (ADR 38 would reject their origin). The check lives in the register and update use cases, so it also fires when an update changes only the origins and would orphan a URL; invalid input persists nothing. It is a cross-field rule between `AppUrl` and `AllowedOrigin`, so it sits in the application layer (or one domain function over both), not inside either value object. Legacy rows with null URLs are unaffected until their one `app update`.
+
+| Option | Tradeoff | Decision |
+|--------|----------|----------|
+| Enforce at create and update | A mistake surfaces at the operator's terminal, not in a user's browser | **Chosen** |
+| Warn only | A silently broken confirm screen in production | Rejected |
+| Derive the URL origin into `allowed_origins` automatically | Hidden widening of the CORS allowlist | Rejected |
 
 **Value object.** `PostResetRedirectUri` is renamed to `AppUrl` and reused for both URLs, with the same rules: absolute, https (or http for localhost outside production), no userinfo, no fragment. The fragment is forbidden because Auth appends one. Deleting it and writing two new value objects would duplicate the rules. `redirect_uris`, `client_type` and `client_secret_hash` stay dormant for Phase 4; no Phase 1 endpoint reads them.
 
@@ -265,6 +303,27 @@ The `503` is raised before any account lookup, so it reveals nothing about accou
 | Limits inside use cases | One place, `Clock`-testable. The lockout needs the normalized email and the outcome, which only the use case knows | **Chosen** |
 | Nest guards or interceptors | They run before the outcome is known, so per-IP limits and lockout would be split across two places | Rejected |
 | Refresh inside `token-lifecycle` | Mixes stable crypto with credential and session rules that change for other reasons (proposal) | Rejected |
+
+### ADR 43: API contract rules (round 11)
+
+Closes the gaps found while writing `docs/api-contract.md`. Where an earlier ADR or spec text disagrees, this table wins.
+
+| Topic | Decision |
+|-------|----------|
+| Error body | `{ "error": "<code>", "message": "<human text>" }` on every endpoint, matching the built signup, confirm and resend. Clients branch on `error` |
+| Generic bodies | Signup, resend (as built) and forgot return fixed texts, identical on every path: forgot `"If an account exists for this address, an email is on its way."` |
+| Confirm success | `200 { "message": "Your email address has been confirmed." }` |
+| Login `400` | `invalid_request` (also refresh, logout, forgot and every body endpoint for a missing or non-string field) |
+| Bearer failures | `401 { "error": "invalid_token", "message": ... }` with `WWW-Authenticate: Bearer`, one body and header set for every cause (`/me`, `change`). Login `401` keeps `invalid_credentials` and sends no `WWW-Authenticate` |
+| `GET /me` | `{ id, email, email_verified, created_at }`. `id` equals `sub`; `created_at` ISO 8601 UTC. Auth stores identity and credentials only: no name or profile. Apps keep profiles and link them by `id` |
+| Change password, wrong current | `400 invalid_current_password`, never `401` (a `401` is indistinguishable from an expired token and makes clients refresh in a loop). It counts toward both lockout counters. While the pair is blocked or the account locked, the same `400` even for the correct password, without bcrypt. Check order: bearer, body shape, new-password rules (no counter touched), lockout state, compare |
+| Forgot for an unconfirmed account | Generic `202`; sends a CONFIRMATION email (a new token superseding earlier ones, the resend path) instead of a reset, because a reset cannot be used to log in. Counts toward `email_account`. Residual timing: the write set differs for unknown versus existing accounts by a few milliseconds, accepted for the same reasons as ADR 31 and bounded by `email_ip` and `email_account` |
+| `Retry-After` | Integer seconds, at least 1 |
+| Issuer and JWKS | `iss` is exactly `AUTH_PUBLIC_BASE_URL`; the JWKS URL is `${iss}/.well-known/jwks.json`. Production value: an `https` URL with no trailing slash, no query and no fragment. Auth does not rewrite the value, so the operator must configure it in that form (a config check is task 19.13) |
+| Preflight | See ADR 38 |
+| Limits on refresh and confirm | See ADR 36 |
+
+**Rejected:** a `401` with a distinct code for the wrong current password (still the same status as an expired token, so a client that refreshes on `401` could loop), and a `204` or generic `200` on confirm (clients need a stable success shape; the fixed message costs nothing).
 
 ## Module Structure
 
@@ -304,7 +363,7 @@ Each table is defined by an `EntitySchema` and created by a migration with `down
 | `apps` | `id uuid`, `client_id text UNIQUE`, `name`, `client_type enum(public, confidential)`, `client_secret_hash bytea NULL`, `redirect_uris text[]` (dormant until Phase 4), `allowed_origins text[]`, `email_from`, `email_confirmation_url text NULL`, `password_reset_url text NULL` (both required by the use cases, ADR 39), `status`, timestamps. `post_reset_redirect_uri` is dropped. |
 | `users` | `id uuid`, `app_id FK`, `email citext`, `password_hash`, `email_verified_at NULL`, `password_changed_at`, timestamps, **UNIQUE(app_id, email)** |
 | `auth_sessions` | `id uuid` (the family id), `app_id FK`, `user_id FK` (indexed), `created_at`, `last_used_at`, `expires_at` (absolute, 30 d, indexed), `revoked_at NULL`, `revoked_reason enum(logout, reuse_detected, password_changed, password_reset, ops_revoke_all) NULL` (ADR 35; `ops_revoke_all` is set by the key-compromise CLI) |
-| `refresh_tokens` | `token_hash bytea PK`, `session_id FK` (indexed), `expires_at` (idle, 7 d, capped at session expiry), `consumed_at NULL`, `created_at` (ADR 35) |
+| `refresh_tokens` | `token_hash bytea PK`, `session_id FK` (indexed), `expires_at` (idle, 7 d, capped at session expiry), `consumed_at NULL`, `created_at`, and for the reuse grace window `replaced_by_hash bytea NULL`, `consumed_ip_hash bytea NULL`, `grace_used_at NULL`, `revoked_at NULL` (ADR 35) |
 | `abuse_counters` | `UNLOGGED`. `scope text`, `key bytea`, `window_start`, `count int`, `blocked_until NULL`, `expires_at` (indexed), **PK(scope, key)** (ADR 36) |
 | `one_time_tokens` | `id`, `user_id FK`, `purpose enum(email_verification, password_reset)`, `token_hash bytea UNIQUE`, `expires_at` (24h or 1h), `consumed_at NULL`. Issuing a new token invalidates earlier unconsumed ones for the same purpose. |
 | `email_outbox` | `id`, `app_id FK`, `to_address` (`to` is a reserved word), `template`, `payload jsonb`, `status enum(pending, sent, failed)`, `attempts`, `next_attempt_at`, `last_error`, `locked_until` (lease expiry, null when unclaimed), `created_at`. Partial index on `next_attempt_at` where `status = 'pending'`. |
@@ -328,9 +387,12 @@ SPA -- POST /api/v1/auth/login {client_id,email,password}, Origin --> Auth
 
 ```
 SPA -- POST /api/v1/auth/refresh {client_id, refresh_token} --> Auth
-  UoW{ UPDATE..RETURNING consume ; insert successor ; touch session }
+  hit refresh_ip -> 429 + Retry-After when limited ; origin bound to client_id? no -> 401 invalid_grant
+  UoW{ UPDATE..RETURNING consume (stores successor hash + IP hash) ; insert successor ; touch session }
     consumed by this call -> 200 new pair
-    0 rows, token already consumed (same app) -> revoke session -> 401
+    0 rows, token consumed (same app), inside grace, same IP, grace unused, successor unused
+        -> UoW{ claim grace ; revoke successor ; insert fresh token } -> 200 new pair, same session
+    0 rows, token consumed or revoked (same app), any other case -> revoke session -> 401
     0 rows, anything else -> 401 invalid_grant
 ```
 
@@ -363,8 +425,11 @@ const AppMapper = { toDomain(row: AppRow): App { /* ... */ }, toPersistence(app:
 interface TokenPairResponse { access_token: string; token_type: 'Bearer'; expires_in: number; refresh_token: string; }
 interface SessionRepository {
   open(session: NewSession, firstTokenHash: Buffer): Promise<void>;
-  consume(tokenHash: Buffer, appId: string, now: Date): Promise<ConsumedToken | null>; // UPDATE..RETURNING
-  findTokenState(tokenHash: Buffer): Promise<{ sessionId: string; appId: string; consumed: boolean } | null>;
+  consume(tokenHash: Buffer, appId: string, now: Date, successorHash: Buffer, ipHash: Buffer | null): Promise<ConsumedToken | null>; // UPDATE..RETURNING
+  findTokenState(tokenHash: Buffer): Promise<{ sessionId: string; appId: string; consumed: boolean; consumedAt: Date | null; consumedIpHash: Buffer | null; graceUsed: boolean; revoked: boolean } | null>;
+  claimGrace(tokenHash: Buffer, now: Date): Promise<Buffer | null>; // returns replaced_by_hash, null when already claimed
+  revokeToken(tokenHash: Buffer, now: Date): Promise<boolean>; // false when the token was already used or revoked
+  addToken(sessionId: string, tokenHash: Buffer, expiresAt: Date): Promise<void>;
   revoke(sessionId: string, reason: RevokeReason, now: Date): Promise<void>;
   revokeAllForUser(userId: string, reason: RevokeReason, now: Date): Promise<void>;
 }
@@ -391,13 +456,13 @@ interface AbuseCounterStore {
 | `POST /api/v1/accounts/signup` | user-accounts | Registration, generic `202` |
 | `POST /api/v1/accounts/confirm` | user-accounts | `{token}`, single use (ADR 40) |
 | `POST /api/v1/accounts/resend-confirmation` | user-accounts | Generic `202` |
-| `POST /api/v1/password/forgot` | password-management | `{client_id, email}`, generic `202`; reset email only for a confirmed account |
+| `POST /api/v1/password/forgot` | password-management | `{client_id, email}`, generic `202`; reset email for a confirmed account, confirmation email for an unconfirmed one (ADR 43) |
 | `POST /api/v1/password/reset` | password-management | `{token, new_password}`; token-bound app, password write and revocation of all sessions in one UoW |
 | `POST /api/v1/password/change` | password-management | Bearer plus `{current_password, new_password}`; lockout counters apply; revokes all sessions |
 
-The route table has 13 routes: 10 under `/api/v1` and 3 at the root (ADR 28). Preflight `OPTIONS` is answered by the CORS middleware on the 10 API routes (ADR 38). Exact status codes, error codes and request bodies are owned by the specs; where this design differs, the spec wins. Names the specs leave open: `invalid_credentials` (login, change), `invalid_client` (`400`, non-login body endpoints), `invalid_or_expired_link` (confirm, reset), `unconfigured_client` (`400`, null email URL), `rate_limited` (`429`) and `temporarily_unavailable` (`503`). The refresh failure is `invalid_grant`.
+The route table has 13 routes: 10 under `/api/v1` and 3 at the root (ADR 28). Preflight `OPTIONS` is answered by the CORS middleware on the 10 API routes (ADR 38). Exact status codes, error codes and request bodies are owned by the specs; where this design differs, the spec wins. Names the specs leave open: `invalid_credentials` (login, change), `invalid_client` (`400`, non-login body endpoints), `invalid_or_expired_link` (confirm, reset), `unconfigured_client` (`400`, null email URL), `rate_limited` (`429`) and `temporarily_unavailable` (`503`). The refresh failure is `invalid_grant`. Round 11 adds `invalid_request` (`400`, malformed body on every endpoint), `invalid_current_password` (`400`, change), `invalid_token` (`401`, `/me` and change) and `invalid_email` and `invalid_password` as built (ADR 43).
 
-**Config schema (zod)** adds (revision 2): `TRUST_PROXY` (ADR 37, default `false`, `true` rejected), `REFRESH_IDLE_TTL_SECONDS` (default 604800), `REFRESH_ABSOLUTE_TTL_SECONDS` (default 2592000), and `ABUSE_<SCOPE>_LIMIT`, `_WINDOW_SECONDS`, `_BLOCK_SECONDS` for each ADR 36 scope. Earlier units added: `AUTH_PUBLIC_BASE_URL` (required, absolute URL), `SMTP_HOST` (required), `SMTP_PORT` (number, default 587), `SMTP_SECURE` (boolean, default false; true means implicit TLS, usually port 465), `SMTP_USER` and `SMTP_PASS` (optional pair, both or neither, so a local catcher needs no auth), and `MAIL_FROM` (required default sender). `SMTP_PASS` is never logged.
+**Config schema (zod)** adds (revision 2): `TRUST_PROXY` (ADR 37, default `false`, `true` rejected), `REFRESH_IDLE_TTL_SECONDS` (default 604800), `REFRESH_ABSOLUTE_TTL_SECONDS` (default 2592000), `REFRESH_REUSE_GRACE_SECONDS` (default 10, `0` disables, ADR 35), and `ABUSE_<SCOPE>_LIMIT`, `_WINDOW_SECONDS`, `_BLOCK_SECONDS` for each ADR 36 scope. Earlier units added: `AUTH_PUBLIC_BASE_URL` (required, absolute URL), `SMTP_HOST` (required), `SMTP_PORT` (number, default 587), `SMTP_SECURE` (boolean, default false; true means implicit TLS, usually port 465), `SMTP_USER` and `SMTP_PASS` (optional pair, both or neither, so a local catcher needs no auth), and `MAIL_FROM` (required default sender). `SMTP_PASS` is never logged.
 
 ```ts
 interface EmailMessage { to: string; from: string; subject: string; text: string; }
@@ -434,7 +499,8 @@ No blocking questions. The revision 2 assumptions were reconciled with the specs
 - [x] Login never returns `429` (generic `401`). IP-only limits on signup, resend, forgot and reset return `429` with `Retry-After`; per-account email caps stay silent (ADR 36).
 - [x] The `account-exists` notice links to `password_reset_url` with no token (ADR 39).
 - [x] Password change revokes ALL sessions, including the current one; the SPA logs in again (ADR 35).
-- [x] No refresh grace window in Phase 1; clients serialize refresh (ADR 35).
+- [x] Refresh reuse grace window (round 11, replaces "no grace window"): about 10 s, same client IP, once per rotated token, successor revoked and a fresh pair issued in the same session; configurable (ADR 35). Clients still serialize refresh.
+- [x] Round 11 contract rules (error body, `/me` fields, change-password `400`, forgot for unconfirmed accounts, `refresh_ip` and `confirm_ip` limits, preflight headers, email URL origins, issuer and JWKS URL) are fixed in ADR 36, 38, 39 and 43.
 
 Closed in round 3:
 
