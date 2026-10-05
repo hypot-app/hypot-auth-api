@@ -2,13 +2,13 @@
 
 ## Purpose
 
-Per-app templated emails for confirmation, welcome, and password reset.
+Per-app templated emails for confirmation, welcome, and password reset. Links point to the app's own frontend, never to a page hosted by Auth.
 
 ## Requirements
 
 ### Requirement: Email types
 
-The system MUST send these emails: account confirmation, welcome (after confirmation), password reset, a duplicate-signup ("account exists / signup attempt") notice, and (assumption) a password-changed notice. The duplicate-signup notice MUST suggest logging in or resetting the password, MUST link to the hosted forgot-password page `${AUTH_PUBLIC_BASE_URL}/api/v1/password/forgot?client_id=...`, and MUST NOT contain a token.
+The system MUST send: account confirmation, welcome (after confirmation), password reset, a duplicate-signup ("account exists") notice, and (assumption) a password-changed notice. The account-exists notice MUST suggest logging in or resetting the password, MUST link to the app's `password_reset_url` WITHOUT a token, and MUST NOT contain a token.
 
 #### Scenario: Confirmation on signup
 - GIVEN a new registration in app A
@@ -17,7 +17,7 @@ The system MUST send these emails: account confirmation, welcome (after confirma
 
 ### Requirement: Per-app templates
 
-Each app MUST be able to configure template content (sender name, subject, body text) and MAY override the from address (`apps.email_from`). When no override is set, the global `MAIL_FROM` default applies. Apps MUST NOT store a link base. When an app has no custom template, the system MUST use a default template. Templates MUST NOT allow arbitrary script execution; variables MUST be escaped.
+Each app MUST be able to configure template content (sender name, subject, body text) and MAY override the from address (`apps.email_from`). Without an override, the global `MAIL_FROM` applies. Without a custom template, a default template MUST be used. Templates MUST NOT allow script execution; variables MUST be escaped.
 
 #### Scenario: Custom template
 - GIVEN app A has a custom confirmation template
@@ -29,45 +29,52 @@ Each app MUST be able to configure template content (sender name, subject, body 
 - WHEN a user of app B requests a password reset
 - THEN the default template is used
 
-### Requirement: Link safety
+### Requirement: Link construction
 
-Links MUST contain only the raw single-use token and MUST be built from the single global `AUTH_PUBLIC_BASE_URL` setting (the public URL of the Auth host), for example `${AUTH_PUBLIC_BASE_URL}/api/v1/accounts/confirm?token=...` and `${AUTH_PUBLIC_BASE_URL}/api/v1/password/reset?token=...&client_id=...`. Non-token links (the `account-exists` deep link to `${AUTH_PUBLIC_BASE_URL}/api/v1/password/forgot?client_id=...`) carry only the public `client_id`. Emails MUST NOT contain passwords or password hashes. Tokens MUST NOT be logged.
+Confirmation links MUST be the app's `email_confirmation_url` and reset links MUST be the app's `password_reset_url`, with the raw single-use token appended in the URL FRAGMENT as `#token=<token>`, so the token never reaches servers, logs or Referer headers. Links MUST NOT be built from `AUTH_PUBLIC_BASE_URL` or any request value, and MUST NOT target hosted Auth pages (none exist). Emails MUST NOT contain passwords or hashes, and tokens MUST NOT be logged. `AUTH_PUBLIC_BASE_URL` stays the issuer/JWKS public URL only.
 
-#### Scenario: Account-exists deep link
+#### Scenario: Confirmation link
+- GIVEN app A has `email_confirmation_url=https://a.example/confirm`
+- WHEN a confirmation email is rendered
+- THEN the link is `https://a.example/confirm#token=<token>`
+
+#### Scenario: Reset link
+- GIVEN app A has `password_reset_url=https://a.example/reset`
+- WHEN a reset email is rendered
+- THEN the link is `https://a.example/reset#token=<token>`
+
+#### Scenario: Account-exists notice
 - GIVEN a duplicate signup in app A
-- WHEN the `account-exists` notice is rendered
-- THEN it links to `${AUTH_PUBLIC_BASE_URL}/api/v1/password/forgot?client_id=<A>`
-- AND it contains no token
+- WHEN the notice is rendered
+- THEN it links to `https://a.example/reset` with no fragment and no token
 
 #### Scenario: Email content
 - GIVEN any outgoing auth email
 - WHEN its body is inspected
-- THEN it contains no password
-- AND any link starts with `AUTH_PUBLIC_BASE_URL` and targets the Auth host
-- AND no per-app link base is used
+- THEN it has no password and no `AUTH_PUBLIC_BASE_URL` link
 
 ### Requirement: Provider abstraction and failure handling
 
-Email delivery MUST go through a provider interface. The Phase 1 implementation MUST use generic SMTP, configured only through environment settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`), so any SMTP-capable provider works with no vendor SDK. A provider failure MUST NOT alter the HTTP response (preserving no-enumeration) and MUST be logged without secrets. (Assumption: retry/queue strategy is a design decision; bounce handling is Phase 2.)
+Delivery MUST go through a provider interface. Phase 1 MUST use generic SMTP configured only by `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`. A provider failure MUST NOT alter the HTTP response (no enumeration) and MUST be logged without secrets. (Assumption: retry strategy is a design decision; bounces are Phase 2.)
 
 #### Scenario: Provider outage during forgot-password
 - GIVEN the email provider is failing
 - WHEN forgot-password is requested for an existing account
-- THEN the response is still the generic success message
+- THEN the response is still the generic 202
 - AND the failure is logged without token or password
 
 ## Out of Scope (Deferred)
 
-The following MUST NOT be delivered in this change.
-
 | Item | Phase |
 |------|-------|
-| Rate limiting, account lockout, audit logs, monitoring and alerts, apps 2-3, SDK docs | 2 |
-| 2FA, webhooks, admin panel/HTTP app management, session revocation, password policies, GDPR export/delete | 3 |
-| Social login, full OIDC, organization multi-tenancy, certifications | 4 |
-| Email change, Redis, access-token denylisting, roles/permissions in tokens | Not planned in Phase 1 |
+| Audit logs, monitoring and alerts, apps 2-3, SDK docs | 2 |
+| 2FA, webhooks, admin panel, session management UI, password policies, GDPR | 3 |
+| OAuth Code + PKCE, hosted login, social login, OIDC, org tenancy | 4 |
+| Email change, Redis, access-token denylist, roles in tokens | Not planned in Phase 1 |
+
+(Rate limiting and lockout moved into Phase 1: see `abuse-protection`.)
 
 #### Scenario: Deferred features absent
 - GIVEN the Phase 1 release
 - WHEN the API surface is reviewed
-- THEN no endpoints for 2FA, webhooks, admin, social login, or email change exist
+- THEN no endpoints for 2FA, webhooks, admin, social login, email change, or OAuth authorize/token exist
