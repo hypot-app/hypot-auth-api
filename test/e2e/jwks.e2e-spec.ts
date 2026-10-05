@@ -1,6 +1,7 @@
-import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
+import { createLocalJWKSet, jwtVerify, type JSONWebKeySet } from 'jose';
 import request from 'supertest';
+import { ACCESS_TOKEN_ISSUER, type AccessTokenIssuer } from '../../src/token-lifecycle/domain/access-token';
 import { generateKeySet } from '../../src/token-lifecycle/infrastructure/signing-key-generator';
 import { createTestApp } from '../support/create-test-app';
 import { startTestDatabase, type TestDatabase } from '../support/postgres';
@@ -40,13 +41,17 @@ describe('GET /.well-known/jwks.json (e2e)', () => {
     }
   });
 
-  it('lets a consumer verify a signature offline with the published key and its kid', async () => {
-    const payload = Buffer.from('signed-by-the-active-key');
-    const signature = sign('sha256', payload, createPrivateKey({ key: keySet.active as never, format: 'jwk' }));
+  it('lets a consumer verify an issued token offline with the JWKS fetched over HTTP, for its own audience only', async () => {
+    const issuer = app.get<AccessTokenIssuer>(ACCESS_TOKEN_ISSUER);
+    const { token } = await issuer.issue({ accountId: 'account-1', clientId: 'app_a' });
 
     const response = await request(app.getHttpServer()).get('/.well-known/jwks.json');
-    const published = response.body.keys.find((jwk: { kid: string }) => jwk.kid === keySet.active.kid);
+    const consumerKeys = createLocalJWKSet(response.body as JSONWebKeySet);
+    const options = { algorithms: ['RS256'], issuer: 'http://localhost:3000' };
 
-    expect(verify('sha256', payload, createPublicKey({ key: published, format: 'jwk' }), signature)).toBe(true);
+    const { payload, protectedHeader } = await jwtVerify(token, consumerKeys, { ...options, audience: 'app_a' });
+    expect(payload.sub).toBe('account-1');
+    expect(protectedHeader.kid).toBe(keySet.active.kid);
+    await expect(jwtVerify(token, consumerKeys, { ...options, audience: 'app_b' })).rejects.toThrow('"aud"');
   });
 });

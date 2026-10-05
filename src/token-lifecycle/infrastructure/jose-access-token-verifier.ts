@@ -1,0 +1,45 @@
+import { createLocalJWKSet, decodeProtectedHeader, jwtVerify, type JSONWebKeySet } from 'jose';
+import type { Clock } from '../../shared-kernel/clock';
+import { DomainError } from '../../shared-kernel/domain-error';
+import { err, ok, type Result } from '../../shared-kernel/result';
+import type { AccessTokenClaims, AccessTokenVerifier } from '../domain/access-token';
+import type { KeyStore } from '../domain/key-store';
+
+/** A 2048-bit RS256 access token is about 500 characters; anything near this cap is not ours. */
+const MAX_TOKEN_LENGTH = 4096;
+const CLOCK_TOLERANCE_SECONDS = 5;
+const REQUIRED_CLAIMS = ['iss', 'sub', 'aud', 'iat', 'exp', 'jti'];
+
+export class JoseAccessTokenVerifier implements AccessTokenVerifier {
+  private readonly clock: Clock;
+  private readonly issuer: string;
+  private readonly resolveKey: ReturnType<typeof createLocalJWKSet>;
+
+  constructor(deps: { keyStore: KeyStore; clock: Clock; issuer: string }) {
+    this.clock = deps.clock;
+    this.issuer = deps.issuer;
+    // The published set is the only source of verification keys: active, next and retired.
+    this.resolveKey = createLocalJWKSet(deps.keyStore.publicJwks() as JSONWebKeySet);
+  }
+
+  async verify(token: string, options: { audience?: string } = {}): Promise<Result<AccessTokenClaims, DomainError>> {
+    try {
+      if (token.length > MAX_TOKEN_LENGTH) throw new Error('token too long');
+      // Without a kid jose would pick the only key of a one-key set; every token must name its key.
+      if (typeof decodeProtectedHeader(token).kid !== 'string') throw new Error('missing kid');
+
+      const { payload } = await jwtVerify(token, this.resolveKey, {
+        algorithms: ['RS256'], // pinned: no alg confusion, no `none`
+        issuer: this.issuer,
+        audience: options.audience,
+        currentDate: this.clock.now(),
+        clockTolerance: CLOCK_TOLERANCE_SECONDS,
+        requiredClaims: REQUIRED_CLAIMS,
+      });
+      return ok(payload as unknown as AccessTokenClaims);
+    } catch {
+      // The reason is deliberately dropped: it must not become an oracle for token forgers.
+      return err(new DomainError('invalid_token', 'Invalid access token'));
+    }
+  }
+}

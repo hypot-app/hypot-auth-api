@@ -116,6 +116,13 @@ service; `docker compose down -v` discards it). Without Docker run `npm run keys
 gitignored `.keys/signing-keys.json` and leaves an existing file untouched, then add
 `AUTH_SIGNING_KEYS_FILE=.keys/signing-keys.json` to your `.env`.
 
+Tokens carry `kid` (header) and `iss`, `aud` (the app's `client_id`), `sub`, `iat`, `exp` (one hour), `jti`;
+roles are the apps' business. The issuer is `AUTH_PUBLIC_BASE_URL`. A consumer validates offline: fetch JWKS, pick
+the key by `kid`, accept only `RS256`, check `iss`, its own `aud` and `exp`. The service's own verifier does the
+same with a 5 second clock tolerance, accepts any published key (active, next, retired), and refuses unknown or
+missing `kid`, other algorithms (including `none` and HS256) and tokens over 4096 characters, always with the
+same generic `invalid_token` error.
+
 Rotation is a config change: (1) add the new key as `next` and deploy; (2) after the 5 minute JWKS cache
 (and once every consumer has refreshed) move `next` to `active` and the old `active` to `retired`; (3) after
 1 hour plus the cache TTL remove `retired`. Emergency rotation also revokes all refresh tokens.
