@@ -68,8 +68,26 @@ Emails go through a Postgres outbox and a background worker started by `main.ts`
 put files with the same names in `templates/<client_id>/` to override them for one app. The build copies the
 templates into `dist/`.
 
-TODO(U5/U6): pass the token TTL to the templates as a variable. The default confirmation and password-reset
-templates hard-code "24 hours" and "1 hour" while the real TTLs live in U5/U6.
+TODO(U6): pass the token TTL to the templates as a variable. The confirmation template hard-codes
+"24 hours", which matches the confirmation token TTL in `user-accounts/domain/one-time-token.ts`, and the
+password-reset template hard-codes "1 hour" until U6 adds that flow.
+
+### Accounts
+
+Accounts are per app: unique on `(app_id, email)`, email stored lowercase. Passwords are bcrypt cost 12,
+8 characters minimum and 72 UTF-8 bytes maximum (bcrypt ignores the rest), no NUL character.
+
+```bash
+curl -X POST localhost:3000/api/v1/accounts/signup -H 'content-type: application/json'   -d '{"client_id":"app_...","email":"ana@example.com","password":"correct horse"}'   # 202, email in Mailpit
+curl 'localhost:3000/api/v1/accounts/confirm?token=<token from the email>'                   # 200 once, then 400
+curl -X POST localhost:3000/api/v1/accounts/resend-confirmation -H 'content-type: application/json'   -d '{"client_id":"app_...","email":"ana@example.com"}'                                   # 202 always
+```
+
+Signup and resend answer the same body whether or not the address is registered. A duplicate signup sends the
+owner an `account-exists` notice (no token) instead of a confirmation. Confirmation links last 24 hours, work
+once, and a resend invalidates the previous one. Unconfirmed accounts cannot log in (login arrives in U7).
+Residual timing difference: signup always hashes (so both paths cost one bcrypt); resend does a few more
+database writes for an unconfirmed account than for an unknown one (milliseconds).
 
 ## Run locally without Docker
 
@@ -94,4 +112,5 @@ required variable is missing or invalid (see `.env.example`).
 
 - `GET /` welcome message
 - `GET /health` liveness plus database ping (200, or 503 when the database is down)
+- `POST /api/v1/accounts/signup`, `GET /api/v1/accounts/confirm`, `POST /api/v1/accounts/resend-confirmation`
 - Business routes are served under `/api/v1`; `/`, `/health` and `/.well-known/jwks.json` stay at the root.
