@@ -28,6 +28,8 @@ interface Forge {
   key: KeyObject;
   alg?: string;
   kid?: string | null;
+  /** Protected header `typ`; `null` omits it. */
+  typ?: string | null;
   iss?: string;
   aud?: string;
   exp?: number;
@@ -36,8 +38,17 @@ interface Forge {
 }
 
 /** Builds a token the issuer would never produce, to attack the verifier. */
-async function forge({ key, alg = 'RS256', kid = 'k', iss = ISSUER, aud = 'app_a', exp = START_SECONDS + 3600, pad = 0 }: Forge) {
-  const header = kid === null ? { alg } : { alg, kid };
+async function forge({
+  key,
+  alg = 'RS256',
+  kid = 'k',
+  typ = 'at+jwt',
+  iss = ISSUER,
+  aud = 'app_a',
+  exp = START_SECONDS + 3600,
+  pad = 0,
+}: Forge) {
+  const header = { alg, ...(kid === null ? {} : { kid }), ...(typ === null ? {} : { typ }) };
   return new SignJWT(pad > 0 ? { pad: 'x'.repeat(pad) } : {})
     .setProtectedHeader(header)
     .setIssuer(iss)
@@ -65,8 +76,9 @@ describe('JoseAccessTokenIssuer', () => {
 
     const issued = await issuer.issue({ accountId: 'account-1', clientId: 'app_a' });
 
-    expect(decodeProtectedHeader(issued.token)).toEqual({ alg: 'RS256', kid: set.active.kid });
-    expect(decodeProtectedHeader(issued.token).kid).toBe(keyStore.activeSigningKey().kid);
+    // RFC 9068: explicit typing keeps an access token from being replayed as another JWT type.
+    expect(decodeProtectedHeader(issued.token)).toEqual({ alg: 'RS256', kid: keyStore.activeSigningKey().kid, typ: 'at+jwt' });
+    expect(keyStore.activeSigningKey().kid).toBe(set.active.kid);
     // toEqual with a closed list also proves there is no roles or roles_globales claim.
     expect(decodeJwt(issued.token)).toEqual({
       iss: ISSUER,
@@ -120,6 +132,24 @@ describe('JoseAccessTokenVerifier', () => {
 
     expect((await verifier.verify(token, { audience: 'app_a' })).ok).toBe(true);
     expectInvalid(await verifier.verify(token, { audience: 'app_b' }));
+  });
+
+  describe('explicit typing (RFC 9068, RFC 8725 3.11)', () => {
+    const { verifier } = build(set);
+
+    it('accepts a token typed at+jwt', async () => {
+      const token = await forge({ key: signingKey.privateKey, kid: signingKey.kid, typ: 'at+jwt' });
+
+      expect((await verifier.verify(token)).ok).toBe(true);
+    });
+
+    it('rejects a token without typ', async () => {
+      expectInvalid(await verifier.verify(await forge({ key: signingKey.privateKey, kid: signingKey.kid, typ: null })));
+    });
+
+    it('rejects a token of another type signed by the same key (id+jwt)', async () => {
+      expectInvalid(await verifier.verify(await forge({ key: signingKey.privateKey, kid: signingKey.kid, typ: 'id+jwt' })));
+    });
   });
 
   describe('key rotation: every published key verifies by kid', () => {

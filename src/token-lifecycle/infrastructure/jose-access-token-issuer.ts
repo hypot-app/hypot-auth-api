@@ -3,6 +3,7 @@ import { SignJWT } from 'jose';
 import type { Clock } from '../../shared-kernel/clock';
 import {
   ACCESS_TOKEN_TTL_SECONDS,
+  ACCESS_TOKEN_TYP,
   type AccessTokenIssuer,
   type IssueAccessTokenInput,
   type IssuedAccessToken,
@@ -26,7 +27,7 @@ export class JoseAccessTokenIssuer implements AccessTokenIssuer {
     const expiresAt = issuedAt + ACCESS_TOKEN_TTL_SECONDS;
 
     const token = await new SignJWT({})
-      .setProtectedHeader({ alg: key.alg, kid: key.kid })
+      .setProtectedHeader({ alg: key.alg, kid: key.kid, typ: ACCESS_TOKEN_TYP })
       .setIssuer(this.issuer)
       .setAudience(clientId)
       .setSubject(accountId)

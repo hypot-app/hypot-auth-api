@@ -4,6 +4,9 @@ import type { Result } from '../../shared-kernel/result';
 /** Access tokens live one hour. They are not denylisted: logout and password change wait for `exp` (spec). */
 export const ACCESS_TOKEN_TTL_SECONDS = 3600;
 
+/** Protected header `typ` of every access token (RFC 9068): a token of another type is never accepted. */
+export const ACCESS_TOKEN_TYP = 'at+jwt';
+
 /** Claims of an access token. Roles belong to the apps, so none are carried. */
 export interface AccessTokenClaims {
   /** Issuer URL of this service. */

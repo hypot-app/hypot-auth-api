@@ -2,7 +2,7 @@ import { createLocalJWKSet, decodeProtectedHeader, jwtVerify, type JSONWebKeySet
 import type { Clock } from '../../shared-kernel/clock';
 import { DomainError } from '../../shared-kernel/domain-error';
 import { err, ok, type Result } from '../../shared-kernel/result';
-import type { AccessTokenClaims, AccessTokenVerifier } from '../domain/access-token';
+import { ACCESS_TOKEN_TYP, type AccessTokenClaims, type AccessTokenVerifier } from '../domain/access-token';
 import type { KeyStore } from '../domain/key-store';
 
 /** A 2048-bit RS256 access token is about 500 characters; anything near this cap is not ours. */
@@ -30,6 +30,7 @@ export class JoseAccessTokenVerifier implements AccessTokenVerifier {
 
       const { payload } = await jwtVerify(token, this.resolveKey, {
         algorithms: ['RS256'], // pinned: no alg confusion, no `none`
+        typ: ACCESS_TOKEN_TYP, // explicit typing: an id+jwt or an untyped JWT from the same key is refused
         issuer: this.issuer,
         audience: options.audience,
         currentDate: this.clock.now(),

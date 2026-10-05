@@ -119,9 +119,9 @@ untouched, then add `AUTH_SIGNING_KEYS_FILE=.keys/signing-keys.json` to your `.e
 from a secret manager** that mounts the JSON at the same kind of path and is pointed to by
 `AUTH_SIGNING_KEYS_FILE`; never run the generator against production.
 
-Tokens carry `kid` (header) and `iss`, `aud` (the app's `client_id`), `sub`, `iat`, `exp` (one hour), `jti`;
+Tokens carry `typ: at+jwt` and `kid` (header, RFC 9068) and `iss`, `aud` (the app's `client_id`), `sub`, `iat`, `exp` (one hour), `jti`;
 roles are the apps' business. The issuer is `AUTH_PUBLIC_BASE_URL`. A consumer validates offline: fetch JWKS, pick
-the key by `kid`, accept only `RS256`, check `iss`, its own `aud` and `exp`. The service's own verifier does the
+the key by `kid`, accept only `RS256` and `typ: at+jwt`, check `iss`, its own `aud` and `exp`. The service's own verifier does the
 same with a 5 second clock tolerance, accepts any published key (active, next, retired), and refuses unknown or
 missing `kid`, other algorithms (including `none` and HS256) and tokens over 4096 characters, always with the
 same generic `invalid_token` error.
