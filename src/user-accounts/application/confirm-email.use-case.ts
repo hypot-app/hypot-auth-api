@@ -35,7 +35,7 @@ export class ConfirmEmailUseCase {
       const user = await this.deps.users.findById(consumed.userId);
       if (user === null) return invalidLink();
 
-      await this.deps.users.save(user.confirm(now));
+      await this.deps.users.markEmailVerified(user.id, now);
       await this.deps.outbox.save(
         OutboxEmail.queue({
           id: randomUUID(),

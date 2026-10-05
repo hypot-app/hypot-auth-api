@@ -15,8 +15,9 @@ export class InMemoryUserRepository implements UserRepository {
     return true;
   }
 
-  async save(user: User): Promise<void> {
-    this.users.set(user.id, user);
+  async markEmailVerified(userId: string, at: Date): Promise<void> {
+    const user = this.users.get(userId);
+    if (user !== undefined) this.users.set(userId, user.confirm(at));
   }
 
   async findByAppAndEmail(appId: string, email: string): Promise<User | null> {

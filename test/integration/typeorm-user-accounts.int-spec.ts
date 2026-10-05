@@ -118,12 +118,23 @@ describe('user and one-time-token repositories (integration)', () => {
       expect(await users.findById(user.id)).toBeNull();
     });
 
-    it('saves the changes of an existing account', async () => {
+    it('marks the email verified and keeps every other column', async () => {
       const user = newUser(appA);
       await users.add(user);
-      const confirmed = user.confirm(at(60));
-      await users.save(confirmed);
-      expect(await users.findById(user.id)).toEqual(confirmed);
+      await users.markEmailVerified(user.id, at(60));
+      expect(await users.findById(user.id)).toEqual(user.confirm(at(60)));
+    });
+
+    it('keeps the first verification time when the account is already verified', async () => {
+      const user = newUser(appA);
+      await users.add(user);
+      await users.markEmailVerified(user.id, at(60));
+      await users.markEmailVerified(user.id, at(120));
+      expect((await users.findById(user.id))?.emailVerifiedAt).toEqual(at(60));
+    });
+
+    it('ignores an unknown account', async () => {
+      await expect(users.markEmailVerified(randomUUID(), at(60))).resolves.toBeUndefined();
     });
   });
 
