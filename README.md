@@ -140,7 +140,7 @@ three more writes and one random-token call than a duplicate (about 3-10 ms agai
 gaps are accepted and bounded by the per-IP and per-account limits (planned, U13 and U17b).
 
 Signup, confirm and resend are called by app frontends from the browser, so they follow the origin-bound CORS
-rules above (planned, U17a). They are rate limited per IP (`429` with `Retry-After`) and per target account
+rules above (signup and resend: built in U11c; confirm: planned, U17a). They are rate limited per IP (`429` with `Retry-After`) and per target account
 (silent cap, 3 emails per hour). The "no CORS on accounts" rule of the hosted-UI design is gone: Auth has no
 hosted UI.
 

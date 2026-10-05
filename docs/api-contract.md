@@ -64,7 +64,7 @@ Texts: the fixed `message` strings are listed per endpoint where they are fixed.
 
 - No `Origin` header (native clients, servers): not CORS-gated.
 - Allowed-origin lookups may be cached up to 30 seconds.
-- Today the CORS middleware is attached only to legacy routes, not to the account routes. The planned units change that.
+- Today the CORS middleware covers all 10 routes and the preflight answer above is live. The origin binding of the actual request is live for signup and resend-confirmation (`400 invalid_client`, no allow header); the other endpoints get it in their own units. `GET accounts/confirm` has no binding until U17a.
 
 ### Rate-limit behaviour (summary)
 
@@ -119,7 +119,7 @@ Status: IMPLEMENTED.
 
 ### `POST /api/v1/accounts/signup`
 
-Status: IMPLEMENTED (limits and browser CORS: PLANNED).
+Status: IMPLEMENTED (limits: PLANNED; browser CORS with origin binding: IMPLEMENTED).
 
 | Item | Value |
 |------|-------|
@@ -146,7 +146,7 @@ Status: PLANNED. The current `GET /api/v1/accounts/confirm?token=` is IMPLEMENTE
 
 ### `POST /api/v1/accounts/resend-confirmation`
 
-Status: IMPLEMENTED (limits and browser CORS: PLANNED).
+Status: IMPLEMENTED (limits: PLANNED; browser CORS with origin binding: IMPLEMENTED).
 
 | Item | Value |
 |------|-------|
