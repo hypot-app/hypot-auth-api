@@ -1,6 +1,6 @@
-import { PostResetRedirectUri } from './post-reset-redirect-uri';
+import { AppUrl } from './app-url';
 
-describe('PostResetRedirectUri', () => {
+describe('AppUrl', () => {
   const accepted: [string, string, boolean][] = [
     ['https url', 'https://a.example/login', false],
     ['https url in production', 'https://a.example/login', true],
@@ -10,7 +10,7 @@ describe('PostResetRedirectUri', () => {
   ];
 
   it.each(accepted)('accepts %s', (_label, raw, isProduction) => {
-    const result = PostResetRedirectUri.create(raw, { isProduction });
+    const result = AppUrl.create(raw, { isProduction });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value.value).toBe(raw);
   });
@@ -32,21 +32,8 @@ describe('PostResetRedirectUri', () => {
   ];
 
   it.each(rejected)('rejects %s', (_label, raw, isProduction) => {
-    const result = PostResetRedirectUri.create(raw, { isProduction });
+    const result = AppUrl.create(raw, { isProduction });
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.code).toBe('invalid_post_reset_redirect_uri');
-  });
-
-  describe('optional', () => {
-    it('treats null and undefined as no redirect', () => {
-      expect(PostResetRedirectUri.optional(null, { isProduction: true })).toEqual({ ok: true, value: null });
-      expect(PostResetRedirectUri.optional(undefined, { isProduction: true })).toEqual({ ok: true, value: null });
-    });
-
-    it('validates a present value', () => {
-      const result = PostResetRedirectUri.optional('https://a.example/login', { isProduction: true });
-      expect(result.ok && result.value?.value).toBe('https://a.example/login');
-      expect(PostResetRedirectUri.optional('ftp://x', { isProduction: true }).ok).toBe(false);
-    });
+    if (!result.ok) expect(result.error.code).toBe('invalid_app_url');
   });
 });

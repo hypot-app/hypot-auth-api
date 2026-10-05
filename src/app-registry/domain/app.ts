@@ -14,20 +14,25 @@ export interface AppProps {
   redirectUris: string[];
   allowedOrigins: string[];
   emailFrom: string | null;
-  /** Already validated through PostResetRedirectUri when it was written. */
-  postResetRedirectUri: string | null;
+  /** Already validated through AppUrl when it was written. Null only for apps created before the URLs existed. */
+  emailConfirmationUrl: string | null;
+  passwordResetUrl: string | null;
   status: AppStatus;
   createdAt: Date;
   updatedAt: Date;
 }
 
-/** Fields an operator may change. `undefined` leaves a field as is; `null` clears a nullable one. */
+/**
+ * Fields an operator may change. `undefined` leaves a field as is; `null` clears `emailFrom`.
+ * The email link URLs can be replaced but never cleared.
+ */
 export interface AppChanges {
   name?: string;
   redirectUris?: string[];
   allowedOrigins?: string[];
   emailFrom?: string | null;
-  postResetRedirectUri?: string | null;
+  emailConfirmationUrl?: string;
+  passwordResetUrl?: string;
 }
 
 /** A client application served by Auth. Plain TypeScript: no framework or persistence imports. */
@@ -40,7 +45,8 @@ export class App implements AppProps {
   readonly redirectUris: string[];
   readonly allowedOrigins: string[];
   readonly emailFrom: string | null;
-  readonly postResetRedirectUri: string | null;
+  readonly emailConfirmationUrl: string | null;
+  readonly passwordResetUrl: string | null;
   readonly status: AppStatus;
   readonly createdAt: Date;
   readonly updatedAt: Date;
@@ -54,7 +60,8 @@ export class App implements AppProps {
     this.redirectUris = [...props.redirectUris];
     this.allowedOrigins = [...props.allowedOrigins];
     this.emailFrom = props.emailFrom;
-    this.postResetRedirectUri = props.postResetRedirectUri;
+    this.emailConfirmationUrl = props.emailConfirmationUrl;
+    this.passwordResetUrl = props.passwordResetUrl;
     this.status = props.status;
     this.createdAt = props.createdAt;
     this.updatedAt = props.updatedAt;
@@ -85,8 +92,8 @@ export class App implements AppProps {
       redirectUris: changes.redirectUris ?? this.redirectUris,
       allowedOrigins: changes.allowedOrigins ?? this.allowedOrigins,
       emailFrom: changes.emailFrom === undefined ? this.emailFrom : changes.emailFrom,
-      postResetRedirectUri:
-        changes.postResetRedirectUri === undefined ? this.postResetRedirectUri : changes.postResetRedirectUri,
+      emailConfirmationUrl: changes.emailConfirmationUrl ?? this.emailConfirmationUrl,
+      passwordResetUrl: changes.passwordResetUrl ?? this.passwordResetUrl,
       updatedAt: now,
     });
   }

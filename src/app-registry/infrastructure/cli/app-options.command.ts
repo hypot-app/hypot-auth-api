@@ -13,7 +13,6 @@ export interface SharedAppOptions {
   redirectUri?: string[];
   origin?: string[];
   emailFrom?: string;
-  postResetRedirectUri?: string;
 }
 
 /** Options shared by `app create` and `app update`; subclasses add their own. */
@@ -41,15 +40,6 @@ export abstract class AppOptionsCommand extends CommandRunner {
 
   @Option({ flags: '--email-from <address>', description: 'From address that overrides MAIL_FROM for this app' })
   parseEmailFrom(value: string): string {
-    return value;
-  }
-
-  @Option({
-    flags: '--post-reset-redirect-uri <url>',
-    description:
-      'Fixed URL users are sent to after a password reset (https; http only for localhost outside production)',
-  })
-  parsePostResetRedirectUri(value: string): string {
     return value;
   }
 }

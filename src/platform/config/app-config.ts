@@ -23,6 +23,14 @@ const envSchema = z
     MAIL_FROM: z.string().min(1),
   })
   .superRefine((env, ctx) => {
+    // Parsed, so this guard does not depend on the base rule's scheme regex.
+    if (env.NODE_ENV === 'production' && new URL(env.AUTH_PUBLIC_BASE_URL).protocol !== 'https:') {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['AUTH_PUBLIC_BASE_URL'],
+        message: 'must be an https URL in production',
+      });
+    }
     if ((env.SMTP_USER === undefined) !== (env.SMTP_PASS === undefined)) {
       ctx.addIssue({
         code: 'custom',

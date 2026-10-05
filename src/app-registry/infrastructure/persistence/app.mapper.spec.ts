@@ -13,7 +13,8 @@ const rowOf = (overrides: Partial<AppRow> = {}): AppRow => ({
   redirect_uris: ['https://a.example/cb'],
   allowed_origins: ['https://a.example'],
   email_from: 'no-reply@a.example',
-  post_reset_redirect_uri: 'https://a.example/login',
+  email_confirmation_url: 'https://a.example/confirm',
+  password_reset_url: 'https://a.example/reset',
   status: 'inactive',
   created_at: NOW,
   updated_at: new Date('2026-02-02T00:00:00.000Z'),
@@ -30,7 +31,8 @@ describe('AppMapper', () => {
     expect(app.redirectUris).toEqual(['https://a.example/cb']);
     expect(app.allowedOrigins).toEqual(['https://a.example']);
     expect(app.emailFrom).toBe('no-reply@a.example');
-    expect(app.postResetRedirectUri).toBe('https://a.example/login');
+    expect(app.emailConfirmationUrl).toBe('https://a.example/confirm');
+    expect(app.passwordResetUrl).toBe('https://a.example/reset');
     expect(app.isActive()).toBe(false);
   });
 
@@ -39,17 +41,19 @@ describe('AppMapper', () => {
     expect(AppMapper.toPersistence(AppMapper.toDomain(row))).toEqual(row);
   });
 
-  it('round-trips the null case (public app, no email_from, no post-reset URI)', () => {
+  it('round-trips the null case (public app, no email_from, no email link URLs)', () => {
     const row = rowOf({
       client_type: 'public',
       client_secret_hash: null,
       email_from: null,
-      post_reset_redirect_uri: null,
+      email_confirmation_url: null,
+      password_reset_url: null,
       status: 'active',
     });
     const app = AppMapper.toDomain(row);
     expect(app.clientSecretHash).toBeNull();
-    expect(app.postResetRedirectUri).toBeNull();
+    expect(app.emailConfirmationUrl).toBeNull();
+    expect(app.passwordResetUrl).toBeNull();
     expect(AppMapper.toPersistence(app)).toEqual(row);
   });
 
@@ -63,7 +67,8 @@ describe('AppMapper', () => {
       redirectUris: ['https://b.example/cb'],
       allowedOrigins: [],
       emailFrom: null,
-      postResetRedirectUri: null,
+      emailConfirmationUrl: null,
+      passwordResetUrl: null,
       status: 'active',
       createdAt: NOW,
       updatedAt: NOW,
