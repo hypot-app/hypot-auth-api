@@ -4,8 +4,10 @@ import type { App } from '../../app-registry/domain/app';
  * The app has no URL for the link an email needs (an app created before the URLs existed).
  * The message names the field only: no token, address or link.
  */
+type LinkField = 'email_confirmation_url' | 'password_reset_url';
+
 export class UnconfiguredLink extends Error {
-  constructor(field: 'email_confirmation_url' | 'password_reset_url') {
+  constructor(field: LinkField) {
     super(`app has no ${field} configured`);
     this.name = 'UnconfiguredLink';
   }
@@ -32,7 +34,7 @@ export function accountExistsLink(app: App): string {
 
 const withToken = (url: string, token: string): string => `${url}#token=${encodeURIComponent(token)}`;
 
-function requireUrl(url: string | null, field: ConstructorParameters<typeof UnconfiguredLink>[0]): string {
+function requireUrl(url: string | null, field: LinkField): string {
   if (url === null) throw new UnconfiguredLink(field);
   return url;
 }

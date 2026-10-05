@@ -125,6 +125,7 @@ describe('OutboxWorker', () => {
     expect(outbox.emails.get(email.id)).toMatchObject({ status: 'sent', payload: {}, attempts: 1, lastError: null });
   });
 
+  // ADR 39: links are built at send time from the current app record, so an operator URL change applies to queued mail.
   it('builds the link at send time from the current app, not from what it was when queued', async () => {
     const { worker, renderer, apps, enqueue } = setup();
     await enqueue(appWith('a1', null), 'confirmation', { token: TOKEN });
