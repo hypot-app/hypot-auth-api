@@ -106,15 +106,18 @@ with a `kid` on every key. Provide it in exactly one of two ways:
 - `AUTH_SIGNING_KEYS`: the JSON itself.
 
 The service refuses to start when the set is invalid (bad JSON, missing or mismatched private key, duplicate
-`kid`, RSA key under 2048 bits). The error names the problem, never the key.
+`kid`, RSA key under 2048 bits) or when neither or both variables are set. The error names the problem, never
+the key. Only the API process reads these variables: the operator CLI (`npm run cli`) boots without them.
 
-`GET /.well-known/jwks.json` (root, no prefix) publishes the public half of `active`, `next` and `retired`
-with `Cache-Control: public, max-age=300`. Private parameters are never published.
+`GET /.well-known/jwks.json` (root, no prefix) publishes the public half of `active`, `next` and the
+non-expired `retired` keys with `Cache-Control: public, max-age=300`. Private parameters are never published.
 
-Dev keys: with Docker, compose creates a throwaway set in the `signing_keys` volume (a one-shot `keygen`
-service; `docker compose down -v` discards it). Without Docker run `npm run keys:generate`, which writes the
-gitignored `.keys/signing-keys.json` and leaves an existing file untouched, then add
-`AUTH_SIGNING_KEYS_FILE=.keys/signing-keys.json` to your `.env`.
+**Dev keys only.** `npm run keys:generate` and the compose `keygen` service are for development: they write a
+throwaway set (the compose one lives in the `signing_keys` volume; `docker compose down -v` discards it, and
+the generated file is gitignored). Without Docker run `npm run keys:generate`, which leaves an existing file
+untouched, then add `AUTH_SIGNING_KEYS_FILE=.keys/signing-keys.json` to your `.env`. **Production keys come
+from a secret manager** that mounts the JSON at the same kind of path and is pointed to by
+`AUTH_SIGNING_KEYS_FILE`; never run the generator against production.
 
 Tokens carry `kid` (header) and `iss`, `aud` (the app's `client_id`), `sub`, `iat`, `exp` (one hour), `jti`;
 roles are the apps' business. The issuer is `AUTH_PUBLIC_BASE_URL`. A consumer validates offline: fetch JWKS, pick
@@ -123,9 +126,18 @@ same with a 5 second clock tolerance, accepts any published key (active, next, r
 missing `kid`, other algorithms (including `none` and HS256) and tokens over 4096 characters, always with the
 same generic `invalid_token` error.
 
-Rotation is a config change: (1) add the new key as `next` and deploy; (2) after the 5 minute JWKS cache
-(and once every consumer has refreshed) move `next` to `active` and the old `active` to `retired`; (3) after
-1 hour plus the cache TTL remove `retired`. Emergency rotation also revokes all refresh tokens.
+Rotation is a config change and needs a restart of every instance:
+
+1. Add the new key as `next` and deploy. The timer starts only when ALL instances serve `next`.
+2. Wait at least 15 minutes (1 hour recommended). Consumers cache the JWKS: the endpoint says 5 minutes, but
+   jose's remote JWKS cache defaults to 10 minutes and ignores `Cache-Control`; proxies add more.
+3. Promote: move `next` to `active` and the old `active` to `retired`, adding `"retiredAt": "<ISO timestamp>"`
+   to the retired entry.
+4. The retired key is published until `retiredAt` plus the retention window of 1 hour + 5 s clock tolerance +
+   10 minutes jose cache (4205 s). At the next boot after that it is dropped and a warning names its `kid`;
+   remove the entry from the secret. A retired key without `retiredAt` never expires and logs a boot warning.
+
+Emergency rotation also revokes all refresh tokens.
 
 ## Run locally without Docker
 

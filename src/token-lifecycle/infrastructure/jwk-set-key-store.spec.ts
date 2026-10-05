@@ -1,13 +1,14 @@
 import { createPublicKey, generateKeyPairSync, sign, verify } from 'node:crypto';
 import { generateKeySet, type KeySetJson } from './signing-key-generator';
-import { JwkSetKeyStore, SigningKeyConfigError } from './jwk-set-key-store';
+import { FixedClock } from '../../shared-kernel/clock';
+import { JwkSetKeyStore, RETIRED_KEY_RETENTION_SECONDS, SigningKeyConfigError } from './jwk-set-key-store';
 
 const PRIVATE_FIELDS = ['d', 'p', 'q', 'dp', 'dq', 'qi'];
 
 describe('JwkSetKeyStore', () => {
   const set = generateKeySet();
   const [retiredSet] = [generateKeySet({ next: false })];
-  const full: KeySetJson = { ...set, retired: [retiredSet.active] };
+  const full: KeySetJson = { ...set, retired: [{ ...retiredSet.active, retiredAt: new Date().toISOString() }] };
 
   it('signs with the active key and exposes its kid', () => {
     const store = JwkSetKeyStore.fromJson(JSON.stringify(full));
@@ -41,7 +42,7 @@ describe('JwkSetKeyStore', () => {
   });
 
   it('rotation: promoting next keeps the previous key published and signs with the new kid', () => {
-    const rotated = { active: set.next, retired: [set.active] };
+    const rotated = { active: set.next, retired: [{ ...set.active, retiredAt: new Date().toISOString() }] };
 
     const store = JwkSetKeyStore.fromJson(JSON.stringify(rotated));
 
@@ -54,9 +55,68 @@ describe('JwkSetKeyStore', () => {
     expect(store.publicJwks().keys.map((jwk) => jwk.kid)).toEqual([set.active.kid]);
   });
 
+  describe('retired key expiry (W3)', () => {
+    const now = new Date('2026-10-04T12:00:00.000Z');
+    const retiredAt = (secondsAgo: number) => new Date(now.getTime() - secondsAgo * 1000).toISOString();
+    const boot = (retired: Record<string, unknown>[]) => {
+      const warnings: string[] = [];
+      const store = JwkSetKeyStore.fromJson(JSON.stringify({ ...set, retired }), {
+        clock: new FixedClock(now),
+        warn: (message) => warnings.push(message),
+      });
+      return { kids: store.publicJwks().keys.map((jwk) => jwk.kid), warnings };
+    };
+    const old = retiredSet.active;
+
+    it('publishes a retired key until the retention window has passed', () => {
+      const { kids, warnings } = boot([{ ...old, retiredAt: retiredAt(RETIRED_KEY_RETENTION_SECONDS - 1) }]);
+
+      expect(kids).toEqual([set.active.kid, set.next?.kid, old.kid]);
+      expect(warnings).toEqual([]);
+    });
+
+    it('drops a retired key at the end of the retention window and warns with the kid only', () => {
+      const { kids, warnings } = boot([{ ...old, retiredAt: retiredAt(RETIRED_KEY_RETENTION_SECONDS) }]);
+
+      expect(kids).toEqual([set.active.kid, set.next?.kid]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain(old.kid);
+      expect(warnings[0]).not.toContain(String(old.n));
+      expect(warnings[0]).not.toContain(String(old.d));
+    });
+
+    it('keeps a retired key without retiredAt for backward compatibility but warns that it never expires', () => {
+      const { kids, warnings } = boot([old]);
+
+      expect(kids).toEqual([set.active.kid, set.next?.kid, old.kid]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain(old.kid);
+      expect(warnings[0]).toMatch(/no retiredAt|no expiry/);
+    });
+
+    it('keeps only the non-expired keys when several are retired', () => {
+      const fresh = generateKeySet({ next: false }).active;
+      const { kids } = boot([
+        { ...old, retiredAt: retiredAt(RETIRED_KEY_RETENTION_SECONDS + 60) },
+        { ...fresh, retiredAt: retiredAt(60) },
+      ]);
+
+      expect(kids).toEqual([set.active.kid, set.next?.kid, fresh.kid]);
+    });
+
+    it('rejects a retiredAt that is not an ISO timestamp, without echoing it', () => {
+      const act = () => boot([{ ...old, retiredAt: 'SECRET-NOT-A-DATE' }]);
+
+      expect(act).toThrow(SigningKeyConfigError);
+      expect(act).toThrow('retired.0.retiredAt');
+      expect(act).not.toThrow('SECRET-NOT-A-DATE');
+    });
+  });
+
   describe('rejects an invalid configuration without echoing key material', () => {
     const publicOnly = { kty: 'RSA', n: set.active.n, e: set.active.e, kid: set.active.kid };
     const weak = generateKeyPairSync('rsa', { modulusLength: 1024 }).privateKey.export({ format: 'jwk' });
+    const retiredPublic = { ...publicOnly, kid: 'retired-pub', retiredAt: new Date().toISOString() };
     const { d, p, q, dp, dq, qi } = retiredSet.active;
     const mismatchedPrivate = { d, p, q, dp, dq, qi };
     const cases: [string, unknown, string][] = [
@@ -69,6 +129,23 @@ describe('JwkSetKeyStore', () => {
       ['a duplicate kid', { active: set.active, next: set.active }, 'duplicate'],
       ['a private key that does not match the public key', { active: { ...set.active, ...mismatchedPrivate } }, 'valid RSA'],
       ['a key shorter than 2048 bits', { active: { ...weak, kid: 'short-key' } }, '2048'],
+      [
+        'a next key that does not match its public key',
+        { active: set.active, next: { ...set.next, ...mismatchedPrivate } },
+        'next key is not a valid RSA private key',
+      ],
+      ['a next key without private parameters', { active: set.active, next: { ...publicOnly, kid: 'next-pub' } }, 'next key'],
+      ['a next key shorter than 2048 bits', { active: set.active, next: { ...weak, kid: 'short-next' } }, 'next key must be'],
+      [
+        'a retired key that is not RSA',
+        { active: set.active, retired: [{ ...retiredPublic, kty: 'EC' }] },
+        'retired.0.kty',
+      ],
+      [
+        'a retired key shorter than 2048 bits',
+        { active: set.active, retired: [{ ...weak, kid: 'short-retired', retiredAt: new Date().toISOString() }] },
+        'retired key must be',
+      ],
     ];
 
     it.each(cases)('%s', (_label, value, needle) => {

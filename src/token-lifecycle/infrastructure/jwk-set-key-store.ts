@@ -1,8 +1,23 @@
 import { createPrivateKey, createPublicKey, sign, verify, type KeyObject } from 'node:crypto';
+import { Logger } from '@nestjs/common';
 import { z } from 'zod';
+import { SystemClock, type Clock } from '../../shared-kernel/clock';
 import type { JsonWebKeySet, KeyStore, PublicJwk, SigningKey } from '../domain/key-store';
 
 const MIN_MODULUS_BITS = 2048;
+
+/**
+ * How long a retired key stays published after `retiredAt` (ADR 32): the 1 hour access
+ * token lifetime, plus the 5 second clock tolerance, plus the 10 minute default cache of
+ * jose's remote JWKS (it ignores Cache-Control, so it is the longest cache a consumer has).
+ */
+export const RETIRED_KEY_RETENTION_SECONDS = 3600 + 5 + 600;
+
+export interface KeyStoreOptions {
+  clock?: Clock;
+  /** Receives boot warnings. They name a `kid` only, never key material. */
+  warn?: (message: string) => void;
+}
 
 /** Thrown at startup for an unusable key set. Messages never include key material. */
 export class SigningKeyConfigError extends Error {
@@ -22,7 +37,8 @@ const jwkSchema = z.looseObject({
 const keySetSchema = z.object({
   active: jwkSchema,
   next: jwkSchema.optional(),
-  retired: z.array(jwkSchema).optional(),
+  // `retiredAt`: when the key stopped signing. Without it a retired key never expires.
+  retired: z.array(jwkSchema.extend({ retiredAt: z.iso.datetime({ offset: true }).optional() })).optional(),
 });
 
 type Jwk = z.infer<typeof jwkSchema>;
@@ -37,7 +53,9 @@ export class JwkSetKeyStore implements KeyStore {
     private readonly jwks: JsonWebKeySet,
   ) {}
 
-  static fromJson(json: string): JwkSetKeyStore {
+  static fromJson(json: string, options: KeyStoreOptions = {}): JwkSetKeyStore {
+    const clock = options.clock ?? new SystemClock();
+    const warn = options.warn ?? ((message: string) => new Logger(JwkSetKeyStore.name).warn(message));
     let raw: unknown;
     try {
       raw = JSON.parse(json);
@@ -52,15 +70,27 @@ export class JwkSetKeyStore implements KeyStore {
     }
     const { active, next, retired = [] } = parsed.data;
 
+    const allKids = [active, ...(next ? [next] : []), ...retired].map((jwk) => jwk.kid);
+    if (new Set(allKids).size !== allKids.length) {
+      throw new SigningKeyConfigError('Invalid signing key set: duplicate kid');
+    }
+
+    const stillPublished = retired.filter((jwk) => {
+      if (jwk.retiredAt === undefined) {
+        warn(`Retired signing key ${jwk.kid} has no retiredAt and never expires; add retiredAt to let it expire`);
+        return true;
+      }
+      const expiresAt = Date.parse(jwk.retiredAt) + RETIRED_KEY_RETENTION_SECONDS * 1000;
+      if (clock.now().getTime() < expiresAt) return true;
+      warn(`Retired signing key ${jwk.kid} is past its retention window and is no longer published; remove it from the key set`);
+      return false;
+    });
+
     const entries = [
       { slot: 'active', jwk: active },
       ...(next ? [{ slot: 'next', jwk: next }] : []),
-      ...retired.map((jwk) => ({ slot: 'retired', jwk })),
+      ...stillPublished.map((jwk) => ({ slot: 'retired', jwk })),
     ];
-    const kids = entries.map((entry) => entry.jwk.kid);
-    if (new Set(kids).size !== kids.length) {
-      throw new SigningKeyConfigError('Invalid signing key set: duplicate kid');
-    }
 
     let activeKey: KeyObject | undefined;
     const published = entries.map(({ slot, jwk }) => {

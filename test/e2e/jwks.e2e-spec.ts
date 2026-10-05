@@ -11,11 +11,11 @@ describe('GET /.well-known/jwks.json (e2e)', () => {
   let app: INestApplication;
   const current = generateKeySet(); // active + next
   const previous = generateKeySet({ next: false });
-  const keySet = { ...current, retired: [previous.active] };
+  const keySet = { ...current, retired: [{ ...previous.active, retiredAt: new Date().toISOString() }] };
 
   beforeAll(async () => {
     db = await startTestDatabase();
-    app = await createTestApp({ databaseUrl: db.url, config: { signingKeysJson: JSON.stringify(keySet) } });
+    app = await createTestApp({ databaseUrl: db.url, signingKeysJson: JSON.stringify(keySet) });
   }, 180_000);
 
   afterAll(async () => {
