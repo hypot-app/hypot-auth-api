@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Inject, Injectable, type NestMiddleware } from '@nestjs/common';
 import { IsOriginAllowedUseCase } from '../application/is-origin-allowed.use-case';
-import type { CorsRequest } from './cors-grant';
+import type { CorsRequest } from '../../platform/http/cors-grant';
 
 const ALLOWED_METHODS = 'GET, POST, OPTIONS';
 const ALLOWED_HEADERS = 'Content-Type, Authorization';

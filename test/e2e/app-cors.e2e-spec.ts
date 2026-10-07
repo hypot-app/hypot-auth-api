@@ -1,6 +1,6 @@
 import { Controller, Get, Post, type INestApplication } from '@nestjs/common';
 import request from 'supertest';
-import { CorsGrant } from '../../src/app-registry/http/cors-grant';
+import { CorsGrant } from '../../src/platform/http/cors-grant';
 import { RegisterAppUseCase } from '../../src/app-registry/application/register-app.use-case';
 import { createTestApp } from '../support/create-test-app';
 import { startTestDatabase, type TestDatabase } from '../support/postgres';

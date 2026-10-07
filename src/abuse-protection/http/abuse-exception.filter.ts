@@ -1,6 +1,6 @@
 import { Catch, HttpException, HttpStatus, type ArgumentsHost, type ExceptionFilter } from '@nestjs/common';
 import type { ServerResponse } from 'node:http';
-import { grantCorsAllow, type CorsRequest } from '../../app-registry/http/cors-grant';
+import { grantCorsAllow, type CorsRequest } from '../../platform/http/cors-grant';
 import type { Clock } from '../../shared-kernel/clock';
 import { TemporarilyUnavailable } from '../domain/temporarily-unavailable';
 
