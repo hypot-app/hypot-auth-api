@@ -177,4 +177,33 @@ describe('PostgresAbuseCounterStore (integration, ADR 36)', () => {
       await expect(store.reset('login_account_ip', key)).resolves.toBeUndefined();
     });
   });
+
+  describe('deleteExpired', () => {
+    const keyOf = (n: number) => CounterKey.of('email_ip', [`ip-${n}`]);
+    const total = async (): Promise<number> => db.dataSource.getRepository(AbuseCounterSchema).count();
+
+    it('deletes counters whose expiry has passed and keeps live ones, a lockout included', async () => {
+      await store.hit('email_ip', keyOf(1), WINDOW, T0); // expires T0+100
+      await store.hit('email_ip', keyOf(2), WINDOW, after(T0, 60)); // expires T0+160
+      for (let i = 0; i < 3; i++) await store.hit('login_account_ip', key, LOCKOUT, T0); // locked until T0+500
+
+      expect(await store.deleteExpired(after(T0, 100), 1000)).toBe(1);
+      expect(await store.deleteExpired(after(T0, 400), 1000)).toBe(1);
+      expect(await total()).toBe(1);
+      expect((await row())?.blocked_until).toEqual(after(T0, 500));
+      expect(await store.deleteExpired(after(T0, 500), 1000)).toBe(1);
+      expect(await total()).toBe(0);
+    });
+
+    it('deletes at most the batch size per call', async () => {
+      for (let n = 0; n < 5; n++) await store.hit('email_ip', keyOf(n), WINDOW, T0);
+      const later = after(T0, 1000);
+
+      expect(await store.deleteExpired(later, 2)).toBe(2);
+      expect(await total()).toBe(3);
+      expect(await store.deleteExpired(later, 2)).toBe(2);
+      expect(await store.deleteExpired(later, 2)).toBe(1);
+      expect(await store.deleteExpired(later, 2)).toBe(0);
+    });
+  });
 });

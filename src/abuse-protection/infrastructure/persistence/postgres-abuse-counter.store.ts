@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import type { AbuseCounterStore, CounterRef, HitResult } from '../../domain/abuse-counter.store';
+import type { AbuseCounterStore, CounterRef, ExpiredCounterPurge, HitResult } from '../../domain/abuse-counter.store';
 import type { Policy } from '../../domain/policy';
 import type { Scope } from '../../domain/scope';
 
@@ -34,13 +34,22 @@ const BLOCKED_UNTIL_SQL = `
     ON c."scope" = t."scope" AND c."key" = decode(t."key", 'hex')
   WHERE c."blocked_until" > $1::timestamptz`;
 
+// ctid picks the rows without a sort; the sweeper repeats until a batch comes back short.
+const DELETE_EXPIRED_SQL = `
+  WITH removed AS (
+    DELETE FROM "abuse_counters"
+    WHERE "ctid" IN (SELECT "ctid" FROM "abuse_counters" WHERE "expires_at" <= $1::timestamptz LIMIT $2::int)
+    RETURNING 1
+  )
+  SELECT count(*)::int AS "deleted" FROM removed`;
+
 /**
  * Fixed-window counters in Postgres (ADR 36). Every statement goes through the root
  * DataSource manager, never the transactional one from the unit of work: a business
  * rollback must not undo a count, and no row lock may outlive this statement.
  */
 @Injectable()
-export class PostgresAbuseCounterStore implements AbuseCounterStore {
+export class PostgresAbuseCounterStore implements AbuseCounterStore, ExpiredCounterPurge {
   constructor(private readonly dataSource: DataSource) {}
 
   async hit(scope: Scope, key: Buffer, policy: Policy, now: Date): Promise<HitResult> {
@@ -65,6 +74,11 @@ export class PostgresAbuseCounterStore implements AbuseCounterStore {
       counters.map((counter) => counter.key.toString('hex')),
     ]);
     return rows[0]?.until ?? null;
+  }
+
+  async deleteExpired(now: Date, limit: number): Promise<number> {
+    const rows: { deleted: number }[] = await this.dataSource.manager.query(DELETE_EXPIRED_SQL, [now, limit]);
+    return rows[0]?.deleted ?? 0;
   }
 
   async reset(scope: Scope, key: Buffer): Promise<void> {

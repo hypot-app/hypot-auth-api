@@ -146,6 +146,18 @@ rules above (signup and resend: built in U11c; confirm: planned, U17a). They are
 (silent cap, 3 emails per hour). The "no CORS on accounts" rule of the hosted-UI design is gone: Auth has no
 hosted UI.
 
+### Abuse protection
+
+Rate limits and the login lockout count in Postgres (`abuse_counters`, an UNLOGGED table, no Redis); a sweeper
+started by `main.ts` deletes expired rows every 5 minutes. Each scope has `ABUSE_<SCOPE>_LIMIT` and
+`ABUSE_<SCOPE>_WINDOW_SECONDS` (plus `_BLOCK_SECONDS` for `LOGIN_ACCOUNT_IP` and `LOGIN_ACCOUNT`). Defaults:
+`LOGIN_IP` 100 per 15 min, `LOGIN_ACCOUNT_IP` 5 per 15 min, `LOGIN_ACCOUNT` 50 per 1 h (both lockouts last 15 min),
+`EMAIL_IP`, `RESET_IP` and `CONFIRM_IP` 20 per 1 h, `REFRESH_IP` 60 per 15 min, `EMAIL_ACCOUNT` 3 per 1 h.
+The client IP is the TCP peer unless `TRUST_PROXY` (default `false`: a hop count, or a comma-separated list of
+`loopback`, `uniquelocal` or CIDRs; `true` is rejected) names the proxies in front of Auth. Behind a load balancer
+set it, or every user shares the proxy's address. IPv6 clients are keyed on their /64. If the counter store fails,
+credential endpoints answer `503 temporarily_unavailable`. The guard exists; U14, U17 and U18 call it from the endpoints.
+
 ### Signing keys and JWKS
 
 Access tokens are RS256 JWTs signed with a key set that is supplied as a secret and never committed

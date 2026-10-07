@@ -25,4 +25,10 @@ export interface AbuseCounterStore {
   reset(scope: Scope, key: Buffer): Promise<void>;
 }
 
+/** Housekeeping port for the sweeper. */
+export interface ExpiredCounterPurge {
+  /** Deletes up to `limit` counters whose `expires_at` has passed; returns how many. */
+  deleteExpired(now: Date, limit: number): Promise<number>;
+}
+
 export const ABUSE_COUNTER_STORE = Symbol('AbuseCounterStore');
