@@ -174,7 +174,15 @@ Real forks: none. Items 8 and 9 are the closest; both follow the specs, and the 
 - [x] 13.11 RED/GREEN (W3): `AbuseExceptionFilter` grants CORS on both `429` and `503`. e2e: a `429` thrown without a controller grant is readable from an active app's origin; a `503` has the allow header; no `Origin` or an unknown origin gets none. Unit rows for both statuses. Mutations: no grant (2 e2e fail), grant only the 429 (1).
 - [x] 13.12 RED/GREEN (W2): a limiter outage logs `abuse limiter store unavailable (<scope>): <driver message>` (no keys, IPs or parameters; a non-Error cause prints `unknown error`), at most once per 60 s per process with the injected `Clock`; `TemporarilyUnavailable` carries the `scope`. Mutations: no throttle, `<=` at the boundary, log the 429, print the raw cause, drop the scope.
 
+**U13f** `feat/u13f-abuse-client-ref` (review fix W4 of the U13 verify; stacked on U13e)
+
+- [x] 13.13 RED/GREEN (W4): structural invariants. `checkLoginIp(client, ip): Promise<boolean>` is the only login IP check; `checkIp` and `checkClientIp` take separate scope unions without `login_ip`, so login has no path to a Retry-After or a `429`. The guard accepts only a branded `ClientRef` (`ClientRef.resolved(id)` for a resolved active app, `ClientRef.unknown()` for the sentinel, whose key cannot collide with an app whose id is `unknown`), never a raw string; `UNKNOWN_CLIENT_ID` is gone. `@ts-expect-error` specs make `npm run typecheck` fail if either restriction is loosened. Mutations: widen `checkClientIp` back to `login_ip` and drop the `ClientRef` brand (each makes `tsc` report an unused directive); resolved key without its prefix (1 fails); a random sentinel key (1).
+
 ## U14 Session-auth A: sessions and login
+
+> **U13f contract for login.** Login MUST use `AbuseGuard.checkLoginIp` and `ClientRef` (never a raw `client_id` string, never `checkClientIp`). The `401` for a limited, blocked or locked login is the generic one; there is no 429 path by construction.
+
+- [ ] 14.0 RED (first task of U14): an e2e probe (the pattern of `abuse-protection.e2e-spec.ts`) that resolves the client for each request and calls `checkLoginIp` with `ClientRef.resolved` for a known app and `ClientRef.unknown()` otherwise. Many requests with different random `client_id` values from one IP share ONE `login_ip` limit and cannot grow the table without bound. 14.7 repeats the assertion against the real endpoint.
 
 **U14a** `feat/u14a-session-persistence` (230-260 lines)
 
@@ -188,7 +196,7 @@ Real forks: none. Items 8 and 9 are the closest; both follow the specs, and the 
 
 **U14c** `feat/u14c-login` (385-440 lines, `size:exception` pre-flagged if over 400 after trimming)
 
-- [ ] 14.5 RED: `LoginUseCase` unit with recording fakes. Exactly one `verify` on each path (unknown email, wrong password, unconfirmed, success, unknown client, malformed email, password bcrypt cannot hash compared as `''`); zero `verify` when limited or blocked; both lockout counters recorded on a mismatch, including unknown emails; success resets the pair counter only; unknown client keys the sentinel `(unknown, IP)`. Mutations: return early for an unknown email, skip the dummy hash, skip the confirmed check, record a failure on success. The U7 ordering is a reference, not cherry-picked.
+- [ ] 14.5 RED: `LoginUseCase` unit with recording fakes. Exactly one `verify` on each path (unknown email, wrong password, unconfirmed, success, unknown client, malformed email, password bcrypt cannot hash compared as `''`); zero `verify` when limited or blocked; both lockout counters recorded on a mismatch, including unknown emails; success resets the pair counter only; an unknown client uses `ClientRef.unknown()`. Mutations: return early for an unknown email, skip the dummy hash, skip the confirmed check, record a failure on success. The U7 ordering is a reference, not cherry-picked.
 - [ ] 14.6 GREEN: `LoginUseCase`, boot-time dummy cost-12 hash provider, session issue in one `UnitOfWork` (open session + first token, then sign the access token with `aud` = `client_id`, `sub` = user id). Config `REFRESH_IDLE_TTL_SECONDS` (604800) and `REFRESH_ABSOLUTE_TTL_SECONDS` (2592000).
 - [ ] 14.7 RED/GREEN: `POST /api/v1/auth/login` (zod body, `req.ip`, `Origin` passed to the use case). e2e: 200 body shape, `expires_in` 3600, `aud`, no `Set-Cookie`; byte-identical `401` (status, body, headers) for unknown email, wrong password, unconfirmed, locked, blocked, IP-limited and unknown client, and never `429`; correct password on an unconfirmed, locked or blocked account issues nothing; malformed body gives `400 invalid_request` without state wording; wrong-app origin gives the generic `401`; no `Origin` skips the binding; allow header bound to the app, no credentials header.
 
