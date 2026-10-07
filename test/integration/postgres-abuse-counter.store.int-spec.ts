@@ -2,13 +2,13 @@ import { AbuseGuard } from '../../src/abuse-protection/application/abuse-guard';
 import { ClientIp } from '../../src/abuse-protection/domain/client-ip';
 import { ClientRef } from '../../src/abuse-protection/domain/client-ref';
 import { CounterKey } from '../../src/abuse-protection/domain/counter-key';
-import { DEFAULT_POLICIES, type Policy } from '../../src/abuse-protection/domain/policy';
+import { DEFAULT_POLICIES, resolvePolicies, type Policy } from '../../src/abuse-protection/domain/policy';
 import {
   AbuseCounterSchema,
   type AbuseCounterRow,
 } from '../../src/abuse-protection/infrastructure/persistence/abuse-counter.schema';
 import { PostgresAbuseCounterStore } from '../../src/abuse-protection/infrastructure/persistence/postgres-abuse-counter.store';
-import { FixedClock } from '../../src/shared-kernel/clock';
+import { FixedClock, type Clock } from '../../src/shared-kernel/clock';
 import { TypeOrmUnitOfWork } from '../../src/platform/persistence/typeorm-unit-of-work';
 import { anApp } from '../support/app-fixture';
 import { startTestDatabase, type TestDatabase } from '../support/postgres';
@@ -192,6 +192,39 @@ describe('PostgresAbuseCounterStore (integration, ADR 36)', () => {
       );
 
       expect(decisions.filter((d) => d === 'allowed')).toHaveLength(DEFAULT_POLICIES.login_account_ip.limit);
+    });
+
+    it('lets exactly the limit through when parallel attempts each carry a different now', async () => {
+      let tick = 0;
+      const advancing: Clock = { now: () => new Date(T0.getTime() + tick++) };
+      const guard = new AbuseGuard({ store, policies: DEFAULT_POLICIES, clock: advancing });
+      const ip = ClientIp.from('203.0.113.9', undefined);
+      const client = ClientRef.resolved(anApp({ id: 'app' }));
+
+      const decisions = await Promise.all(Array.from({ length: 30 }, () => guard.beginLoginAttempt(client, 'ana@example.com', ip)));
+
+      expect(decisions.filter((d) => d === 'allowed')).toHaveLength(DEFAULT_POLICIES.login_account_ip.limit);
+    });
+
+    it('keeps a tripped pair locked after its window rolls, until the lock itself ends', async () => {
+      const clock = new FixedClock(T0);
+      const policies = resolvePolicies({ login_account_ip: { limit: 3, windowSeconds: 100, blockSeconds: 500 } });
+      const guard = new AbuseGuard({ store, policies, clock });
+      const ip = ClientIp.from('203.0.113.9', undefined);
+      const client = ClientRef.resolved(anApp({ id: 'app' }));
+      const attempt = () => guard.beginLoginAttempt(client, 'ana@example.com', ip);
+
+      expect([await attempt(), await attempt(), await attempt()]).toEqual(['allowed', 'allowed', 'allowed']);
+      expect(await attempt()).toBe('blocked');
+
+      clock.advanceMs(150_000);
+      expect(await attempt()).toBe('blocked');
+
+      clock.advanceMs(349_999);
+      expect(await attempt()).toBe('blocked');
+
+      clock.advanceMs(1);
+      expect(await attempt()).toBe('allowed');
     });
   });
 });
