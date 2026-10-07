@@ -486,10 +486,10 @@ Login returns the same `401` for an unknown email, a wrong password, an unconfir
 
 | Counter | Default | Effect |
 |---------|---------|--------|
-| 5 failures in 15 minutes from one IP for one account | configurable | That IP is blocked from that account for 15 minutes |
-| 50 failures in 1 hour from any IP for one account | configurable | The account is locked for 15 minutes |
+| 5 attempts in 15 minutes from one IP for one account | configurable | That IP is blocked from that account for 15 minutes; when the block ends the count restarts, so one IP gets at most about 20 attempts an hour |
+| 50 attempts in a window of 1 hour from any IP for one account | configurable | The account is locked for 15 minutes; when the lock ends the count restarts, so all IPs together get at most about 200 attempts an hour |
 
-While blocked or locked, even the correct password fails with the same generic `401`. A user may therefore see "incorrect password" with the right password. Suggest "Forgot password" after a few failures. The same two counters cover change password: wrong attempts there count too, and while blocked the correct current password gets the same `400 invalid_current_password`.
+Both counters count attempts, not only failures, and a success does not give the account counter back. **Do not log in again and again with a service account.** A service account or automation that logs in more than 50 times an hour locks its own account for 15 minutes, and every user of that account is locked out with it. Log in once, keep the refresh token and renew the access token with it (see [Refresh with rotation](#refresh-with-rotation)), and log in again only when the refresh token is rejected. While blocked or locked, even the correct password fails with the same generic `401`. A user may therefore see "incorrect password" with the right password. Suggest "Forgot password" after a few failures. The same two counters cover change password: wrong attempts there count too, and while blocked the correct current password gets the same `400 invalid_current_password`.
 
 ### Rate limits and `429`
 

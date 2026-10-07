@@ -13,9 +13,9 @@ The system MUST count login attempts with two counters, following NIST SP 800-63
 | Counter | Key | Default | Effect |
 |---------|-----|---------|--------|
 | Pair | (app, account, client IP) | 5 attempts / 15 min | The 6th and later attempts are blocked; that IP is blocked from that account for 15 min |
-| Global | (app, account) | 50 attempts / 1 h from any IP | The 51st and later attempts are blocked; the account is locked for 15 min |
+| Global | (app, account) | 50 attempts / 1 h window from any IP | The 51st and later attempts are blocked; the account is locked for 15 min, and when the lock ends the count restarts |
 
-Every threshold, window and block duration MUST be configurable by environment settings with these defaults. Counters MUST also be kept for unknown emails (keyed by email hash), so lockout cannot reveal whether an account exists. While blocked or locked, even the correct password MUST fail, and attempts made during a block MUST NOT extend it. The same counters apply to `POST /password/change`: a wrong current password is a failed login for both counters, and while the (account, IP) pair is blocked or the account is locked, change MUST fail with the same `invalid_current_password` error even for the correct password, without running bcrypt. An attempt MUST be counted atomically BEFORE the password is checked, so parallel attempts cannot all pass a check made before any of them is counted. A successful login MUST reset the pair counter and MUST NOT reset or decrement the global counter (assumption: the global counter counts attempts rather than failures, because a decrement would reopen the race; successes are rare against the limit).
+Because each lock is shorter than its window and the count restarts when a lock ends, the real throughput is higher than the nominal window rate, and it is documented as such (README, `docs/api-contract.md`, `docs/integration-guide.md`, ADR 36): the pair counter allows about 20 attempts per hour sustained (5 per 15 min lock cycle), and the global counter allows 50 per 15 min cycle, so a distributed attacker gets at most about 200 attempts per hour per account and needs at least 10 distinct (account, IP) pairs to reach it. Both counters count attempts, so a service account or automation that logs in more than 50 times an hour locks itself; app teams reuse refresh tokens instead of logging in again. Every threshold, window and block duration MUST be configurable by environment settings with these defaults. Counters MUST also be kept for unknown emails (keyed by email hash), so lockout cannot reveal whether an account exists. While blocked or locked, even the correct password MUST fail, and attempts made during a block MUST NOT extend it. The same counters apply to `POST /password/change`: a wrong current password is a failed login for both counters, and while the (account, IP) pair is blocked or the account is locked, change MUST fail with the same `invalid_current_password` error even for the correct password, without running bcrypt. An attempt MUST be counted atomically BEFORE the password is checked, so parallel attempts cannot all pass a check made before any of them is counted. A successful login MUST reset the pair counter and MUST NOT reset or decrement the global counter (assumption: the global counter counts attempts rather than failures, because a decrement would reopen the race; successes are rare against the limit).
 
 #### Scenario: Pair block
 - GIVEN IP X made 5 login attempts for account U in 15 minutes
@@ -32,6 +32,12 @@ Every threshold, window and block duration MUST be configurable by environment s
 - GIVEN 50 login attempts against U in 1 hour from many IPs
 - WHEN any IP logs in to U with the correct password
 - THEN the generic login failure is returned until the 15 min lock ends
+
+#### Scenario: Global throughput after lock expiry
+- GIVEN 50 login attempts against U locked the account at minute 0
+- WHEN the lock ends at minute 15
+- THEN the global count restarts at 1 and another 50 attempts are allowed
+- AND the account sees at most about 200 attempts per hour from all IPs together
 
 #### Scenario: Lock expires
 - GIVEN U was locked 15 minutes ago

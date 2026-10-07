@@ -160,7 +160,7 @@ Properties: the raw successor is never stored or re-issued; grace is at most onc
 |-------|-----|--------|---------|---------------|
 | `login_ip` | client + IP | every login request | 100 / 15 min | Generic `401` until the window ends |
 | `login_account_ip` | client + email + IP | login attempts, counted before bcrypt | 5 / 15 min | The 6th attempt and later are blocked; that IP is blocked 15 min for that account |
-| `login_account` | client + email | login attempts from any IP, counted before bcrypt | 50 / 1 h | The 51st attempt and later are blocked; the account is blocked 15 min |
+| `login_account` | client + email | login attempts from any IP, counted before bcrypt | 50 / 1 h window | The 51st attempt and later are blocked; the account is blocked 15 min, and the count restarts when the lock ends (real throughput below) |
 | `email_ip` | client + IP | signup, resend, forgot requests | 20 / 1 h | `429` with `Retry-After` (see below) |
 | `reset_ip` | IP | reset requests | 20 / 1 h | `429` with `Retry-After` |
 | `confirm_ip` | IP | confirm requests (round 11) | 20 / 1 h | `429` with `Retry-After` |
@@ -189,14 +189,28 @@ Counters run for unknown emails too, so they reveal nothing about existence. `PO
 Table `abuse_counters`, created `UNLOGGED`: `scope text`, `key bytea`, `window_start`, `count int`, `blocked_until NULL`, `expires_at`; primary key `(scope, key)`; index on `expires_at`. One atomic statement per hit:
 
 ```sql
-INSERT INTO abuse_counters AS c (scope, key, window_start, count, blocked_until, expires_at)
-VALUES ($scope, $key, $now, 1, NULL, $now + $window)
-ON CONFLICT (scope, key) DO UPDATE SET
-  window_start = CASE WHEN c.window_start + $window <= $now THEN $now ELSE c.window_start END,
-  count        = CASE WHEN c.window_start + $window <= $now THEN 1 ELSE c.count + 1 END
-  -- blocked_until and expires_at are derived in the same SET from the new count
-RETURNING count, blocked_until;
+WITH prev AS (          -- the PREVIOUS row: was its lockout still running at $now?
+  SELECT blocked_until > $now AS locked FROM abuse_counters
+  WHERE scope = $scope AND key = $key FOR UPDATE
+),
+gate AS (SELECT COALESCE(bool_or(locked), false) AS blocked FROM prev),
+hit AS (
+  INSERT INTO abuse_counters AS c (scope, key, window_start, count, blocked_until, expires_at)
+  SELECT $scope, $key, $now, 1, CASE WHEN $limit <= 1 THEN $blockEnd END, GREATEST($windowEnd, <that block end>)
+  FROM gate             -- data dependency: the lock-and-read finishes before the upsert runs
+  ON CONFLICT (scope, key) DO UPDATE SET
+    window_start  = CASE WHEN ROLLED THEN $now ELSE c.window_start END,
+    count         = CASE WHEN ROLLED THEN 1 ELSE c.count + 1 END,
+    blocked_until = CASE WHEN c.blocked_until > $now THEN c.blocked_until   -- a live lock is kept, never extended
+                         WHEN <new count> >= $limit THEN $blockEnd END,     -- the hit that reaches the limit starts it
+    expires_at    = GREATEST(<new window end>, <new blocked_until>)
+  RETURNING c.count, c.blocked_until, c.window_start + $window AS window_ends_at
+)
+SELECT hit.count, hit.blocked_until, hit.window_ends_at, gate.blocked AS blocked_before FROM hit, gate;
+-- ROLLED = c.window_start + $window <= $now OR c.blocked_until <= $now   (the window ended, or a lock inside it ended)
 ```
+
+`blocked_before` is the explicit "locked before this hit" signal. The guard blocks when `count > limit OR blocked_before`; the hit that only starts the lock reports `false`, so it is the last allowed one. RETURNING sees only the new row, hence the `prev` CTE: `FOR UPDATE` makes a concurrent hit wait and read the latest committed row, and the old JS test `blockedUntil != now + blockSeconds` is gone. Residual: two first-ever hits racing on a row that does not exist yet can both read "not locked", which is harmless because the loser's count is already past a limit of 1; no deterministic test covers the `FOR UPDATE` itself.
 
 - **Contention.** A hot key serializes on one row lock, held only for that statement. The store always uses the root `DataSource` manager, never the ALS transactional manager (ADR 16). A rolled-back business transaction therefore cannot undo a count, and no lock is held across bcrypt.
 - **`UNLOGGED`.** No WAL for a table written on every request. A crash or failover empties it, so counters restart and an attacker gets at most one fresh window. `ALTER TABLE … SET LOGGED` reverts this if HA needs change.
@@ -204,7 +218,7 @@ RETURNING count, blocked_until;
 - **Time.** `$now` comes from the injected `Clock`, not `now()`, as with the outbox lease (ADR 30). This keeps tests deterministic.
 - **Cleanup.** An `AbuseCounterSweeper`, started by `main.ts` only (the outbox-poller pattern), sweeps once at start and then deletes expired rows every 5 min in batches of 1,000.
 - **Ordering.** Checks run before the user lookup and before bcrypt. Keys need no user row. The login lockout counts the attempt BEFORE bcrypt (see "Login pre-count" below), not after it.
-- **Client identity (round 12).** The guard accepts a `ClientRef`, never a raw string. `ClientRef.resolved(id)` is created only for an active, resolved app; `ClientRef.unknown()` is the shared sentinel. A raw `client_id` from a body would mint a counter per random id and bypass `login_ip`, `email_ip` and `refresh_ip` while growing the table; the type makes that a compile error, and every unknown client shares one counter per IP.
+- **Client identity (round 12).** The guard accepts a `ClientRef`, never a raw string. `ClientRef.resolved(app)` takes the `App` that `ResolveClientUseCase` returned (a type-only import; `App` has a private constructor, so a string, a request-body field or a look-alike object does not compile, checked by `@ts-expect-error` specs in `npm run typecheck`) and is for an active, resolved app only; `ClientRef.unknown()` is the shared sentinel. A raw `client_id` from a body would mint a counter per random id and bypass `login_ip`, `email_ip` and `refresh_ip` while growing the table; the type makes that a compile error, and every unknown client shares one counter per IP.
 - **CORS on `429` and `503` (round 12).** `AbuseExceptionFilter` grants `Access-Control-Allow-Origin` to the request's candidate origin (stashed by the CORS middleware only for an active app's origin) on both statuses. The bodies are static and carry no app or account data, so no controller has to remember to grant them. A request with no `Origin`, or an unknown one, gets no allow header.
 - **Outage log (round 12).** A limiter store failure logs `abuse limiter store unavailable (<scope>): <driver message>` and nothing else (no keys, IPs or parameters), at most once per 60 s per process, so an outage cannot flood the log.
 
@@ -213,7 +227,9 @@ RETURNING count, blocked_until;
 1. Hit `login_account_ip`. If it is over its limit, or an older block is still active, answer `blocked` and stop.
 2. Otherwise hit `login_account` and apply the same rule.
 
-Exactly `limit` attempts per window are `allowed`; the attempt that reaches the limit starts the block but is the last allowed one. A block older than the hit (it survives a window rollover) blocks even though the count restarted. Step 2 is skipped for a blocked pair so an attacker hammering from a blocked IP cannot lock the account for everyone. `recordLoginSuccess` resets only the pair counter, which refunds that attempt. **Assumption (deviation from the literal "failures" wording):** the global counter counts attempts, and a success does NOT refund it. Successes are rare against the limit of 50, and a refund (a decrement) would reopen the race the pre-count closes. The cost is that legitimate logins use up the account's 50 attempts per hour; that is far above human use. `POST /password/change` uses the same two calls. `recordLoginFailure` and the store's `blockedUntil` read no longer exist.
+Exactly `limit` attempts per window are `allowed`; the attempt that reaches the limit starts the block but is the last allowed one. A block older than the hit (it survives a window rollover) blocks even though the count restarted. Step 2 is skipped for a blocked pair so an attacker hammering from a blocked IP cannot lock the account for everyone. `recordLoginSuccess` resets only the pair counter, which refunds that attempt. **Assumption (deviation from the literal "failures" wording):** the global counter counts attempts, and a success does NOT refund it. Successes are rare against the limit of 50, and a refund (a decrement) would reopen the race the pre-count closes. The cost is that legitimate logins use up the account's 50 attempts per window; that is far above human use.
+
+**Real throughput (user decision A, 2026-10-07: document, no behaviour change).** The 15 min lock is shorter than the 1 h window, and a window also rolls when a lock ends (see "Lock expiry"), so the nominal "50 / 1 h" understates what an attacker gets. Pair counter (5 attempts, window 15 min, lock 15 min from the 5th): one cycle is 5 attempts plus a 900 s lock, so about 5 per 900 s, which is 20 per hour sustained for one account and IP (25 in a closed 3600 s interval with bursts at both ends, up to about 29 with a one-time 4-then-5 window-boundary bonus). Account counter (50, window 1 h, lock 15 min, count restarts when the lock ends): 50 per 900 s, which is 200 per hour sustained (250 in a closed hour, about 300 with the boundary bonus). Reaching 200 needs at least 10 distinct pair keys (IPs or IPv6 /64s), because each pair is capped at about 20 per hour. Tradeoff considered: keeping the count across the lock would make the nominal number true, but a legitimate user would be re-locked at once when the lock ends, so the real rate is documented instead. Two consequences are documented for operators and app teams: password change (U19) shares both counters, and service accounts or automation that log in more than 50 times an hour lock themselves; they must reuse refresh tokens (`docs/integration-guide.md`). `POST /password/change` uses the same two calls. `recordLoginFailure` and the store's `blockedUntil` read no longer exist.
 
 **Fail mode when a limiter statement errors:**
 
