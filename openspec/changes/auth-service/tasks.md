@@ -210,8 +210,8 @@ Real forks: none. Items 8 and 9 are the closest; both follow the specs, and the 
 
 **Group 1: session persistence**
 
-- [ ] 14.1 RED: migration `1760000006000-CreateAuthSessions` int test: `auth_sessions` (`revoked_reason` enum including `ops_revoke_all`, indexes on `user_id` and `expires_at`) and `refresh_tokens` (`token_hash bytea` PK, `session_id` FK indexed, plus the grace-window columns `replaced_by_hash bytea NULL`, `consumed_ip_hash bytea NULL`, `grace_used_at NULL`, `revoked_at NULL`, ADR 35); up, down (drops the enum), up. GREEN.
-- [ ] 14.2 RED/GREEN: domain `Session` and `RefreshToken`, `EntitySchema` rows, mappers with round-trip tests (null `revoked_at`, `consumed_at`, `replaced_by_hash`, `consumed_ip_hash` and `grace_used_at`, every enum value). Hexagonal check on imports.
+- [x] 14.1 RED: migration `1760000006000-CreateAuthSessions` int test: `auth_sessions` (`revoked_reason` enum including `ops_revoke_all`, indexes on `user_id` and `expires_at`) and `refresh_tokens` (`token_hash bytea` PK, `session_id` FK indexed, plus the grace-window columns `replaced_by_hash bytea NULL`, `consumed_ip_hash bytea NULL`, `grace_used_at NULL`, `revoked_at NULL`, ADR 35); up, down (drops the enum), up. GREEN.
+- [x] 14.2 RED/GREEN: domain `Session` and `RefreshToken`, `EntitySchema` rows, mappers with round-trip tests (null `revoked_at`, `consumed_at`, `replaced_by_hash`, `consumed_ip_hash` and `grace_used_at`, every enum value). Hexagonal check on imports.
 
 **Group 2: session repository**
 
