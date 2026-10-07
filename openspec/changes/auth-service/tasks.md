@@ -162,8 +162,8 @@ Real forks: none. Items 8 and 9 are the closest; both follow the specs, and the 
 
 **U13c** `feat/u13c-abuse-guard-sweeper` (315-360 lines)
 
-- [ ] 13.8 RED/GREEN: `AbuseGuard` (application) with port fakes and a fixed clock, covering the spec scenarios: pair block while IP Y still passes, global lock, lock expiry, unknown email identical, threshold 3 configurable, success resets the pair counter and not the global one, attempts during a block do not extend it. Mutation: reset the global counter on success, the global-lock test fails.
-- [ ] 13.9 RED/GREEN: decisions `allowed`, `ip_limited(retryAfterSeconds)` and `account_suppressed` for the email, reset, confirm and refresh checks (`retryAfterSeconds` is an integer, at least 1). Store failure raises `TemporarilyUnavailable` (mapped to `503 temporarily_unavailable`) before any account lookup. Mutation: fail open, the 503 test fails.
+- [x] 13.8 RED/GREEN: `AbuseGuard` (application) with port fakes and a fixed clock, covering the spec scenarios: pair block while IP Y still passes, global lock, lock expiry, unknown email identical, threshold 3 configurable, success resets the pair counter and not the global one, attempts during a block do not extend it. Mutation: reset the global counter on success, the global-lock test fails.
+- [x] 13.9 RED/GREEN: decisions `allowed`, `ip_limited(retryAfterSeconds)` and `account_suppressed` for the email, reset, confirm and refresh checks (`retryAfterSeconds` is an integer, at least 1). Store failure raises `TemporarilyUnavailable` (mapped to `503 temporarily_unavailable`) before any account lookup. Mutation: fail open, the 503 test fails.
 - [ ] 13.10 RED/GREEN: `AbuseCounterSweeper` deletes expired rows every 5 min in batches of 1,000, started by `main.ts` only (outbox-poller pattern), awaits its drain on shutdown; `AbuseProtectionModule` exports the guard. Int test: expired rows deleted, live rows kept, batch loop. Check with `rg` that `abuse-protection` imports only `shared-kernel`.
 
 ## U14 Session-auth A: sessions and login
