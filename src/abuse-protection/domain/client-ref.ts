@@ -7,9 +7,10 @@ import type { App } from '../../app-registry/domain/app';
  * `ResolveClientUseCase` returns, never a string) or use the shared sentinel (`unknown`), so all
  * unknown clients share one counter per IP.
  *
- * `App` is a type-only import: it adds no runtime dependency and no new type to maintain, and its
- * private constructor makes it nominal, so neither a string nor a look-alike object compiles. A
- * dedicated branded id would cost a second type and still need app-registry to mint it.
+ * `App` is a type-only import: it adds no runtime dependency and no new type to maintain. `App` has
+ * a private member (`snapshot()`), which makes it nominal, so neither a string nor a look-alike
+ * object (even one copying every public member) compiles. A private constructor alone would not do
+ * this. A dedicated branded id would cost a second type and still need app-registry to mint it.
  */
 export class ClientRef {
   /** Makes the class nominal: a look-alike `{ key }` object is not assignable. */

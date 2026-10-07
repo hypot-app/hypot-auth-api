@@ -1,3 +1,4 @@
+import type { App } from '../../app-registry/domain/app';
 import { anApp } from '../../../test/support/app-fixture';
 import { CounterKey } from './counter-key';
 import { ClientRef } from './client-ref';
@@ -37,6 +38,8 @@ describe('ClientRef', () => {
       ClientRef.resolved(body.client_id),
       // @ts-expect-error a look-alike object is not an App (it has private members)
       ClientRef.resolved({ id: 'app-a', clientId: 'client-a' }),
+      // @ts-expect-error even a copy of every public member is not an App (private `snapshot()`)
+      ClientRef.resolved({ ...APP_A } as Pick<App, keyof App>),
     ];
     expect(misuse).toBeInstanceOf(Function);
   });
