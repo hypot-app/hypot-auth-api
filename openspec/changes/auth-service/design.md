@@ -203,6 +203,8 @@ RETURNING count, blocked_until;
 - **Time.** `$now` comes from the injected `Clock`, not `now()`, as with the outbox lease (ADR 30). This keeps tests deterministic.
 - **Cleanup.** An `AbuseCounterSweeper`, started by `main.ts` only (the outbox-poller pattern), deletes expired rows every 5 min in batches of 1,000.
 - **Ordering.** Checks run before the user lookup and before bcrypt. Keys need no user row. Failure increments run after bcrypt.
+- **CORS on `429` and `503` (round 12).** `AbuseExceptionFilter` grants `Access-Control-Allow-Origin` to the request's candidate origin (stashed by the CORS middleware only for an active app's origin) on both statuses. The bodies are static and carry no app or account data, so no controller has to remember to grant them. A request with no `Origin`, or an unknown one, gets no allow header.
+- **Outage log (round 12).** A limiter store failure logs `abuse limiter store unavailable (<scope>): <driver message>` and nothing else (no keys, IPs or parameters), at most once per 60 s per process, so an outage cannot flood the log.
 
 **Fail mode when a limiter statement errors:**
 

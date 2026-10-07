@@ -31,7 +31,11 @@ import { PostgresAbuseCounterStore } from './infrastructure/persistence/postgres
       useFactory: (purge: PostgresAbuseCounterStore, clock: Clock) =>
         new AbuseCounterSweeper({ purge, clock, logger: new Logger('AbuseCounterSweeper') }),
     },
-    { provide: APP_FILTER, useClass: AbuseExceptionFilter },
+    {
+      provide: APP_FILTER,
+      inject: [CLOCK],
+      useFactory: (clock: Clock) => new AbuseExceptionFilter(clock, new Logger('AbuseExceptionFilter')),
+    },
   ],
   exports: [AbuseGuard, AbuseCounterSweeper],
 })

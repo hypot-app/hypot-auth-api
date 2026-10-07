@@ -45,7 +45,7 @@ export class AbuseGuard {
   /** True while the (account, IP) pair is blocked or the account is locked. */
   async isLoginBlocked(clientId: string, email: string, ip: ClientIp): Promise<boolean> {
     const counters: CounterRef[] = [this.pairRef(clientId, email, ip), this.accountRef(clientId, email)];
-    const until = await this.guarded(() => this.deps.store.blockedUntil(counters, this.deps.clock.now()));
+    const until = await this.guarded('login_account_ip', () => this.deps.store.blockedUntil(counters, this.deps.clock.now()));
     return until !== null;
   }
 
@@ -58,7 +58,7 @@ export class AbuseGuard {
   /** Resets the pair counter only: the global counter must survive, or an attacker with one valid login erases it. */
   async recordLoginSuccess(clientId: string, email: string, ip: ClientIp): Promise<void> {
     const { scope, key } = this.pairRef(clientId, email, ip);
-    await this.guarded(() => this.deps.store.reset(scope, key));
+    await this.guarded(scope, () => this.deps.store.reset(scope, key));
   }
 
   private async hitIp(scope: 'login_ip' | 'email_ip' | 'reset_ip' | 'confirm_ip' | 'refresh_ip', parts: string[]) {
@@ -71,7 +71,7 @@ export class AbuseGuard {
 
   private hit(scope: Scope, parts: string[], now = this.deps.clock.now()) {
     const policy = this.deps.policies[scope];
-    return this.guarded(() => this.deps.store.hit(scope, CounterKey.of(scope, parts), policy, now));
+    return this.guarded(scope, () => this.deps.store.hit(scope, CounterKey.of(scope, parts), policy, now));
   }
 
   private pairRef(clientId: string, email: string, ip: ClientIp): CounterRef {
@@ -82,11 +82,11 @@ export class AbuseGuard {
     return { scope: 'login_account', key: CounterKey.of('login_account', [clientId, email]) };
   }
 
-  private async guarded<T>(operation: () => Promise<T>): Promise<T> {
+  private async guarded<T>(scope: Scope, operation: () => Promise<T>): Promise<T> {
     try {
       return await operation();
     } catch (cause) {
-      throw new TemporarilyUnavailable({ cause });
+      throw new TemporarilyUnavailable({ cause, scope });
     }
   }
 }

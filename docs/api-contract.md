@@ -52,7 +52,7 @@ Texts: the fixed `message` strings are listed per endpoint where they are fixed.
 - A request with an `Origin` header is allowed only when the origin exactly matches an allowed origin of the app that the request identifies (body `client_id`, token owner for confirm and reset, token `aud` for `/me` and change).
 - Origin matching is exact on the browser-serialised origin (lowercase scheme and host, no trailing slash), so an uppercase `Origin` never matches.
 - Allowed: `Access-Control-Allow-Origin: <origin>` (never `*`) and `Vary: Origin`. Never `Access-Control-Allow-Credentials`. Never `Set-Cookie`.
-- The allow header is granted only after the origin binding passes (fail-closed), plus on request-validation `400` and `429` answers from an active app's origin so the client can read them. Binding rejections and `500` never carry it.
+- The allow header is granted only after the origin binding passes (fail-closed), plus on request-validation `400`, `429` and `503` answers from an active app's origin so the client can read them (the `429` and `503` of the rate limiter always carry it, whatever the endpoint: their bodies hold no app data). Binding rejections and `500` never carry it.
 - Not allowed: no CORS allow header, and the endpoint's own generic outcome (see each endpoint: `invalid_client`, `invalid_credentials`, `invalid_grant`, `invalid_or_expired_link`, `invalid_token`, or `204` with no effect for logout).
 - Preflight `OPTIONS`: `204`, answered when the origin belongs to **any** active app (the body is not visible). The actual request is still checked against its own `client_id`. The answer carries exactly:
 

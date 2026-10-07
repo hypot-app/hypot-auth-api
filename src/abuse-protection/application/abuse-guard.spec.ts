@@ -159,16 +159,16 @@ describe('AbuseGuard: per-account email cap', () => {
 });
 
 describe('AbuseGuard: a store failure fails closed', () => {
-  const calls: [string, (guard: AbuseGuard) => Promise<unknown>][] = [
-    ['checkIp', (g) => g.checkIp('reset_ip', IP_X)],
-    ['checkClientIp', (g) => g.checkClientIp('login_ip', 'app', IP_X)],
-    ['checkEmailAccount', (g) => g.checkEmailAccount('app', ANA)],
-    ['isLoginBlocked', (g) => g.isLoginBlocked('app', ANA, IP_X)],
-    ['recordLoginFailure', (g) => g.recordLoginFailure('app', ANA, IP_X)],
-    ['recordLoginSuccess', (g) => g.recordLoginSuccess('app', ANA, IP_X)],
+  const calls: [string, string, (guard: AbuseGuard) => Promise<unknown>][] = [
+    ['checkIp', 'reset_ip', (g) => g.checkIp('reset_ip', IP_X)],
+    ['checkClientIp', 'login_ip', (g) => g.checkClientIp('login_ip', 'app', IP_X)],
+    ['checkEmailAccount', 'email_account', (g) => g.checkEmailAccount('app', ANA)],
+    ['isLoginBlocked', 'login_account_ip', (g) => g.isLoginBlocked('app', ANA, IP_X)],
+    ['recordLoginFailure', 'login_account_ip', (g) => g.recordLoginFailure('app', ANA, IP_X)],
+    ['recordLoginSuccess', 'login_account_ip', (g) => g.recordLoginSuccess('app', ANA, IP_X)],
   ];
 
-  it.each(calls)('%s raises TemporarilyUnavailable and keeps the cause', async (_name, call) => {
+  it.each(calls)('%s raises TemporarilyUnavailable naming the %s scope and keeping the cause', async (_n, scope, call) => {
     const { guard, store } = setup();
     store.failWith = new Error('connection refused');
 
@@ -176,5 +176,6 @@ describe('AbuseGuard: a store failure fails closed', () => {
 
     expect(error).toBeInstanceOf(TemporarilyUnavailable);
     expect((error as TemporarilyUnavailable).cause).toBe(store.failWith);
+    expect((error as TemporarilyUnavailable).scope).toBe(scope);
   });
 });
