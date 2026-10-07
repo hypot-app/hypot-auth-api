@@ -2,7 +2,7 @@ import { BadRequestException, Body, Controller, Get, Headers, HttpCode, Post, Qu
 import { z } from 'zod';
 import type { DomainError } from '../../shared-kernel/domain-error';
 import type { Result } from '../../shared-kernel/result';
-import { CorsGrant } from '../../app-registry/http/cors-grant';
+import { CorsGrant } from '../../platform/http/cors-grant';
 import { ConfirmEmailUseCase } from '../application/confirm-email.use-case';
 import { ResendConfirmationUseCase } from '../application/resend-confirmation.use-case';
 import { SignupUseCase } from '../application/signup.use-case';

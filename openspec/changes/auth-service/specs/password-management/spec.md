@@ -85,7 +85,7 @@ The system MUST expose exactly `POST /api/v1/password/forgot`, `POST /api/v1/pas
 - WHEN the current password is wrong
 - THEN the response is `400` with `error` `invalid_current_password`
 - AND the password is unchanged and no session is revoked
-- AND both lockout counters record a failure
+- AND the attempt was counted on both lockout counters before the password was checked
 
 #### Scenario: Wrong current password is not a 401
 - GIVEN a valid access token and a wrong current password

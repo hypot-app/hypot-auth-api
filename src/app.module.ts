@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AbuseProtectionModule } from './abuse-protection/abuse-protection.module';
 import { AppRegistryModule } from './app-registry/app-registry.module';
 import { PlatformModule } from './platform/platform.module';
 import { SharedKernelModule } from './shared-kernel/shared-kernel.module';
@@ -11,6 +12,7 @@ import { UserAccountsModule } from './user-accounts/user-accounts.module';
     SharedKernelModule,
     PlatformModule,
     AppRegistryModule,
+    AbuseProtectionModule,
     TransactionalEmailModule,
     UserAccountsModule,
     TokenLifecycleModule,

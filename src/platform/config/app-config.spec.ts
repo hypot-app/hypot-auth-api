@@ -18,6 +18,7 @@ describe('loadConfig', () => {
       authPublicBaseUrl: 'https://auth.example.com',
       smtp: { host: 'smtp.example.com', port: 587, secure: false, auth: undefined },
       mailFrom: 'no-reply@example.com',
+      trustProxy: false,
     });
   });
 
@@ -167,5 +168,44 @@ describe('loadConfig', () => {
       expect(act).toThrow('PORT');
       expect(act).not.toThrow('PRIVATE-KEY-MARKER');
     });
+  });
+});
+
+describe('loadConfig: TRUST_PROXY (ADR 37)', () => {
+  const trustProxy = (value: string) => loadConfig({ ...validEnv, TRUST_PROXY: value }).trustProxy;
+
+  it('defaults to false, so X-Forwarded-For is ignored', () => {
+    expect(loadConfig(validEnv).trustProxy).toBe(false);
+    expect(trustProxy('false')).toBe(false);
+  });
+
+  it.each([['1', 1], ['2', 2], ['10', 10]])('accepts the hop count %s as a number', (value, expected) => {
+    expect(trustProxy(value)).toBe(expected);
+  });
+
+  it.each(['loopback', 'loopback, uniquelocal', '10.0.0.0/8', '10.1.2.3/32', '10.1.2.3', '2000::/16', '2001:db8::/32', '::1'])(
+    'passes the list %p through to Express',
+    (value) => {
+      expect(trustProxy(value)).toBe(value);
+    },
+  );
+
+  // A hop count above 10 or a CIDR wider than /8 (IPv4) or /16 (IPv6) trusts far more than any real proxy chain.
+  it.each([
+    'true', 'TRUE', '0', '-1', '1.5', '', 'bogus', '10.0.0.0/33', 'loopback,,', '0.0.0.0/0', '::/0',
+    '11', '100', '0.0.0.0/1', '10.0.0.0/7', '2000::/15', '::/1', 'loopback, 10.0.0.0/7',
+  ])(
+    'rejects %p at boot',
+    (value) => {
+      expect(() => trustProxy(value)).toThrow(ConfigError);
+      expect(() => trustProxy(value)).toThrow('TRUST_PROXY');
+    },
+  );
+});
+
+describe('loadConfig: ABUSE_<SCOPE>_*', () => {
+  it('leaves ABUSE_* to abuse-protection, so the platform neither parses nor exposes them', () => {
+    const config = loadConfig({ ...validEnv, ABUSE_EMAIL_IP_LIMIT: '0' });
+    expect(Object.keys(config)).not.toContain('abusePolicies');
   });
 });

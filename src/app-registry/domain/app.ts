@@ -108,6 +108,7 @@ export class App implements AppProps {
     return this.status === 'active';
   }
 
+  // Private member: it keeps `App` nominal, which `ClientRef.resolved(app: App)` relies on.
   private snapshot(): AppProps {
     return { ...this };
   }

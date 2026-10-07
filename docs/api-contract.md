@@ -52,7 +52,7 @@ Texts: the fixed `message` strings are listed per endpoint where they are fixed.
 - A request with an `Origin` header is allowed only when the origin exactly matches an allowed origin of the app that the request identifies (body `client_id`, token owner for confirm and reset, token `aud` for `/me` and change).
 - Origin matching is exact on the browser-serialised origin (lowercase scheme and host, no trailing slash), so an uppercase `Origin` never matches.
 - Allowed: `Access-Control-Allow-Origin: <origin>` (never `*`) and `Vary: Origin`. Never `Access-Control-Allow-Credentials`. Never `Set-Cookie`.
-- The allow header is granted only after the origin binding passes (fail-closed), plus on request-validation `400` and `429` answers from an active app's origin so the client can read them. Binding rejections and `500` never carry it.
+- The allow header is granted only after the origin binding passes (fail-closed), plus on request-validation `400`, `429` and `503` answers from an active app's origin so the client can read them (the `429` and `503` of the rate limiter always carry it, whatever the endpoint: their bodies hold no app data). Binding rejections and `500` never carry it.
 - Not allowed: no CORS allow header, and the endpoint's own generic outcome (see each endpoint: `invalid_client`, `invalid_credentials`, `invalid_grant`, `invalid_or_expired_link`, `invalid_token`, or `204` with no effect for logout).
 - Preflight `OPTIONS`: `204`, answered when the origin belongs to **any** active app (the body is not visible). The actual request is still checked against its own `client_id`. The answer carries exactly:
 
@@ -73,14 +73,16 @@ Texts: the fixed `message` strings are listed per endpoint where they are fixed.
 | Scope | Applies to | Over the limit | Defaults (configurable, ADR 36) |
 |-------|------------|----------------|--------------------------------|
 | Login per IP | login | Generic login `401`, never `429` | 100 / 15 min |
-| Login pair (account, IP) | login, change (wrong current password) | Generic `401` for that IP (change: `400 invalid_current_password`) | 5 failures / 15 min, block 15 min |
-| Login global (account) | login, change | Generic `401` from any IP (change: same `400`) | 50 failures / 1 h, lock 15 min |
+| Login pair (account, IP) | login, change (wrong current password) | Generic `401` for that IP (change: `400 invalid_current_password`) | 5 attempts / 15 min (counted before the password check), block 15 min |
+| Login global (account) | login, change | Generic `401` from any IP (change: same `400`) | 50 attempts per window (1 h); reaching it locks the account for 15 min, then the count restarts (about 200 attempts / h / account at most, see below) |
 | Email per IP | signup, resend, forgot | `429` + `Retry-After` | 20 / 1 h |
 | Reset per IP | reset | `429` + `Retry-After` | 20 / 1 h |
 | Confirm per IP | confirm | `429` + `Retry-After` | 20 / 1 h |
 | Refresh per (app, IP) | refresh | `429` + `Retry-After` | 60 / 15 min |
 | Email per account | signup, resend, forgot | Normal `202`, email silently not sent | 3 / 1 h |
 | Store unavailable | credential endpoints | `503` | n/a |
+
+Real login throughput. Both login counters count attempts (successful ones too), and each lock lasts 15 min, shorter than the 1 h window, so a count restarts when its lock ends. The pair counter allows 5 attempts per lock cycle, about 20 per hour sustained for one account and IP. The account counter allows 50 attempts per cycle of 15 min, so a distributed attacker gets at most about 200 attempts per hour per account (about 250 in a closed hour, counting a burst at each end), and needs at least 10 distinct IPs (or IPv6 /64 prefixes) to reach it. A success refunds only the pair counter. `POST /password/change` shares both counters. An account that is logged into more than 50 times an hour locks itself for 15 min.
 
 `/me` and logout have no limiter. Client IP comes from the TCP peer unless the operator configures trusted proxies; IPv6 is keyed on its /64. The `429` decision depends only on the IP and the endpoint, never on account or token state. The numbers are configurable defaults: do not hard-code them in your app.
 

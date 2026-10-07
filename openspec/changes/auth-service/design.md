@@ -82,11 +82,11 @@ Sources: `decisions-round8` (API-only), `round9` (limits in Phase 1), `round10` 
 
 1. Parse the body; resolve the client with origin binding (ADR 38). An unknown, inactive or origin-unbound client is **not** a `400`: the session-auth spec makes it the generic login failure. It skips the user lookup but still goes through steps 3 and 5. The limiter key for such a request uses the sentinel client `unknown` plus the IP, so random `client_id` values neither bypass `login_ip` nor grow the table without bound.
 2. Normalize the email. A malformed email skips the lookup but still runs step 5.
-3. Abuse checks (ADR 36): count the `login_ip` hit, then read the `login_account_ip` and `login_account` blocks. Limited or blocked: generic failure, **no bcrypt**. This is the one deliberate exception to "one bcrypt per attempt": skipping the hash is the point of limiting (CPU protection), and unknown emails are counted and blocked the same way, so the fast path reveals nothing about existence. The session-auth spec states this exception.
+3. Abuse checks (ADR 36): `checkLoginIp(client, ip)`, then `beginLoginAttempt(client, email, ip)`, which counts both lockout counters atomically before bcrypt. Limited or blocked: generic failure, **no bcrypt**. This is the one deliberate exception to "one bcrypt per attempt": skipping the hash is the point of limiting (CPU protection), and unknown emails are counted and blocked the same way, so the fast path reveals nothing about existence. The session-auth spec states this exception.
 4. `findByAppAndEmail`.
 5. Exactly ONE `hasher.verify`, against the user's hash or the boot-time dummy cost-12 hash. A password bcrypt cannot hash as given (NUL, over 72 bytes) is compared as `''`. No early return before this step.
-6. Decide only now. `user === null || !matches || !confirmed` gives `401 invalid_credentials`, one body for every cause, including limited and blocked. A password mismatch (unknown email included) records a failure on both lockout counters.
-7. Success resets `login_account_ip`, then creates the session, the refresh token and the access token in one `UnitOfWork` (ADR 35).
+6. Decide only now. `user === null || !matches || !confirmed` gives `401 invalid_credentials`, one body for every cause, including limited and blocked. Counting already happened in step 3, so a mismatch records nothing more.
+7. Success calls `recordLoginSuccess`, which resets `login_account_ip` only (the pair refund, ADR 36), then creates the session, the refresh token and the access token in one `UnitOfWork` (ADR 35).
 
 ### ADR 35: Refresh tokens and sessions
 
@@ -159,8 +159,8 @@ Properties: the raw successor is never stored or re-issued; grace is at most onc
 | Scope | Key | Counts | Default | When exceeded |
 |-------|-----|--------|---------|---------------|
 | `login_ip` | client + IP | every login request | 100 / 15 min | Generic `401` until the window ends |
-| `login_account_ip` | client + email + IP | password mismatches | 5 / 15 min | That IP is blocked 15 min for that account |
-| `login_account` | client + email | password mismatches from any IP | 50 / 1 h | The account is blocked 15 min |
+| `login_account_ip` | client + email + IP | login attempts, counted before bcrypt | 5 / 15 min | The 6th attempt and later are blocked; that IP is blocked 15 min for that account |
+| `login_account` | client + email | login attempts from any IP, counted before bcrypt | 50 / 1 h window | The 51st attempt and later are blocked; the account is blocked 15 min, and the count restarts when the lock ends (real throughput below) |
 | `email_ip` | client + IP | signup, resend, forgot requests | 20 / 1 h | `429` with `Retry-After` (see below) |
 | `reset_ip` | IP | reset requests | 20 / 1 h | `429` with `Retry-After` |
 | `confirm_ip` | IP | confirm requests (round 11) | 20 / 1 h | `429` with `Retry-After` |
@@ -172,7 +172,7 @@ Properties: the raw successor is never stored or re-issued; grace is at most onc
 Counters run for unknown emails too, so they reveal nothing about existence. `POST /password/change` checks the two lockout counters before bcrypt and records them on a wrong current password. While blocked, change returns the same `400 invalid_current_password` as a wrong password, even for the correct one (ADR 43). Every email that `forgot` sends, including a confirmation email for an unconfirmed account, counts toward `email_account`. Keys are SHA-256 of the composite; this is pseudonymous, not anonymous (emails are guessable), and rows are short-lived. The `email_account` default is 3 / 1 h, as in the abuse-protection spec (an earlier draft said 5).
 
 **Response rules (the abuse-protection spec wins).**
-- **Login never returns `429`.** Limited, blocked and locked logins return the same generic `401` as a failed login.
+- **Login never returns `429`.** Limited, blocked and locked logins return the same generic `401` as a failed login. This is structural (round 12): login's per-IP limit is `AbuseGuard.checkLoginIp(client, ip): Promise<boolean>` with no Retry-After, and the generic `checkIp`/`checkClientIp` types refuse the `login_ip` scope (a `@ts-expect-error` spec fails `npm run typecheck` if that is loosened).
 - **Limits keyed only by IP on the other endpoints** (`email_ip`, `reset_ip`, `confirm_ip`, `refresh_ip`) return `429` with `Retry-After` (an integer number of seconds until the window ends, at least 1) and the generic body `{ "error": "rate_limited", "message": "Too many requests. Try again later." }`. A `429` on refresh is never `invalid_grant`, so a client does not log the user out. The decision depends only on the caller's IP and the endpoint group, never on account state, so it cannot enumerate accounts.
 - **Per-account email caps** (`email_account`) never return `429`. They return the normal generic response and send nothing. For signup the account is still created; only the email is suppressed.
 - Tradeoff: a legitimate user behind a shared NAT can see `429` on signup or forgot, which is why the IP defaults are generous. The `429` body code is `rate_limited` (the spec only says "generic body").
@@ -189,20 +189,47 @@ Counters run for unknown emails too, so they reveal nothing about existence. `PO
 Table `abuse_counters`, created `UNLOGGED`: `scope text`, `key bytea`, `window_start`, `count int`, `blocked_until NULL`, `expires_at`; primary key `(scope, key)`; index on `expires_at`. One atomic statement per hit:
 
 ```sql
-INSERT INTO abuse_counters AS c (scope, key, window_start, count, blocked_until, expires_at)
-VALUES ($scope, $key, $now, 1, NULL, $now + $window)
-ON CONFLICT (scope, key) DO UPDATE SET
-  window_start = CASE WHEN c.window_start + $window <= $now THEN $now ELSE c.window_start END,
-  count        = CASE WHEN c.window_start + $window <= $now THEN 1 ELSE c.count + 1 END
-  -- blocked_until and expires_at are derived in the same SET from the new count
-RETURNING count, blocked_until;
+WITH prev AS (          -- the PREVIOUS row: was its lockout still running at $now?
+  SELECT blocked_until > $now AS locked FROM abuse_counters
+  WHERE scope = $scope AND key = $key FOR UPDATE
+),
+gate AS (SELECT COALESCE(bool_or(locked), false) AS blocked FROM prev),
+hit AS (
+  INSERT INTO abuse_counters AS c (scope, key, window_start, count, blocked_until, expires_at)
+  SELECT $scope, $key, $now, 1, CASE WHEN $limit <= 1 THEN $blockEnd END, GREATEST($windowEnd, <that block end>)
+  FROM gate             -- data dependency: the lock-and-read finishes before the upsert runs
+  ON CONFLICT (scope, key) DO UPDATE SET
+    window_start  = CASE WHEN ROLLED THEN $now ELSE c.window_start END,
+    count         = CASE WHEN ROLLED THEN 1 ELSE c.count + 1 END,
+    blocked_until = CASE WHEN c.blocked_until > $now THEN c.blocked_until   -- a live lock is kept, never extended
+                         WHEN <new count> >= $limit THEN $blockEnd END,     -- the hit that reaches the limit starts it
+    expires_at    = GREATEST(<new window end>, <new blocked_until>)
+  RETURNING c.count, c.blocked_until, c.window_start + $window AS window_ends_at
+)
+SELECT hit.count, hit.blocked_until, hit.window_ends_at, gate.blocked AS blocked_before FROM hit, gate;
+-- ROLLED = c.window_start + $window <= $now OR c.blocked_until <= $now   (the window ended, or a lock inside it ended)
 ```
+
+`blocked_before` is the explicit "locked before this hit" signal. The guard blocks when `count > limit OR blocked_before`; the hit that only starts the lock reports `false`, so it is the last allowed one. RETURNING sees only the new row, hence the `prev` CTE: `FOR UPDATE` makes a concurrent hit wait and read the latest committed row, and the old JS test `blockedUntil != now + blockSeconds` is gone. Residual: two first-ever hits racing on a row that does not exist yet can both read "not locked", which is harmless because the loser's count is already past a limit of 1; no deterministic test covers the `FOR UPDATE` itself.
 
 - **Contention.** A hot key serializes on one row lock, held only for that statement. The store always uses the root `DataSource` manager, never the ALS transactional manager (ADR 16). A rolled-back business transaction therefore cannot undo a count, and no lock is held across bcrypt.
 - **`UNLOGGED`.** No WAL for a table written on every request. A crash or failover empties it, so counters restart and an attacker gets at most one fresh window. `ALTER TABLE … SET LOGGED` reverts this if HA needs change.
+- **Lock expiry.** A window also rolls when a lockout inside it ends (`blocked_until <= now`): the count restarts at 1, so a lifted lock really lifts and the next attempt is not re-locked at once (the spec scenario "Lock expires"; the global counter's 15 min lock sits inside its 1 h window). Without this, the pre-count would keep blocking until the window ended.
 - **Time.** `$now` comes from the injected `Clock`, not `now()`, as with the outbox lease (ADR 30). This keeps tests deterministic.
-- **Cleanup.** An `AbuseCounterSweeper`, started by `main.ts` only (the outbox-poller pattern), deletes expired rows every 5 min in batches of 1,000.
-- **Ordering.** Checks run before the user lookup and before bcrypt. Keys need no user row. Failure increments run after bcrypt.
+- **Cleanup.** An `AbuseCounterSweeper`, started by `main.ts` only (the outbox-poller pattern), sweeps once at start and then deletes expired rows every 5 min in batches of 1,000.
+- **Ordering.** Checks run before the user lookup and before bcrypt. Keys need no user row. The login lockout counts the attempt BEFORE bcrypt (see "Login pre-count" below), not after it.
+- **Client identity (round 12).** The guard accepts a `ClientRef`, never a raw string. `ClientRef.resolved(app)` takes the `App` that `ResolveClientUseCase` returned (a type-only import; `App` has a private member, `snapshot()`, which makes it nominal, so a string, a request-body field or a look-alike object does not compile, checked by `@ts-expect-error` specs in `npm run typecheck`) and is for an active, resolved app only; `ClientRef.unknown()` is the shared sentinel. A raw `client_id` from a body would mint a counter per random id and bypass `login_ip`, `email_ip` and `refresh_ip` while growing the table; the type makes that a compile error, and every unknown client shares one counter per IP.
+- **CORS on `429` and `503` (round 12).** `AbuseExceptionFilter` grants `Access-Control-Allow-Origin` to the request's candidate origin (stashed by the CORS middleware only for an active app's origin) on both statuses. The bodies are static and carry no app or account data, so no controller has to remember to grant them. A request with no `Origin`, or an unknown one, gets no allow header.
+- **Outage log (round 12).** A limiter store failure logs `abuse limiter store unavailable (<scope>): <driver message>` and nothing else (no keys, IPs or parameters), at most once per 60 s per process, so an outage cannot flood the log.
+
+**Login pre-count (round 12, replaces check-then-act).** A read-only `isLoginBlocked` before bcrypt plus a failure increment after it lets N parallel logins all pass the check before any failure lands: one IP could fire up to its `login_ip` limit (100) in guesses instead of 5. `AbuseGuard.beginLoginAttempt(client, email, ip): 'allowed' | 'blocked'` therefore counts the attempt first, with one atomic upsert per counter:
+
+1. Hit `login_account_ip`. If it is over its limit, or an older block is still active, answer `blocked` and stop.
+2. Otherwise hit `login_account` and apply the same rule.
+
+Exactly `limit` attempts per window are `allowed`; the attempt that reaches the limit starts the block but is the last allowed one. A block older than the hit (it survives a window rollover) blocks even though the count restarted. Step 2 is skipped for a blocked pair so an attacker hammering from a blocked IP cannot lock the account for everyone. `recordLoginSuccess` resets only the pair counter, which refunds that attempt. **Assumption (deviation from the literal "failures" wording):** the global counter counts attempts, and a success does NOT refund it. Successes are rare against the limit of 50, and a refund (a decrement) would reopen the race the pre-count closes. The cost is that legitimate logins use up the account's 50 attempts per window; that is far above human use.
+
+**Real throughput (user decision A, 2026-10-07: document, no behaviour change).** The 15 min lock is shorter than the 1 h window, and a window also rolls when a lock ends (see "Lock expiry"), so the nominal "50 / 1 h" understates what an attacker gets. Pair counter (5 attempts, window 15 min, lock 15 min from the 5th): one cycle is 5 attempts plus a 900 s lock, so about 5 per 900 s, which is 20 per hour sustained for one account and IP (25 in a closed 3600 s interval with bursts at both ends, up to about 29 with a one-time 4-then-5 window-boundary bonus). Account counter (50, window 1 h, lock 15 min, count restarts when the lock ends): 50 per 900 s, which is 200 per hour sustained (250 in a closed hour, about 300 with the boundary bonus). Reaching 200 needs at least 10 distinct pair keys (IPs or IPv6 /64s), because each pair is capped at about 20 per hour. Tradeoff considered: keeping the count across the lock would make the nominal number true, but a legitimate user would be re-locked at once when the lock ends, so the real rate is documented instead. Two consequences are documented for operators and app teams: password change (U19) shares both counters, and service accounts or automation that log in more than 50 times an hour lock themselves; they must reuse refresh tokens (`docs/integration-guide.md`). `POST /password/change` uses the same two calls. `recordLoginFailure` and the store's `blockedUntil` read no longer exist.
 
 **Fail mode when a limiter statement errors:**
 
@@ -219,9 +246,11 @@ The `503` is raised before any account lookup, so it reveals nothing about accou
 
 | Option | Tradeoff | Decision |
 |--------|----------|----------|
-| Explicit `trust proxy` from config | Operators must set it behind a load balancer. If they forget, all users share the proxy IP and limits trip early: this fails safe (over-limiting, never bypass) | **Chosen** |
+| Explicit `trust proxy` from config | Operators must set it behind a load balancer. If they forget, all users share the proxy IP and limits trip early: this fails safe (over-limiting, never bypass). The opposite mistake does NOT fail safe, see the risk below | **Chosen** |
 | Read `X-Forwarded-For` directly, or `trust proxy = true` | Any client spoofs its IP when no proxy strips the header | Rejected |
 | Key IPv6 per full address | Rotating addresses inside a /64 is free | Rejected |
+
+**Operator misconfiguration risk (round 12).** Only *forgetting* to set `TRUST_PROXY` fails safe. An *overstated* hop count (more hops than real proxies) makes Express walk past the real client into the client-controlled part of `X-Forwarded-For`, so the leftmost value an attacker sends wins and the limits can be dodged by rotating it. A CIDR wider than the real proxies trusts addresses that are not proxies and has the same effect. Boot therefore bounds the value: a hop count must be 1 to 10 and a CIDR no wider than /8 (IPv4) or /16 (IPv6); `true` and `/0` stay rejected. These bounds cut the blast radius of a typo, but the operator must still set the exact number of proxies in front of Auth.
 
 ### ADR 38: CORS bound to the client (amends ADR 29)
 
@@ -436,8 +465,7 @@ interface SessionRepository {
 
 // abuse-protection (ADR 36)
 interface AbuseCounterStore {
-  hit(scope: Scope, key: Buffer, policy: Policy, now: Date): Promise<{ count: number; blockedUntil: Date | null }>;
-  blockedUntil(keys: Array<{ scope: Scope; key: Buffer }>, now: Date): Promise<Date | null>;
+  hit(scope: Scope, key: Buffer, policy: Policy, now: Date): Promise<{ count: number; blockedUntil: Date | null; windowEndsAt: Date }>;
   reset(scope: Scope, key: Buffer): Promise<void>;
 }
 ```
@@ -462,7 +490,7 @@ interface AbuseCounterStore {
 
 The route table has 13 routes: 10 under `/api/v1` and 3 at the root (ADR 28). Preflight `OPTIONS` is answered by the CORS middleware on the 10 API routes (ADR 38). Exact status codes, error codes and request bodies are owned by the specs; where this design differs, the spec wins. Names the specs leave open: `invalid_credentials` (login, change), `invalid_client` (`400`, non-login body endpoints), `invalid_or_expired_link` (confirm, reset), `unconfigured_client` (`400`, null email URL), `rate_limited` (`429`) and `temporarily_unavailable` (`503`). The refresh failure is `invalid_grant`. Round 11 adds `invalid_request` (`400`, malformed body on every endpoint), `invalid_current_password` (`400`, change), `invalid_token` (`401`, `/me` and change) and `invalid_email` and `invalid_password` as built (ADR 43).
 
-**Config schema (zod)** adds (revision 2): `TRUST_PROXY` (ADR 37, default `false`, `true` rejected), `REFRESH_IDLE_TTL_SECONDS` (default 604800), `REFRESH_ABSOLUTE_TTL_SECONDS` (default 2592000), `REFRESH_REUSE_GRACE_SECONDS` (default 10, `0` disables, ADR 35), and `ABUSE_<SCOPE>_LIMIT`, `_WINDOW_SECONDS`, `_BLOCK_SECONDS` for each ADR 36 scope. Earlier units added: `AUTH_PUBLIC_BASE_URL` (required, absolute URL), `SMTP_HOST` (required), `SMTP_PORT` (number, default 587), `SMTP_SECURE` (boolean, default false; true means implicit TLS, usually port 465), `SMTP_USER` and `SMTP_PASS` (optional pair, both or neither, so a local catcher needs no auth), and `MAIL_FROM` (required default sender). `SMTP_PASS` is never logged.
+**Config schema (zod)** adds (revision 2): `TRUST_PROXY` (ADR 37, default `false`, `true` rejected), `REFRESH_IDLE_TTL_SECONDS` (default 604800), `REFRESH_ABSOLUTE_TTL_SECONDS` (default 2592000), `REFRESH_REUSE_GRACE_SECONDS` (default 10, `0` disables, ADR 35), and `ABUSE_<SCOPE>_LIMIT`, `_WINDOW_SECONDS`, `_BLOCK_SECONDS` for each ADR 36 scope (parsed by `abuse-protection/infrastructure/abuse-config.ts`, not by `platform/config`, so `platform` never imports `abuse-protection`; each is a positive integer of at most 2147483647, the `int4` the store binds, because a larger value would pass boot and then fail every hit with a permanent 503). Earlier units added: `AUTH_PUBLIC_BASE_URL` (required, absolute URL), `SMTP_HOST` (required), `SMTP_PORT` (number, default 587), `SMTP_SECURE` (boolean, default false; true means implicit TLS, usually port 465), `SMTP_USER` and `SMTP_PASS` (optional pair, both or neither, so a local catcher needs no auth), and `MAIL_FROM` (required default sender). `SMTP_PASS` is never logged.
 
 ```ts
 interface EmailMessage { to: string; from: string; subject: string; text: string; }
