@@ -3,7 +3,6 @@ import { App } from '../../src/app-registry/domain/app';
 import { AppSchema } from '../../src/app-registry/infrastructure/persistence/app.schema';
 import { TypeOrmAppRepository } from '../../src/app-registry/infrastructure/persistence/typeorm-app.repository';
 import { SystemClock } from '../../src/shared-kernel/clock';
-import { EmailLinks } from '../../src/transactional-email/application/email-links';
 import { OutboxWorker } from '../../src/transactional-email/application/outbox-worker';
 import { OutboxEmail } from '../../src/transactional-email/domain/outbox-email';
 import { EmailOutboxSchema } from '../../src/transactional-email/infrastructure/persistence/email-outbox.schema';
@@ -24,7 +23,6 @@ describe('OutboxWorker with Postgres (integration)', () => {
       sender,
       renderer: { render: async ({ template }) => ({ subject: template, text: 'body' }) },
       clock: new SystemClock(),
-      links: new EmailLinks('https://auth.example'),
       defaultFrom: 'no-reply@auth.example',
       logger: { warn: (m) => logs.push(m), error: (m) => logs.push(m) },
       maxAttempts: 3,

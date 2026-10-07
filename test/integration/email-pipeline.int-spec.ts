@@ -12,6 +12,8 @@ import { startMailpit, type TestMailpit } from '../support/mailpit';
 import { startTestDatabase, type TestDatabase } from '../support/postgres';
 
 const BASE_URL = 'https://auth.example.test';
+const CONFIRM_URL = 'https://shop.example/confirm?lang=en';
+const RESET_URL = 'https://shop.example/reset';
 const TOKEN = 'Tok3n_0123456789abcdefghijklmnopqrstuvwxyzAB';
 
 /** The whole path: Postgres outbox -> worker -> Handlebars default templates -> SMTP -> Mailpit. */
@@ -31,8 +33,8 @@ describe('email pipeline (integration, Postgres + Mailpit)', () => {
       redirectUris: [],
       allowedOrigins: [],
       emailFrom,
-      emailConfirmationUrl: null,
-      passwordResetUrl: null,
+      emailConfirmationUrl: CONFIRM_URL,
+      passwordResetUrl: RESET_URL,
       status: 'active',
       createdAt: now,
       updatedAt: now,
@@ -68,7 +70,7 @@ describe('email pipeline (integration, Postgres + Mailpit)', () => {
     await mailpit.clear();
   });
 
-  it('delivers queued emails with links on AUTH_PUBLIC_BASE_URL and the per-app from override', async () => {
+  it('delivers queued emails with links on the app URLs and the per-app from override', async () => {
     const plain = await createApp(null);
     const branded = await createApp('Shop <hello@shop.example>');
     await queue(plain.id, 'confirmation', 'ana@example.com', { token: TOKEN });
@@ -81,15 +83,17 @@ describe('email pipeline (integration, Postgres + Mailpit)', () => {
     const confirmation = byRecipient.get('ana@example.com');
     expect(confirmation?.from).toEqual({ name: 'Auth', address: 'no-reply@auth.example.test' });
     expect(confirmation?.subject).toBe('Confirm your email for Shop');
-    expect(confirmation?.text).toContain(`${BASE_URL}/api/v1/accounts/confirm?token=${TOKEN}`);
+    expect(confirmation?.text).toContain(`${CONFIRM_URL}#token=${TOKEN}`);
 
     const reset = byRecipient.get('bo@example.com');
     expect(reset?.from).toEqual({ name: 'Shop', address: 'hello@shop.example' });
-    expect(reset?.text).toContain(`${BASE_URL}/api/v1/password/reset?token=${TOKEN}&client_id=${branded.clientId}`);
+    expect(reset?.text).toContain(`${RESET_URL}#token=${TOKEN}`);
 
     const exists = byRecipient.get('cy@example.com');
-    expect(exists?.text).toContain(`${BASE_URL}/api/v1/password/forgot?client_id=${branded.clientId}`);
+    expect(exists?.text.match(/https?:\/\/\S+/g)).toEqual([RESET_URL]);
     expect(exists?.text).not.toContain('token');
+    expect(exists?.text).not.toContain('#');
+    for (const message of byRecipient.values()) expect(message.text).not.toContain(BASE_URL);
 
     const rows: { status: string; payload: unknown }[] = await db.dataSource.query(`SELECT status, payload FROM email_outbox`);
     expect(rows).toEqual(Array(3).fill({ status: 'sent', payload: {} }));

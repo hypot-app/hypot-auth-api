@@ -1,8 +1,7 @@
 import { App } from '../../app-registry/domain/app';
-import { EmailLinks } from './email-links';
+import { accountExistsLink, confirmationLink, passwordResetLink } from './email-links';
 import { buildEmailVariables } from './email-variables';
 
-const links = new EmailLinks('https://auth.example.com');
 const TOKEN = 'A'.repeat(43);
 
 const app = App.restore({
@@ -14,36 +13,36 @@ const app = App.restore({
   redirectUris: [],
   allowedOrigins: [],
   emailFrom: null,
-  emailConfirmationUrl: null,
-  passwordResetUrl: null,
+  emailConfirmationUrl: 'https://shop.example/confirm',
+  passwordResetUrl: 'https://shop.example/reset',
   status: 'active',
   createdAt: new Date(0),
   updatedAt: new Date(0),
 });
 
-const build = (template: string, payload: Record<string, string>) =>
-  buildEmailVariables({ template, payload, app, links });
+const build = (template: string, payload: Record<string, string>, target: App = app) =>
+  buildEmailVariables({ template, payload, app: target });
 
 describe('buildEmailVariables', () => {
   // Link formats are asserted once, in email-links.spec; here only that each template is wired to its link.
   it('confirmation: app name and the confirmation link for the token', () => {
     expect(build('confirmation', { token: TOKEN })).toEqual({
       ok: true,
-      value: { appName: 'Shop', link: links.confirmation(TOKEN) },
+      value: { appName: 'Shop', link: confirmationLink(app, TOKEN) },
     });
   });
 
-  it('password-reset: link for the token and the app client_id', () => {
+  it('password-reset: app name and the reset link for the token', () => {
     expect(build('password-reset', { token: TOKEN })).toEqual({
       ok: true,
-      value: { appName: 'Shop', link: links.passwordReset(TOKEN, app.clientId) },
+      value: { appName: 'Shop', link: passwordResetLink(app, TOKEN) },
     });
   });
 
-  it('account-exists: forgot-password link for the client_id, no token needed', () => {
+  it('account-exists: the reset link, no token needed', () => {
     expect(build('account-exists', {})).toEqual({
       ok: true,
-      value: { appName: 'Shop', link: links.accountExists(app.clientId) },
+      value: { appName: 'Shop', link: accountExistsLink(app) },
     });
   });
 
@@ -57,6 +56,23 @@ describe('buildEmailVariables', () => {
       ok: true,
       value: { appName: 'Shop' },
     });
+  });
+
+  it.each([
+    ['confirmation', { token: TOKEN }, 'email_confirmation_url'],
+    ['password-reset', { token: TOKEN }, 'password_reset_url'],
+    ['account-exists', {}, 'password_reset_url'],
+  ])('%s: fails with a field-only reason when the app has no URL for it', (template, payload, field) => {
+    const legacy = App.restore({ ...app, emailConfirmationUrl: null, passwordResetUrl: null });
+
+    expect(build(template, payload, legacy)).toEqual({ ok: false, error: `app has no ${field} configured` });
+  });
+
+  it('welcome and password-changed still build for an app with no URLs', () => {
+    const legacy = App.restore({ ...app, emailConfirmationUrl: null, passwordResetUrl: null });
+
+    expect(build('welcome', {}, legacy).ok).toBe(true);
+    expect(build('password-changed', {}, legacy).ok).toBe(true);
   });
 
   it.each([

@@ -140,10 +140,10 @@ Real forks: none. Items 8 and 9 are the closest; both follow the specs, and the 
 
 **U12** `feat/u12-email-app-links` (315-360 lines)
 
-- [ ] 12.1 RED: `EmailLinks` unit: confirmation link `https://a.example/confirm#token=<percent-encoded>`; reset link likewise; a null URL throws `UnconfiguredLink`; no output contains `AUTH_PUBLIC_BASE_URL`. GREEN: rewrite `src/transactional-email/application/email-links.ts` from the app record.
-- [ ] 12.2 RED/GREEN: `OutboxWorker` builds links at send time from the current app (`findById`); a null URL marks the row `failed` at once with the payload purged and no token in logs. Update existing worker tests.
-- [ ] 12.3 RED/GREEN: templates `confirmation`, `reset` use the built link; `account-exists` links to `password_reset_url` with no token and no `#`; `welcome` and `password-changed` unchanged. Renderer tests: no password, no `AUTH_PUBLIC_BASE_URL` anywhere, `account-exists` has no token.
-- [ ] 12.4 RED/GREEN: update `email-pipeline.int-spec` (Mailpit): the delivered mail carries `app URL + #token=`. Mutation: build from `AUTH_PUBLIC_BASE_URL`, the pipeline and link tests fail. Update the README TTL TODO and ADR 30 payload note if they mention link bases.
+- [x] 12.1 RED: `EmailLinks` unit: confirmation link `https://a.example/confirm#token=<percent-encoded>`; reset link likewise; a null URL throws `UnconfiguredLink`; no output contains `AUTH_PUBLIC_BASE_URL`. GREEN: rewrite `src/transactional-email/application/email-links.ts` from the app record.
+- [x] 12.2 RED/GREEN: `OutboxWorker` builds links at send time from the current app (`findById`); a null URL marks the row `failed` at once with the payload purged and no token in logs. Update existing worker tests.
+- [x] 12.3 RED/GREEN: templates `confirmation`, `reset` use the built link; `account-exists` links to `password_reset_url` with no token and no `#`; `welcome` and `password-changed` unchanged. Renderer tests: no password, no `AUTH_PUBLIC_BASE_URL` anywhere, `account-exists` has no token.
+- [x] 12.4 RED/GREEN: update `email-pipeline.int-spec` (Mailpit): the delivered mail carries `app URL + #token=`. Mutation: build from `AUTH_PUBLIC_BASE_URL`, the pipeline and link tests fail. Update the README TTL TODO and ADR 30 payload note if they mention link bases.
 
 ## U13 Abuse protection (all of it lands before any bcrypt path)
 
@@ -244,6 +244,8 @@ Real forks: none. Items 8 and 9 are the closest; both follow the specs, and the 
 
 - [ ] 18.5 RED/GREEN: `ChangePasswordUseCase` via `AuthenticateBearerUseCase`. Order: bearer, body shape (`400 invalid_request`), new-password rules (`400 invalid_password`, no counter touched), lockout state (blocked or locked gives `400 invalid_current_password` even for the correct password, with NO bcrypt), compare. A wrong current password gives `400 invalid_current_password` (never `401`) and records both counters; success resets the pair counter, writes the hash, `revokeAllForUser(password_changed)` and queues the `password-changed` notice, all in one UoW. Mutations: skip failure recording, exclude the caller's session from revocation, return `401` for a wrong current password (the status test fails), run bcrypt while blocked (the no-bcrypt test fails), touch a counter for a weak new password.
 - [ ] 18.6 RED/GREEN: `POST /api/v1/password/change` e2e: `204`; missing or invalid token `401 invalid_token` with `WWW-Authenticate: Bearer`; wrong current password gives `400 { error: "invalid_current_password", message }`, changes nothing and revokes nothing; after 5 wrong attempts the correct password also gives the same `400` from that IP; weak new password `400 invalid_password` with no state change; every refresh token of the account (the caller's too) fails afterward while the current access token verifies until `exp`; failed changes feed the same counters as login; CORS bound to the token's `aud`.
+
+- [ ] 18.7 Template TTL wording (retargeted from the README `TODO(U6)`, remove it when done): pass the confirmation and reset token TTLs to the email templates as variables, or keep the "24 hours" and "1 hour" wording pinned by a test against the token TTL constants.
 
 ## U19 OpenAPI, retention, e2e, docs and ops
 

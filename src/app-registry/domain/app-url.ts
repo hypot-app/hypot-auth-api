@@ -9,10 +9,13 @@ import { LOCAL_HOSTS, type UrlRuleOptions } from './local-hosts';
 export class AppUrl {
   private constructor(readonly value: string) {}
 
-  /** `label` names the field in the error message so an operator knows which URL to fix. */
+  /**
+   * Stores the normalized `href` (lowercased scheme and host, punycode host, a bare origin gains its `/`).
+   * `label` names the field in the error message so an operator knows which URL to fix.
+   */
   static create(raw: string, options: UrlRuleOptions, label = 'app URL'): Result<AppUrl, DomainError> {
     const reason = rejectionReason(raw, options);
-    return reason === null ? ok(new AppUrl(raw)) : err(invalid(label, reason));
+    return reason === null ? ok(new AppUrl(new URL(raw).href)) : err(invalid(label, reason));
   }
 }
 
@@ -21,6 +24,8 @@ function invalid(label: string, reason: string): DomainError {
 }
 
 function rejectionReason(raw: string, { isProduction }: UrlRuleOptions): string | null {
+  // The URL parser silently strips leading and trailing whitespace and control characters; reject them instead.
+  if (/[\s\p{Cc}]/u.test(raw)) return 'must not contain whitespace or control characters';
   if (!URL.canParse(raw)) return 'must be an absolute URL';
   const url = new URL(raw);
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return 'scheme must be https';

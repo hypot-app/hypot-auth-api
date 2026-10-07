@@ -6,7 +6,6 @@ import { InMemoryEmailOutbox } from '../../../test/support/in-memory-email-outbo
 import type { EmailTemplate } from '../domain/email-template';
 import { OutboxEmail } from '../domain/outbox-email';
 import type { TemplateRenderer } from '../domain/template-renderer';
-import { EmailLinks } from './email-links';
 import { LEASE_MS, OutboxWorker, retryDelayMs, type WorkerLogger } from './outbox-worker';
 
 const NOW = new Date('2026-01-01T00:00:00.000Z');
@@ -15,7 +14,9 @@ const MAIL_FROM = 'Auth <no-reply@auth.example>';
 
 const clientIdOf = (id: string): string => `app_${id.padEnd(32, '0')}`;
 
-const appWith = (id: string, emailFrom: string | null): App =>
+const CONFIRM_URL = 'https://shop.example/confirm';
+
+const appWith = (id: string, emailFrom: string | null, confirmationUrl: string | null = CONFIRM_URL): App =>
   App.restore({
     id,
     clientId: clientIdOf(id),
@@ -25,8 +26,8 @@ const appWith = (id: string, emailFrom: string | null): App =>
     redirectUris: [],
     allowedOrigins: [],
     emailFrom,
-    emailConfirmationUrl: null,
-    passwordResetUrl: null,
+    emailConfirmationUrl: confirmationUrl,
+    passwordResetUrl: 'https://shop.example/reset',
     status: 'active',
     createdAt: NOW,
     updatedAt: NOW,
@@ -60,7 +61,6 @@ function setup(options: { sendDeadlineMs?: number } = {}) {
     sender,
     renderer,
     clock,
-    links: new EmailLinks('https://auth.example'),
     defaultFrom: MAIL_FROM,
     logger,
     maxAttempts: 3,
@@ -111,7 +111,7 @@ describe('OutboxWorker', () => {
       {
         template: 'confirmation',
         clientId: clientIdOf('a1'),
-        variables: { appName: 'Shop', link: `https://auth.example/api/v1/accounts/confirm?token=${TOKEN}` },
+        variables: { appName: 'Shop', link: `${CONFIRM_URL}#token=${TOKEN}` },
       },
     ]);
     expect(sender.sent).toEqual([
@@ -119,10 +119,21 @@ describe('OutboxWorker', () => {
         to: 'ana@example.com',
         from: MAIL_FROM,
         subject: 'subject:confirmation',
-        text: `body:https://auth.example/api/v1/accounts/confirm?token=${TOKEN}`,
+        text: `body:${CONFIRM_URL}#token=${TOKEN}`,
       },
     ]);
     expect(outbox.emails.get(email.id)).toMatchObject({ status: 'sent', payload: {}, attempts: 1, lastError: null });
+  });
+
+  // ADR 39: links are built at send time from the current app record, so an operator URL change applies to queued mail.
+  it('builds the link at send time from the current app, not from what it was when queued', async () => {
+    const { worker, renderer, apps, enqueue } = setup();
+    await enqueue(appWith('a1', null), 'confirmation', { token: TOKEN });
+    await apps.save(appWith('a1', null, 'https://shop.example/new-confirm'));
+
+    await worker.processNext();
+
+    expect(renderer.calls[0]?.variables['link']).toBe(`https://shop.example/new-confirm#token=${TOKEN}`);
   });
 
   it('uses the app email_from over MAIL_FROM when the app sets one', async () => {
@@ -341,6 +352,24 @@ describe('OutboxWorker', () => {
         lastError: 'invalid payload for template confirmation',
       });
       expect(logs.join('\n')).not.toContain('short');
+    });
+
+    it('app without the URL the email needs, without a link or token in the error or logs', async () => {
+      const { worker, sender, renderer, outbox, enqueue, logs } = setup();
+      const email = await enqueue(appWith('a1', null, null), 'confirmation', { token: TOKEN });
+
+      await worker.processNext();
+
+      expect(sender.sent).toEqual([]);
+      expect(renderer.calls).toEqual([]);
+      expect(outbox.emails.get(email.id)).toMatchObject({
+        status: 'failed',
+        payload: {},
+        attempts: 1,
+        lastError: 'app has no email_confirmation_url configured',
+      });
+      expect(logs).toEqual([`email ${email.id} (confirmation) failed permanently: app has no email_confirmation_url configured`]);
+      expect(logs.join(' ')).not.toContain(TOKEN);
     });
 
     it('app no longer exists', async () => {

@@ -1,30 +1,69 @@
-import { EmailLinks } from './email-links';
+import { App } from '../../app-registry/domain/app';
+import { AppUrl } from '../../app-registry/domain/app-url';
+import { accountExistsLink, confirmationLink, passwordResetLink, UnconfiguredLink } from './email-links';
 
-const links = new EmailLinks('https://auth.example.com');
-
-describe('EmailLinks', () => {
-  it('builds the confirmation link under /api/v1 on the configured base', () => {
-    expect(links.confirmation('tok_123')).toBe('https://auth.example.com/api/v1/accounts/confirm?token=tok_123');
+const appWith = (urls: { confirm: string | null; reset: string | null }): App =>
+  App.restore({
+    id: 'id-1',
+    clientId: 'app_0123456789abcdef0123456789abcdef',
+    name: 'Shop',
+    clientType: 'public',
+    clientSecretHash: null,
+    redirectUris: [],
+    allowedOrigins: [],
+    emailFrom: null,
+    emailConfirmationUrl: urls.confirm,
+    passwordResetUrl: urls.reset,
+    status: 'active',
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
   });
 
-  it('builds the reset link with the token and the app client_id', () => {
-    expect(links.passwordReset('tok_123', 'app_abc')).toBe(
-      'https://auth.example.com/api/v1/password/reset?token=tok_123&client_id=app_abc',
-    );
+const app = appWith({ confirm: 'https://a.example/confirm', reset: 'https://a.example/reset' });
+
+describe('email links', () => {
+  it('confirmation: the app confirmation URL with the token in the fragment', () => {
+    expect(confirmationLink(app, 'tok_123')).toBe('https://a.example/confirm#token=tok_123');
   });
 
-  it('builds the account-exists link with only the client_id', () => {
-    expect(links.accountExists('app_abc')).toBe('https://auth.example.com/api/v1/password/forgot?client_id=app_abc');
+  it('reset: the app reset URL with the token in the fragment', () => {
+    expect(passwordResetLink(app, 'tok_123')).toBe('https://a.example/reset#token=tok_123');
   });
 
-  it('keeps a base URL with a port and uses it verbatim', () => {
-    expect(new EmailLinks('http://localhost:3000').accountExists('app_x')).toBe(
-      'http://localhost:3000/api/v1/password/forgot?client_id=app_x',
-    );
+  it('keeps an existing query string and puts the token after it, in the fragment', () => {
+    const withQuery = appWith({ confirm: 'https://a.example/confirm?lang=en', reset: null });
+    expect(confirmationLink(withQuery, 'tok_123')).toBe('https://a.example/confirm?lang=en#token=tok_123');
   });
 
-  it('percent-encodes values so they cannot add or break query parameters', () => {
-    expect(links.confirmation('a&b=c#d')).toBe('https://auth.example.com/api/v1/accounts/confirm?token=a%26b%3Dc%23d');
-    expect(links.accountExists('x&y')).toBe('https://auth.example.com/api/v1/password/forgot?client_id=x%26y');
+  it('links correctly from a normalized bare-origin URL', () => {
+    const normalized = (raw: string): string => {
+      const result = AppUrl.create(raw, { isProduction: false });
+      if (!result.ok) throw new Error('expected a valid URL');
+      return result.value.value;
+    };
+    const bare = appWith({ confirm: normalized('HTTPS://A.Example'), reset: normalized('https://bücher.example') });
+    expect(confirmationLink(bare, 'tok_123')).toBe('https://a.example/#token=tok_123');
+    expect(passwordResetLink(bare, 'tok_123')).toBe('https://xn--bcher-kva.example/#token=tok_123');
+    expect(accountExistsLink(bare)).toBe('https://xn--bcher-kva.example/');
+  });
+
+  it('percent-encodes the token so it cannot add fragment parameters', () => {
+    expect(confirmationLink(app, 'a&b=c#d')).toBe('https://a.example/confirm#token=a%26b%3Dc%23d');
+  });
+
+  it('account-exists: the reset URL as stored, with no token and no fragment', () => {
+    const link = accountExistsLink(app);
+    expect(link).toBe('https://a.example/reset');
+    expect(link).not.toContain('#');
+  });
+
+  it.each([
+    ['confirmation', (a: App) => confirmationLink(a, 'tok'), 'email_confirmation_url'],
+    ['reset', (a: App) => passwordResetLink(a, 'tok'), 'password_reset_url'],
+    ['account-exists', (a: App) => accountExistsLink(a), 'password_reset_url'],
+  ])('%s: throws UnconfiguredLink naming the missing URL when the app has none', (_label, build, field) => {
+    const legacy = appWith({ confirm: null, reset: null });
+    expect(() => build(legacy)).toThrow(UnconfiguredLink);
+    expect(() => build(legacy)).toThrow(field);
   });
 });
