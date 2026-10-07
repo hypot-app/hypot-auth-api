@@ -156,9 +156,9 @@ Real forks: none. Items 8 and 9 are the closest; both follow the specs, and the 
 
 **U13b** `feat/u13b-abuse-store` (280-320 lines)
 
-- [ ] 13.5 RED: migration `1760000005000-CreateAbuseCounters` int test: table is `UNLOGGED` (`relpersistence = 'u'`), PK `(scope, key)`, index on `expires_at`; up, down, up. GREEN: migration, `EntitySchema`, `AbuseCounterStore` port.
-- [ ] 13.6 RED/GREEN: `PostgresAbuseCounterStore.hit` as the single atomic upsert of ADR 36 with the injected `Clock`: window rollover, threshold sets `blocked_until`, hits during a block do not extend it. Always uses the root `DataSource` manager. Int tests with a fixed clock; 10 parallel hits read count 10 and set `blocked_until` once; a rolled-back UoW leaves the count. Mutations: use the ALS manager, the rollback test fails; read-then-write instead of upsert, the concurrency test fails.
-- [ ] 13.7 RED/GREEN: `blockedUntil(keys, now)` and `reset(scope, key)`; tests include an expired block and reset of a missing key.
+- [x] 13.5 RED: migration `1760000005000-CreateAbuseCounters` int test: table is `UNLOGGED` (`relpersistence = 'u'`), PK `(scope, key)`, index on `expires_at`; up, down, up. GREEN: migration, `EntitySchema`, `AbuseCounterStore` port.
+- [x] 13.6 RED/GREEN: `PostgresAbuseCounterStore.hit` as the single atomic upsert of ADR 36 with the injected `Clock`: window rollover, threshold sets `blocked_until`, hits during a block do not extend it. Always uses the root `DataSource` manager. Int tests with a fixed clock; 10 parallel hits read count 10 and set `blocked_until` once; a rolled-back UoW leaves the count. Mutations: use the ALS manager, the rollback test fails; read-then-write instead of upsert, the concurrency test fails.
+- [x] 13.7 RED/GREEN: `blockedUntil(keys, now)` and `reset(scope, key)`; tests include an expired block and reset of a missing key.
 
 **U13c** `feat/u13c-abuse-guard-sweeper` (315-360 lines)
 
