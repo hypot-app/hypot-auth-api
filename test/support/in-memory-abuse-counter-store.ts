@@ -21,6 +21,7 @@ export class InMemoryAbuseCounterStore implements AbuseCounterStore {
     const old = this.rows.get(id);
     const rolled =
       old === undefined || old.windowStart + policy.windowSeconds * 1000 <= t || (old.blockedUntil !== null && old.blockedUntil <= t);
+    const blockedBefore = old?.blockedUntil != null && old.blockedUntil > t;
     const count = rolled ? 1 : old.count + 1;
     let blockedUntil = old?.blockedUntil != null && old.blockedUntil > t ? old.blockedUntil : null;
     if (blockedUntil === null && count >= policy.limit && policy.blockSeconds !== null) {
@@ -32,6 +33,7 @@ export class InMemoryAbuseCounterStore implements AbuseCounterStore {
       count,
       blockedUntil: blockedUntil === null ? null : new Date(blockedUntil),
       windowEndsAt: new Date(windowStart + policy.windowSeconds * 1000),
+      blockedBefore,
     };
   }
 

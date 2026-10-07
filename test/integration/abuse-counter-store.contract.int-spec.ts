@@ -60,12 +60,13 @@ describe.each(variants)('AbuseCounterStore contract: $name', ({ start }) => {
   };
 
   it('counts inside a window anchored at the first hit, then rolls over at its exact end', async () => {
-    expect(await hits(1, WINDOW)).toEqual({ count: 1, blockedUntil: null, windowEndsAt: after(100) });
+    expect(await hits(1, WINDOW)).toEqual({ count: 1, blockedUntil: null, windowEndsAt: after(100), blockedBefore: false });
     expect(await store.hit('login_account_ip', KEY, WINDOW, after(60))).toMatchObject({ count: 2, windowEndsAt: after(100) });
     expect(await store.hit('login_account_ip', KEY, WINDOW, after(100))).toEqual({
       count: 1,
       blockedUntil: null,
       windowEndsAt: after(200),
+      blockedBefore: false,
     });
   });
 
@@ -88,6 +89,7 @@ describe.each(variants)('AbuseCounterStore contract: $name', ({ start }) => {
       count: 1,
       blockedUntil: after(500),
       windowEndsAt: after(250),
+      blockedBefore: true,
     });
   });
 
@@ -98,7 +100,25 @@ describe.each(variants)('AbuseCounterStore contract: $name', ({ start }) => {
       count: 1,
       blockedUntil: null,
       windowEndsAt: after(1100),
+      blockedBefore: false,
     });
+  });
+
+  it('flags a hit as blocked-before only when the previous row had a lock that had not ended', async () => {
+    const tripping = await hits(3, LOCKOUT);
+    expect(tripping).toMatchObject({ blockedUntil: after(500), blockedBefore: false });
+
+    expect((await store.hit('login_account_ip', KEY, LOCKOUT, after(50))).blockedBefore).toBe(true);
+    expect((await store.hit('login_account_ip', KEY, LOCKOUT, after(150))).blockedBefore).toBe(true);
+    expect((await store.hit('login_account_ip', KEY, LOCKOUT, after(499))).blockedBefore).toBe(true);
+    expect(await store.hit('login_account_ip', KEY, LOCKOUT, after(500))).toMatchObject({ count: 1, blockedBefore: false });
+  });
+
+  it('never flags a counter without a lock, nor a lock started by the same millisecond hit', async () => {
+    expect((await hits(9, WINDOW)).blockedBefore).toBe(false);
+    store = await fresh();
+
+    expect((await hits(1, { limit: 1, windowSeconds: 100, blockSeconds: 60 })).blockedBefore).toBe(false);
   });
 
   it('blocks on the first hit when the limit is 1', async () => {

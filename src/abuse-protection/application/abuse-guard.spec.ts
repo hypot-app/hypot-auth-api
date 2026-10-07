@@ -1,6 +1,7 @@
 import { FixedClock } from '../../shared-kernel/clock';
 import { anApp } from '../../../test/support/app-fixture';
 import { InMemoryAbuseCounterStore } from '../../../test/support/in-memory-abuse-counter-store';
+import type { AbuseCounterStore, HitResult } from '../domain/abuse-counter.store';
 import { ClientIp } from '../domain/client-ip';
 import { ClientRef } from '../domain/client-ref';
 import { resolvePolicies, type PolicyOverrides } from '../domain/policy';
@@ -264,5 +265,34 @@ describe('AbuseGuard: a store failure fails closed', () => {
     expect(error).toBeInstanceOf(TemporarilyUnavailable);
     expect((error as TemporarilyUnavailable).cause).toBe(store.failWith);
     expect((error as TemporarilyUnavailable).scope).toBe(scope);
+  });
+});
+
+describe('AbuseGuard: the store, not date arithmetic, says whether a lock predates the hit', () => {
+  /** Answers the same HitResult to every hit, so only the store's own signal can steer the guard. */
+  const guardAnswering = (result: Omit<HitResult, 'windowEndsAt'>) => {
+    const store: AbuseCounterStore = {
+      hit: async () => ({ ...result, windowEndsAt: new Date(T0.getTime() + HOUR_MS) }),
+      reset: async () => undefined,
+    };
+    return new AbuseGuard({ store, policies: resolvePolicies({}), clock: new FixedClock(T0) });
+  };
+
+  it('allows the hit that only started the lock, even when its end is not now + block length', async () => {
+    const guard = guardAnswering({ count: 5, blockedUntil: new Date(T0.getTime() + 1_000), blockedBefore: false });
+
+    expect(await guard.beginLoginAttempt(APP, ANA, IP_X)).toBe('allowed');
+  });
+
+  it('blocks a hit whose previous row was already locked, even when the end equals now + block length', async () => {
+    const guard = guardAnswering({ count: 1, blockedUntil: new Date(T0.getTime() + 15 * MINUTE_MS), blockedBefore: true });
+
+    expect(await guard.beginLoginAttempt(APP, ANA, IP_X)).toBe('blocked');
+  });
+
+  it('blocks past the limit whatever the flag says', async () => {
+    const guard = guardAnswering({ count: 6, blockedUntil: null, blockedBefore: false });
+
+    expect(await guard.beginLoginAttempt(APP, ANA, IP_X)).toBe('blocked');
   });
 });

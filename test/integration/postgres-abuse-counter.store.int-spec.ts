@@ -43,10 +43,10 @@ describe('PostgresAbuseCounterStore (integration, ADR 36)', () => {
   describe('hit', () => {
     it('starts a window at the first hit and counts inside it without moving the end', async () => {
       const first = await store.hit('login_account_ip', key, WINDOW, T0);
-      expect(first).toEqual({ count: 1, blockedUntil: null, windowEndsAt: after(T0, 100) });
+      expect(first).toEqual({ count: 1, blockedUntil: null, windowEndsAt: after(T0, 100), blockedBefore: false });
 
       const second = await store.hit('login_account_ip', key, WINDOW, after(T0, 60));
-      expect(second).toEqual({ count: 2, blockedUntil: null, windowEndsAt: after(T0, 100) });
+      expect(second).toEqual({ count: 2, blockedUntil: null, windowEndsAt: after(T0, 100), blockedBefore: false });
     });
 
     it('rolls over at the exact window end, anchoring the new window at that hit', async () => {
@@ -54,7 +54,7 @@ describe('PostgresAbuseCounterStore (integration, ADR 36)', () => {
       await store.hit('login_account_ip', key, WINDOW, after(T0, 99));
 
       const rolled = await store.hit('login_account_ip', key, WINDOW, after(T0, 100));
-      expect(rolled).toEqual({ count: 1, blockedUntil: null, windowEndsAt: after(T0, 200) });
+      expect(rolled).toEqual({ count: 1, blockedUntil: null, windowEndsAt: after(T0, 200), blockedBefore: false });
     });
 
     it('keeps counters of different scopes and keys apart', async () => {
@@ -77,7 +77,7 @@ describe('PostgresAbuseCounterStore (integration, ADR 36)', () => {
       expect(second.blockedUntil).toBeNull();
 
       const third = await store.hit('login_account_ip', key, LOCKOUT, after(T0, 2));
-      expect(third).toEqual({ count: 3, blockedUntil: after(T0, 502), windowEndsAt: after(T0, 100) });
+      expect(third).toEqual({ count: 3, blockedUntil: after(T0, 502), windowEndsAt: after(T0, 100), blockedBefore: false });
       expect((await row())?.expires_at).toEqual(after(T0, 502));
     });
 
@@ -97,7 +97,7 @@ describe('PostgresAbuseCounterStore (integration, ADR 36)', () => {
       for (let i = 0; i < 3; i++) await store.hit('login_account_ip', key, LOCKOUT, T0);
 
       const rolled = await store.hit('login_account_ip', key, LOCKOUT, after(T0, 150));
-      expect(rolled).toEqual({ count: 1, blockedUntil: after(T0, 500), windowEndsAt: after(T0, 250) });
+      expect(rolled).toEqual({ count: 1, blockedUntil: after(T0, 500), windowEndsAt: after(T0, 250), blockedBefore: true });
       expect((await row())?.expires_at).toEqual(after(T0, 500));
     });
 
@@ -106,7 +106,7 @@ describe('PostgresAbuseCounterStore (integration, ADR 36)', () => {
       for (let i = 0; i < 3; i++) await store.hit('login_account_ip', key, policy, T0);
 
       const next = await store.hit('login_account_ip', key, policy, after(T0, 200));
-      expect(next).toEqual({ count: 1, blockedUntil: null, windowEndsAt: after(T0, 1200) });
+      expect(next).toEqual({ count: 1, blockedUntil: null, windowEndsAt: after(T0, 1200), blockedBefore: false });
       expect((await row())?.expires_at).toEqual(after(T0, 1200));
     });
 

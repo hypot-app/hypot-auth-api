@@ -65,9 +65,9 @@ export class AbuseGuard {
   async beginLoginAttempt(client: ClientRef, email: string, ip: ClientIp): Promise<LoginAttemptDecision> {
     const now = this.deps.clock.now();
     const pair = await this.hit('login_account_ip', [client.key, email, ip.key], now);
-    if (this.exceeds('login_account_ip', pair, now)) return 'blocked';
+    if (this.exceeds('login_account_ip', pair)) return 'blocked';
     const account = await this.hit('login_account', [client.key, email], now);
-    return this.exceeds('login_account', account, now) ? 'blocked' : 'allowed';
+    return this.exceeds('login_account', account) ? 'blocked' : 'allowed';
   }
 
   /** Refunds the pair counter only: the global one must survive, or an attacker with one valid login erases it. */
@@ -78,14 +78,11 @@ export class AbuseGuard {
 
   /**
    * True when this hit must not pass. The hit that reaches the limit starts the block but is still
-   * the last allowed one. A block older than this hit (blockedUntil is not `now + blockSeconds`) blocks
-   * even when the count restarted in a new window.
+   * the last allowed one. A block that predates this hit (`blockedBefore`, decided by the store from the
+   * previous row) blocks even when the count restarted in a new window.
    */
-  private exceeds(scope: Scope, result: HitResult, now: Date): boolean {
-    const { limit, blockSeconds } = this.deps.policies[scope];
-    if (result.count > limit) return true;
-    if (result.blockedUntil === null) return false;
-    return result.blockedUntil.getTime() !== now.getTime() + (blockSeconds ?? 0) * 1000;
+  private exceeds(scope: Scope, result: HitResult): boolean {
+    return result.count > this.deps.policies[scope].limit || result.blockedBefore;
   }
 
   private async hitIp(scope: IpOnlyScope | ClientIpScope, parts: string[]) {

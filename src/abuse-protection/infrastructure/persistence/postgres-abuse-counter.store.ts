@@ -15,18 +15,32 @@ const NEW_BLOCK = `CASE
 END`;
 const NEW_WINDOW_END = `CASE WHEN ${ROLLED} THEN $7::timestamptz ELSE c."window_start" + $4::int * interval '1 second' END`;
 
+// `prev` locks the existing row and reads whether its lockout had not ended at $3, so the flag comes from the
+// PREVIOUS row (RETURNING only sees the new one). `gate` aggregates it, and the INSERT selects FROM `gate`: that
+// data dependency makes Postgres finish the lock-and-read before the upsert touches the row. Concurrent hits
+// wait on the lock and read the latest committed row. A row that does not exist yet has nothing to lock; two
+// first hits racing there can both read "not locked", but the loser's count is already past a limit of 1.
 const HIT_SQL = `
-  INSERT INTO "abuse_counters" AS c ("scope", "key", "window_start", "count", "blocked_until", "expires_at")
-  VALUES ($1, $2, $3::timestamptz, 1,
-    CASE WHEN $5::int <= 1 THEN $6::timestamptz END,
-    GREATEST($7::timestamptz, CASE WHEN $5::int <= 1 THEN $6::timestamptz END))
-  ON CONFLICT ("scope", "key") DO UPDATE SET
-    "window_start" = CASE WHEN ${ROLLED} THEN $3::timestamptz ELSE c."window_start" END,
-    "count" = ${NEW_COUNT},
-    "blocked_until" = ${NEW_BLOCK},
-    "expires_at" = GREATEST(${NEW_WINDOW_END}, ${NEW_BLOCK})
-  RETURNING c."count" AS "count", c."blocked_until" AS "blockedUntil",
-    c."window_start" + $4::int * interval '1 second' AS "windowEndsAt"`;
+  WITH prev AS (
+    SELECT "blocked_until" > $3::timestamptz AS "locked" FROM "abuse_counters"
+    WHERE "scope" = $1::text AND "key" = $2::bytea FOR UPDATE
+  ),
+  gate AS (SELECT COALESCE(bool_or("locked"), false) AS "blocked" FROM prev),
+  hit AS (
+    INSERT INTO "abuse_counters" AS c ("scope", "key", "window_start", "count", "blocked_until", "expires_at")
+    SELECT $1::text, $2::bytea, $3::timestamptz, 1,
+      CASE WHEN $5::int <= 1 THEN $6::timestamptz END,
+      GREATEST($7::timestamptz, CASE WHEN $5::int <= 1 THEN $6::timestamptz END)
+    FROM gate
+    ON CONFLICT ("scope", "key") DO UPDATE SET
+      "window_start" = CASE WHEN ${ROLLED} THEN $3::timestamptz ELSE c."window_start" END,
+      "count" = ${NEW_COUNT},
+      "blocked_until" = ${NEW_BLOCK},
+      "expires_at" = GREATEST(${NEW_WINDOW_END}, ${NEW_BLOCK})
+    RETURNING c."count" AS "count", c."blocked_until" AS "blockedUntil",
+      c."window_start" + $4::int * interval '1 second' AS "windowEndsAt"
+  )
+  SELECT hit."count", hit."blockedUntil", hit."windowEndsAt", gate."blocked" AS "blockedBefore" FROM hit, gate`;
 
 // ctid picks the rows without a sort; the sweeper repeats until a batch comes back short.
 const DELETE_EXPIRED_SQL = `
@@ -50,14 +64,14 @@ export class PostgresAbuseCounterStore implements AbuseCounterStore, ExpiredCoun
     const { limit, windowSeconds, blockSeconds } = policy;
     const blockEnd = blockSeconds === null ? null : new Date(now.getTime() + blockSeconds * 1000);
     const windowEnd = new Date(now.getTime() + windowSeconds * 1000);
-    // An INSERT answers with the rows themselves (an UPDATE would answer [rows, affected]).
-    const rows: { count: number; blockedUntil: Date | null; windowEndsAt: Date }[] = await this.dataSource.manager.query(
+    // A SELECT answers with the rows themselves (a bare UPDATE would answer [rows, affected]).
+    const rows: { count: number; blockedUntil: Date | null; windowEndsAt: Date; blockedBefore: boolean }[] = await this.dataSource.manager.query(
       HIT_SQL,
       [scope, key, now, windowSeconds, limit, blockEnd, windowEnd],
     );
     const [row] = rows;
     if (row === undefined) throw new Error('abuse counter upsert returned no row');
-    return { count: row.count, blockedUntil: row.blockedUntil, windowEndsAt: row.windowEndsAt };
+    return { count: row.count, blockedUntil: row.blockedUntil, windowEndsAt: row.windowEndsAt, blockedBefore: row.blockedBefore };
   }
 
   async deleteExpired(now: Date, limit: number): Promise<number> {

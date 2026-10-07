@@ -8,6 +8,11 @@ export interface HitResult {
   blockedUntil: Date | null;
   /** End of the current window; the source of `Retry-After`. */
   windowEndsAt: Date;
+  /**
+   * True when the counter was already locked before this hit (the previous row's lockout had not ended
+   * at `now`). A hit that only starts the lockout reports false: it is the last allowed one.
+   */
+  blockedBefore: boolean;
 }
 
 /** Port for the fixed-window counters of ADR 36. */
