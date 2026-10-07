@@ -1,4 +1,3 @@
-import { DEFAULT_POLICIES } from '../../abuse-protection/domain/policy';
 import { ConfigError, loadConfig } from './app-config';
 
 const validEnv = {
@@ -20,7 +19,6 @@ describe('loadConfig', () => {
       smtp: { host: 'smtp.example.com', port: 587, secure: false, auth: undefined },
       mailFrom: 'no-reply@example.com',
       trustProxy: false,
-      abusePolicies: DEFAULT_POLICIES,
     });
   });
 
@@ -201,25 +199,9 @@ describe('loadConfig: TRUST_PROXY (ADR 37)', () => {
   );
 });
 
-describe('loadConfig: ABUSE_<SCOPE>_* (ADR 36)', () => {
-  it('overrides one field and keeps the other defaults', () => {
-    const { abusePolicies } = loadConfig({ ...validEnv, ABUSE_LOGIN_ACCOUNT_IP_LIMIT: '3' });
-    expect(abusePolicies.login_account_ip).toEqual({ limit: 3, windowSeconds: 900, blockSeconds: 900 });
-    expect(abusePolicies.email_account).toEqual(DEFAULT_POLICIES.email_account);
-  });
-
-  it('overrides window and block seconds', () => {
-    const { abusePolicies } = loadConfig({
-      ...validEnv,
-      ABUSE_LOGIN_ACCOUNT_WINDOW_SECONDS: '7200',
-      ABUSE_LOGIN_ACCOUNT_BLOCK_SECONDS: '60',
-      ABUSE_REFRESH_IP_WINDOW_SECONDS: '30',
-    });
-    expect(abusePolicies.login_account).toEqual({ limit: 50, windowSeconds: 7200, blockSeconds: 60 });
-    expect(abusePolicies.refresh_ip).toEqual({ limit: 60, windowSeconds: 30, blockSeconds: null });
-  });
-
-  it.each(['0', '-5', '1.5', 'abc', ''])('rejects %p as a limit', (value) => {
-    expect(() => loadConfig({ ...validEnv, ABUSE_EMAIL_IP_LIMIT: value })).toThrow('ABUSE_EMAIL_IP_LIMIT');
+describe('loadConfig: ABUSE_<SCOPE>_*', () => {
+  it('leaves ABUSE_* to abuse-protection, so the platform neither parses nor exposes them', () => {
+    const config = loadConfig({ ...validEnv, ABUSE_EMAIL_IP_LIMIT: '0' });
+    expect(Object.keys(config)).not.toContain('abusePolicies');
   });
 });

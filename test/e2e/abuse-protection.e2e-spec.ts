@@ -34,7 +34,7 @@ describe('abuse protection wiring (e2e)', () => {
     app = await createTestApp({
       databaseUrl: db.url,
       controllers: [ConfirmProbeController],
-      config: { abusePolicies: resolvePolicies({ confirm_ip: { limit: 1 } }) },
+      abusePolicies: resolvePolicies({ confirm_ip: { limit: 1 } }),
     });
     const registered = await app.get(RegisterAppUseCase).execute({
       name: 'A',

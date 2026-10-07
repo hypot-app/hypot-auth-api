@@ -1,7 +1,5 @@
 import { isIP } from 'node:net';
 import { z } from 'zod';
-import { resolvePolicies, type PolicyOverrides, type PolicyTable } from '../../abuse-protection/domain/policy';
-import { SCOPES, type Scope } from '../../abuse-protection/domain/scope';
 
 export const APP_CONFIG = Symbol('AppConfig');
 
@@ -39,42 +37,6 @@ const trustProxy = z
     return /^\d+$/.test(value) ? Number(value) : value;
   });
 
-const positiveInt = z
-  .string()
-  .regex(/^[1-9]\d*$/, 'must be a positive integer')
-  .transform(Number)
-  .optional();
-
-const POLICY_FIELDS = [
-  ['LIMIT', 'limit'],
-  ['WINDOW_SECONDS', 'windowSeconds'],
-  ['BLOCK_SECONDS', 'blockSeconds'],
-] as const;
-
-const abuseEnvKey = (scope: Scope, suffix: string): string => `ABUSE_${scope.toUpperCase()}_${suffix}`;
-
-/** Only lockout scopes have a block length, so `_BLOCK_SECONDS` exists for them alone. */
-const BLOCKING_SCOPES: readonly Scope[] = ['login_account_ip', 'login_account'];
-
-const abuseEnvShape = Object.fromEntries(
-  SCOPES.flatMap((scope) =>
-    POLICY_FIELDS.filter(([, field]) => field !== 'blockSeconds' || BLOCKING_SCOPES.includes(scope)).map(
-      ([suffix]) => [abuseEnvKey(scope, suffix), positiveInt] as const,
-    ),
-  ),
-);
-
-function readPolicyOverrides(values: Record<string, unknown>): PolicyOverrides {
-  const overrides: PolicyOverrides = {};
-  for (const scope of SCOPES) {
-    for (const [suffix, field] of POLICY_FIELDS) {
-      const value = values[abuseEnvKey(scope, suffix)];
-      if (typeof value === 'number') overrides[scope] = { ...overrides[scope], [field]: value };
-    }
-  }
-  return overrides;
-}
-
 const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -88,7 +50,6 @@ const envSchema = z
     SMTP_PASS: z.string().min(1).optional(),
     MAIL_FROM: z.string().min(1),
     TRUST_PROXY: trustProxy,
-    ...abuseEnvShape,
   })
   .superRefine((env, ctx) => {
     // Parsed, so this guard does not depend on the base rule's scheme regex.
@@ -123,7 +84,6 @@ export interface AppConfig {
   mailFrom: string;
   /** Value for Express `trust proxy` (ADR 37). Never `true`. */
   trustProxy: boolean | number | string;
-  abusePolicies: PolicyTable;
 }
 
 /** Thrown at startup when the environment is invalid. Never includes values. */
@@ -159,6 +119,5 @@ export function loadConfig(env: Record<string, string | undefined>): AppConfig {
     },
     mailFrom: values.MAIL_FROM,
     trustProxy: values.TRUST_PROXY,
-    abusePolicies: resolvePolicies(readPolicyOverrides(values)),
   };
 }

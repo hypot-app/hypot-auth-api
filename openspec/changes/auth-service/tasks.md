@@ -167,7 +167,7 @@ Real forks: none. Items 8 and 9 are the closest; both follow the specs, and the 
 
 **U13d** `feat/u13d-abuse-sweeper-module` (13.10 plus the `429`/`503` filter and wiring tests)
 
-- [x] 13.10 RED/GREEN: `AbuseCounterSweeper` deletes expired rows every 5 min in batches of 1,000, started by `main.ts` only (outbox-poller pattern), awaits its drain on shutdown; `AbuseProtectionModule` exports the guard. Int test: expired rows deleted, live rows kept, batch loop. Check with `rg` that `abuse-protection` imports only `shared-kernel`.
+- [x] 13.10 RED/GREEN: `AbuseCounterSweeper` deletes expired rows every 5 min in batches of 1,000, started by `main.ts` only (outbox-poller pattern), awaits its drain on shutdown; `AbuseProtectionModule` exports the guard. Int test: expired rows deleted, live rows kept, batch loop. Check with `rg` the dependency direction (corrected in U13h; the original "imports only `shared-kernel`" note was wrong): `rg -n "abuse-protection" src/platform -g '!*.spec.ts'` and `rg -n "platform" src/abuse-protection` both print nothing, so `platform` does not import `abuse-protection` and the reverse holds too. Outside itself `abuse-protection` imports `shared-kernel` and `app-registry/http/cors-grant` (the CORS grant of the `429`/`503` filter, U13e). Only the composition root `app.module.ts` imports `AbuseProtectionModule`.
 
 **U13e** `feat/u13e-abuse-guard-hardening` (review fixes W3 and W2 of the U13 verify; stacked on U13d)
 
@@ -181,6 +181,10 @@ Real forks: none. Items 8 and 9 are the closest; both follow the specs, and the 
 **U13g** `feat/u13g-login-pre-count` (review fix W1 of the U13 verify; stacked on U13f)
 
 - [x] 13.14 RED/GREEN (W1): the login lockout counts BEFORE bcrypt. `AbuseGuard.beginLoginAttempt(client, email, ip): 'allowed' | 'blocked'` hits the pair counter, then the global counter unless the pair is already blocked, one atomic upsert each; exactly `limit` attempts pass, and a block older than the hit (it survives a window rollover) or a re-lock inside the same window blocks. `recordLoginSuccess` refunds the pair only; the global counter is not decremented (assumption in ADR 36 and the spec: it counts attempts, and a decrement would reopen the race). `isLoginBlocked`, `recordLoginFailure` and the store's `blockedUntil` are removed. Tests: 12 parallel attempts on one pair give exactly 5 allowed (unit and on the real table), 60 parallel from many IPs give exactly 50, blocked pair attempts do not charge the account. Mutations: non-atomic hit in the fake (2 fail), allow an older lock (1), tripping hit blocked (5), `>=` (5), global hit while the pair is blocked (1), reset the global counter (1), fail open (6).
+
+**U13h** `feat/u13h-abuse-config-ownership` (review fix W5 of the U13 verify; stacked on U13g)
+
+- [x] 13.16 RED/GREEN (W5): `ABUSE_<SCOPE>_*` parsing moves out of `platform/config` into `abuse-protection/infrastructure/abuse-config.ts` (`loadAbusePolicies(env)`, `AbuseConfigError`). `AbuseProtectionModule` provides `ABUSE_POLICIES` from a raw-env provider (`ABUSE_ENV`, the `SIGNING_KEYS_SOURCE` pattern of `token-lifecycle`), parsed at boot so a bad value stops the app. `AppConfig` loses `abusePolicies`; `TRUST_PROXY` stays in platform because `configureApp` needs it. The existing config tests move with the code; new tests: boot fails on a bad value, a block length is ignored for scopes without a lockout, the platform no longer parses `ABUSE_*`. Mutations: ignore the env (3 fail), never throw (6), provider ignores the env (2), accept a block length for every scope (1).
 
 ## U14 Session-auth A: sessions and login
 
