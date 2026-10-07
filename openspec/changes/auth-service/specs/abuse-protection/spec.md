@@ -8,23 +8,28 @@ Postgres-backed rate limiting and temporary lockout for the credential endpoints
 
 ### Requirement: Two-counter login lockout
 
-The system MUST track failed logins with two counters, following NIST SP 800-63B and avoiding targeted-lockout DoS:
+The system MUST count login attempts with two counters, following NIST SP 800-63B and avoiding targeted-lockout DoS:
 
 | Counter | Key | Default | Effect |
 |---------|-----|---------|--------|
-| Pair | (app, account, client IP) | 5 failures / 15 min | That IP is blocked from that account for 15 min |
-| Global | (app, account) | 50 failures / 1 h from any IP | The account is locked for 15 min |
+| Pair | (app, account, client IP) | 5 attempts / 15 min | The 6th and later attempts are blocked; that IP is blocked from that account for 15 min |
+| Global | (app, account) | 50 attempts / 1 h from any IP | The 51st and later attempts are blocked; the account is locked for 15 min |
 
-Every threshold, window and block duration MUST be configurable by environment settings with these defaults. Counters MUST also be kept for unknown emails (keyed by email hash), so lockout cannot reveal whether an account exists. While blocked or locked, even the correct password MUST fail, and attempts made during a block MUST NOT extend it. The same counters apply to `POST /password/change`: a wrong current password is a failed login for both counters, and while the (account, IP) pair is blocked or the account is locked, change MUST fail with the same `invalid_current_password` error even for the correct password, without running bcrypt. A successful login MUST reset the pair counter and MUST NOT reset the global counter (assumption).
+Every threshold, window and block duration MUST be configurable by environment settings with these defaults. Counters MUST also be kept for unknown emails (keyed by email hash), so lockout cannot reveal whether an account exists. While blocked or locked, even the correct password MUST fail, and attempts made during a block MUST NOT extend it. The same counters apply to `POST /password/change`: a wrong current password is a failed login for both counters, and while the (account, IP) pair is blocked or the account is locked, change MUST fail with the same `invalid_current_password` error even for the correct password, without running bcrypt. An attempt MUST be counted atomically BEFORE the password is checked, so parallel attempts cannot all pass a check made before any of them is counted. A successful login MUST reset the pair counter and MUST NOT reset or decrement the global counter (assumption: the global counter counts attempts rather than failures, because a decrement would reopen the race; successes are rare against the limit).
 
 #### Scenario: Pair block
-- GIVEN IP X made 5 failed logins for account U in 15 minutes
+- GIVEN IP X made 5 login attempts for account U in 15 minutes
 - WHEN IP X tries U again, even with the correct password
 - THEN the generic login failure is returned
 - AND IP Y can still log in to U with the correct password
 
+#### Scenario: Parallel attempts
+- GIVEN 12 simultaneous login attempts for account U from IP X
+- THEN exactly 5 are allowed to check the password
+- AND the other 7 get the generic login failure without running bcrypt
+
 #### Scenario: Global lock
-- GIVEN 50 failures against U in 1 hour from many IPs
+- GIVEN 50 login attempts against U in 1 hour from many IPs
 - WHEN any IP logs in to U with the correct password
 - THEN the generic login failure is returned until the 15 min lock ends
 

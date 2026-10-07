@@ -1,4 +1,4 @@
-import type { AbuseCounterStore, CounterRef, HitResult } from '../../src/abuse-protection/domain/abuse-counter.store';
+import type { AbuseCounterStore, HitResult } from '../../src/abuse-protection/domain/abuse-counter.store';
 import type { Policy } from '../../src/abuse-protection/domain/policy';
 import type { Scope } from '../../src/abuse-protection/domain/scope';
 
@@ -32,14 +32,6 @@ export class InMemoryAbuseCounterStore implements AbuseCounterStore {
       blockedUntil: blockedUntil === null ? null : new Date(blockedUntil),
       windowEndsAt: new Date(windowStart + policy.windowSeconds * 1000),
     };
-  }
-
-  async blockedUntil(counters: readonly CounterRef[], now: Date): Promise<Date | null> {
-    this.assertAvailable();
-    const ends = counters
-      .map((c) => this.rows.get(`${c.scope}:${c.key.toString('hex')}`)?.blockedUntil ?? null)
-      .filter((end): end is number => end !== null && end > now.getTime());
-    return ends.length === 0 ? null : new Date(Math.max(...ends));
   }
 
   async reset(scope: Scope, key: Buffer): Promise<void> {

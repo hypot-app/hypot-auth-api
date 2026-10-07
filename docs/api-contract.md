@@ -73,8 +73,8 @@ Texts: the fixed `message` strings are listed per endpoint where they are fixed.
 | Scope | Applies to | Over the limit | Defaults (configurable, ADR 36) |
 |-------|------------|----------------|--------------------------------|
 | Login per IP | login | Generic login `401`, never `429` | 100 / 15 min |
-| Login pair (account, IP) | login, change (wrong current password) | Generic `401` for that IP (change: `400 invalid_current_password`) | 5 failures / 15 min, block 15 min |
-| Login global (account) | login, change | Generic `401` from any IP (change: same `400`) | 50 failures / 1 h, lock 15 min |
+| Login pair (account, IP) | login, change (wrong current password) | Generic `401` for that IP (change: `400 invalid_current_password`) | 5 attempts / 15 min (counted before the password check), block 15 min |
+| Login global (account) | login, change | Generic `401` from any IP (change: same `400`) | 50 attempts / 1 h, lock 15 min |
 | Email per IP | signup, resend, forgot | `429` + `Retry-After` | 20 / 1 h |
 | Reset per IP | reset | `429` + `Retry-After` | 20 / 1 h |
 | Confirm per IP | confirm | `429` + `Retry-After` | 20 / 1 h |

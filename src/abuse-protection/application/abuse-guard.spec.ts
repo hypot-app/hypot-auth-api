@@ -22,78 +22,122 @@ function setup(overrides: PolicyOverrides = {}) {
   return { store, clock, guard };
 }
 
-describe('AbuseGuard: login lockout (two counters)', () => {
-  const fail = async (guard: AbuseGuard, times: number, email = ANA, from = IP_X) => {
-    for (let i = 0; i < times; i++) await guard.recordLoginFailure(APP, email, from);
+describe('AbuseGuard: login lockout (atomic pre-count)', () => {
+  /** Runs `times` attempts one after another and returns every decision. */
+  const attempts = async (guard: AbuseGuard, times: number, email = ANA, from = IP_X) => {
+    const decisions: string[] = [];
+    for (let i = 0; i < times; i++) decisions.push(await guard.beginLoginAttempt(APP, email, from));
+    return decisions;
   };
 
-  it('blocks the pair after 5 failures while another IP still passes', async () => {
+  it('allows 5 attempts from a pair, blocks the 6th, and still lets another IP or email in', async () => {
     const { guard } = setup();
-    await fail(guard, 4);
-    expect(await guard.isLoginBlocked(APP, ANA, IP_X)).toBe(false);
+    expect(await attempts(guard, 5)).toEqual(Array(5).fill('allowed'));
 
-    await fail(guard, 1);
-
-    expect(await guard.isLoginBlocked(APP, ANA, IP_X)).toBe(true);
-    expect(await guard.isLoginBlocked(APP, ANA, IP_Y)).toBe(false);
-    expect(await guard.isLoginBlocked(APP, 'bob@example.com', IP_X)).toBe(false);
+    expect(await guard.beginLoginAttempt(APP, ANA, IP_X)).toBe('blocked');
+    expect(await guard.beginLoginAttempt(APP, ANA, IP_Y)).toBe('allowed');
+    expect(await guard.beginLoginAttempt(APP, 'bob@example.com', IP_X)).toBe('allowed');
   });
 
-  it('locks the account for every IP after 50 failures from many IPs', async () => {
+  it('lets exactly the limit through when attempts for one pair arrive in parallel', async () => {
     const { guard } = setup();
-    for (let i = 1; i <= 50; i++) await guard.recordLoginFailure(APP, ANA, ip(`198.51.100.${i}`));
 
-    expect(await guard.isLoginBlocked(APP, ANA, ip('192.0.2.77'))).toBe(true);
+    const decisions = await Promise.all(Array.from({ length: 12 }, () => guard.beginLoginAttempt(APP, ANA, IP_X)));
+
+    expect(decisions.filter((d) => d === 'allowed')).toHaveLength(5);
+    expect(decisions.filter((d) => d === 'blocked')).toHaveLength(7);
   });
 
-  it('lifts the lock when its 15 minutes pass', async () => {
+  it('locks the account for every IP after 50 attempts from many IPs, however parallel', async () => {
+    const { guard } = setup();
+
+    const decisions = await Promise.all(
+      Array.from({ length: 60 }, (_, i) => guard.beginLoginAttempt(APP, ANA, ip(`198.51.100.${i}`))),
+    );
+
+    expect(decisions.filter((d) => d === 'allowed')).toHaveLength(50);
+    expect(await guard.beginLoginAttempt(APP, ANA, ip('192.0.2.77'))).toBe('blocked');
+  });
+
+  it('lifts a pair block when its 15 minutes pass', async () => {
     const { guard, clock } = setup();
-    await fail(guard, 5);
+    await attempts(guard, 5);
 
     clock.advanceMs(15 * MINUTE_MS - 1);
-    expect(await guard.isLoginBlocked(APP, ANA, IP_X)).toBe(true);
+    expect(await guard.beginLoginAttempt(APP, ANA, IP_X)).toBe('blocked');
     clock.advanceMs(1);
-    expect(await guard.isLoginBlocked(APP, ANA, IP_X)).toBe(false);
+    expect(await guard.beginLoginAttempt(APP, ANA, IP_X)).toBe('allowed');
   });
 
   it('does not extend a block with attempts made during it', async () => {
     const { guard, clock } = setup();
-    await fail(guard, 5);
+    await attempts(guard, 5);
     clock.advanceMs(10 * MINUTE_MS);
-    await fail(guard, 3);
+    await attempts(guard, 3);
 
     clock.advanceMs(5 * MINUTE_MS);
-    expect(await guard.isLoginBlocked(APP, ANA, IP_X)).toBe(false);
+    expect(await guard.beginLoginAttempt(APP, ANA, IP_X)).toBe('allowed');
   });
 
   it('blocks an email that has no account exactly like a real one: only the key matters', async () => {
     const { guard } = setup();
-    await fail(guard, 5, 'nobody@example.com');
-    expect(await guard.isLoginBlocked(APP, 'nobody@example.com', IP_X)).toBe(true);
+    await attempts(guard, 5, 'nobody@example.com');
+    expect(await guard.beginLoginAttempt(APP, 'nobody@example.com', IP_X)).toBe('blocked');
   });
 
   it('honors a configured pair threshold of 3', async () => {
     const { guard } = setup({ login_account_ip: { limit: 3 } });
-    await fail(guard, 3);
-    expect(await guard.isLoginBlocked(APP, ANA, IP_X)).toBe(true);
+    expect(await attempts(guard, 4)).toEqual(['allowed', 'allowed', 'allowed', 'blocked']);
   });
 
-  it('resets the pair counter on success but never the global one', async () => {
+  it('refunds the pair on success but never the global counter', async () => {
     const { guard } = setup({ login_account: { limit: 6 } });
-    await fail(guard, 4);
+    await attempts(guard, 4);
     await guard.recordLoginSuccess(APP, ANA, IP_X);
 
-    // The pair counter restarted, so one more failure is far from 5. The global counter is at 5, then 6.
-    await fail(guard, 1);
-    expect(await guard.isLoginBlocked(APP, ANA, IP_X)).toBe(false);
-    await fail(guard, 1);
-    expect(await guard.isLoginBlocked(APP, ANA, IP_Y)).toBe(true);
+    // The pair restarted from zero, the global counter kept its 4: two more fit, the third from anywhere does not.
+    expect(await guard.beginLoginAttempt(APP, ANA, IP_X)).toBe('allowed');
+    expect(await guard.beginLoginAttempt(APP, ANA, IP_Y)).toBe('allowed');
+    expect(await guard.beginLoginAttempt(APP, ANA, IP_Y)).toBe('blocked');
+  });
+
+  it('does not charge the account for attempts a blocked pair keeps making', async () => {
+    const { guard } = setup({ login_account: { limit: 7 } });
+    await attempts(guard, 5);
+    await attempts(guard, 20);
+
+    expect(await guard.beginLoginAttempt(APP, ANA, IP_Y)).toBe('allowed');
+    expect(await guard.beginLoginAttempt(APP, ANA, IP_Y)).toBe('allowed');
+    expect(await guard.beginLoginAttempt(APP, ANA, IP_Y)).toBe('blocked');
+  });
+
+  it('keeps a lock that outlives the window it was set in', async () => {
+    const { guard, clock } = setup({ login_account: { limit: 3 } });
+    await guard.beginLoginAttempt(APP, ANA, IP_X);
+    clock.advanceMs(46 * MINUTE_MS);
+    await guard.beginLoginAttempt(APP, ANA, IP_X);
+    await guard.beginLoginAttempt(APP, ANA, IP_Y);
+
+    // At minute 60 the global window rolled (count 1), but the lock runs until minute 61.
+    clock.advanceMs(14 * MINUTE_MS);
+    expect(await guard.beginLoginAttempt(APP, ANA, ip('192.0.2.1'))).toBe('blocked');
+    clock.advanceMs(MINUTE_MS);
+    expect(await guard.beginLoginAttempt(APP, ANA, ip('192.0.2.2'))).toBe('allowed');
+  });
+
+  it('blocks the attempt that would re-lock an account right after a lock ended inside the same window', async () => {
+    const { guard, clock } = setup({ login_account: { limit: 2, blockSeconds: 60 } });
+    await guard.beginLoginAttempt(APP, ANA, IP_X);
+    await guard.beginLoginAttempt(APP, ANA, IP_Y);
+
+    clock.advanceMs(61_000);
+    expect(await guard.beginLoginAttempt(APP, ANA, ip('192.0.2.1'))).toBe('blocked');
   });
 
   it('counts one email in different apps separately', async () => {
     const { guard } = setup();
-    for (let i = 0; i < 5; i++) await guard.recordLoginFailure(ClientRef.resolved('app-a'), ANA, IP_X);
-    expect(await guard.isLoginBlocked(ClientRef.resolved('app-b'), ANA, IP_X)).toBe(false);
+    await attempts(guard, 6);
+    expect(await guard.beginLoginAttempt(ClientRef.resolved('app-b'), ANA, IP_X)).toBe('allowed');
   });
 });
 
@@ -173,7 +217,7 @@ describe('AbuseGuard: the login IP limit has no way to produce a 429', () => {
       // @ts-expect-error a raw client_id is not a ClientRef
       guard.checkLoginIp('raw-client-id', IP_X),
       // @ts-expect-error a raw client_id is not a ClientRef
-      guard.isLoginBlocked('raw-client-id', ANA, IP_X),
+      guard.beginLoginAttempt('raw-client-id', ANA, IP_X),
       // @ts-expect-error a raw client_id is not a ClientRef
       guard.checkEmailAccount('raw-client-id', ANA),
     ];
@@ -203,8 +247,7 @@ describe('AbuseGuard: a store failure fails closed', () => {
     ['checkClientIp', 'email_ip', (g) => g.checkClientIp('email_ip', APP, IP_X)],
     ['checkLoginIp', 'login_ip', (g) => g.checkLoginIp(APP, IP_X)],
     ['checkEmailAccount', 'email_account', (g) => g.checkEmailAccount(APP, ANA)],
-    ['isLoginBlocked', 'login_account_ip', (g) => g.isLoginBlocked(APP, ANA, IP_X)],
-    ['recordLoginFailure', 'login_account_ip', (g) => g.recordLoginFailure(APP, ANA, IP_X)],
+    ['beginLoginAttempt', 'login_account_ip', (g) => g.beginLoginAttempt(APP, ANA, IP_X)],
     ['recordLoginSuccess', 'login_account_ip', (g) => g.recordLoginSuccess(APP, ANA, IP_X)],
   ];
 

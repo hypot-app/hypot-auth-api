@@ -10,17 +10,10 @@ export interface HitResult {
   windowEndsAt: Date;
 }
 
-export interface CounterRef {
-  scope: Scope;
-  key: Buffer;
-}
-
 /** Port for the fixed-window counters of ADR 36. */
 export interface AbuseCounterStore {
   /** Atomically counts one event. Reaching `policy.limit` starts a lockout when the policy has a block length. */
   hit(scope: Scope, key: Buffer, policy: Policy, now: Date): Promise<HitResult>;
-  /** Latest end among the active lockouts of these counters, or null when none is active. */
-  blockedUntil(counters: readonly CounterRef[], now: Date): Promise<Date | null>;
   /** Forgets one counter; a missing one is not an error. */
   reset(scope: Scope, key: Buffer): Promise<void>;
 }

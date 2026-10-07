@@ -1,5 +1,5 @@
 import type { Clock } from '../../shared-kernel/clock';
-import type { AbuseCounterStore, CounterRef } from '../domain/abuse-counter.store';
+import type { AbuseCounterStore, HitResult } from '../domain/abuse-counter.store';
 import type { ClientIp } from '../domain/client-ip';
 import type { ClientRef } from '../domain/client-ref';
 import { CounterKey } from '../domain/counter-key';
@@ -9,6 +9,7 @@ import { TemporarilyUnavailable } from '../domain/temporarily-unavailable';
 
 export type IpDecision = { kind: 'allowed' } | { kind: 'ip_limited'; retryAfterSeconds: number };
 export type EmailDecision = { kind: 'allowed' } | { kind: 'account_suppressed' };
+export type LoginAttemptDecision = 'allowed' | 'blocked';
 
 /**
  * IP limits that answer `429`. `login_ip` is deliberately not here: login never returns a `429`
@@ -53,23 +54,38 @@ export class AbuseGuard {
     return count > this.deps.policies.email_account.limit ? { kind: 'account_suppressed' } : { kind: 'allowed' };
   }
 
-  /** True while the (account, IP) pair is blocked or the account is locked. */
-  async isLoginBlocked(client: ClientRef, email: string, ip: ClientIp): Promise<boolean> {
-    const counters: CounterRef[] = [this.pairRef(client, email, ip), this.accountRef(client, email)];
-    const until = await this.guarded('login_account_ip', () => this.deps.store.blockedUntil(counters, this.deps.clock.now()));
-    return until !== null;
+  /**
+   * Counts the attempt BEFORE the password is checked, with one atomic upsert per counter, so
+   * parallel attempts cannot all pass a read-only check (check-then-act). Exactly `limit` attempts
+   * are allowed per window; the rest are `blocked`. The account counter is skipped when the pair is
+   * already blocked, so an attacker hammering from a blocked IP cannot lock the account for everyone.
+   * Both counters therefore count attempts, not failures: a success refunds only the pair
+   * (`recordLoginSuccess`), and the account counter keeps it, because giving it back would reopen the race.
+   */
+  async beginLoginAttempt(client: ClientRef, email: string, ip: ClientIp): Promise<LoginAttemptDecision> {
+    const now = this.deps.clock.now();
+    const pair = await this.hit('login_account_ip', [client.key, email, ip.key], now);
+    if (this.exceeds('login_account_ip', pair, now)) return 'blocked';
+    const account = await this.hit('login_account', [client.key, email], now);
+    return this.exceeds('login_account', account, now) ? 'blocked' : 'allowed';
   }
 
-  /** Call after the password check failed. A hit made during a block does not extend it. */
-  async recordLoginFailure(client: ClientRef, email: string, ip: ClientIp): Promise<void> {
-    await this.hit('login_account_ip', [client.key, email, ip.key]);
-    await this.hit('login_account', [client.key, email]);
-  }
-
-  /** Resets the pair counter only: the global counter must survive, or an attacker with one valid login erases it. */
+  /** Refunds the pair counter only: the global one must survive, or an attacker with one valid login erases it. */
   async recordLoginSuccess(client: ClientRef, email: string, ip: ClientIp): Promise<void> {
-    const { scope, key } = this.pairRef(client, email, ip);
-    await this.guarded(scope, () => this.deps.store.reset(scope, key));
+    const key = CounterKey.of('login_account_ip', [client.key, email, ip.key]);
+    await this.guarded('login_account_ip', () => this.deps.store.reset('login_account_ip', key));
+  }
+
+  /**
+   * True when this hit must not pass. The hit that reaches the limit starts the block but is still
+   * the last allowed one. A block older than this hit (blockedUntil is not `now + blockSeconds`) blocks
+   * even when the count restarted in a new window.
+   */
+  private exceeds(scope: Scope, result: HitResult, now: Date): boolean {
+    const { limit, blockSeconds } = this.deps.policies[scope];
+    if (result.count > limit) return true;
+    if (result.blockedUntil === null) return false;
+    return result.blockedUntil.getTime() !== now.getTime() + (blockSeconds ?? 0) * 1000;
   }
 
   private async hitIp(scope: IpOnlyScope | ClientIpScope, parts: string[]) {
@@ -83,14 +99,6 @@ export class AbuseGuard {
   private hit(scope: Scope, parts: string[], now = this.deps.clock.now()) {
     const policy = this.deps.policies[scope];
     return this.guarded(scope, () => this.deps.store.hit(scope, CounterKey.of(scope, parts), policy, now));
-  }
-
-  private pairRef(client: ClientRef, email: string, ip: ClientIp): CounterRef {
-    return { scope: 'login_account_ip', key: CounterKey.of('login_account_ip', [client.key, email, ip.key]) };
-  }
-
-  private accountRef(client: ClientRef, email: string): CounterRef {
-    return { scope: 'login_account', key: CounterKey.of('login_account', [client.key, email]) };
   }
 
   private async guarded<T>(scope: Scope, operation: () => Promise<T>): Promise<T> {

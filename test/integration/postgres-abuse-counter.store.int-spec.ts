@@ -1,10 +1,14 @@
+import { AbuseGuard } from '../../src/abuse-protection/application/abuse-guard';
+import { ClientIp } from '../../src/abuse-protection/domain/client-ip';
+import { ClientRef } from '../../src/abuse-protection/domain/client-ref';
 import { CounterKey } from '../../src/abuse-protection/domain/counter-key';
-import type { Policy } from '../../src/abuse-protection/domain/policy';
+import { DEFAULT_POLICIES, type Policy } from '../../src/abuse-protection/domain/policy';
 import {
   AbuseCounterSchema,
   type AbuseCounterRow,
 } from '../../src/abuse-protection/infrastructure/persistence/abuse-counter.schema';
 import { PostgresAbuseCounterStore } from '../../src/abuse-protection/infrastructure/persistence/postgres-abuse-counter.store';
+import { FixedClock } from '../../src/shared-kernel/clock';
 import { TypeOrmUnitOfWork } from '../../src/platform/persistence/typeorm-unit-of-work';
 import { startTestDatabase, type TestDatabase } from '../support/postgres';
 
@@ -129,37 +133,6 @@ describe('PostgresAbuseCounterStore (integration, ADR 36)', () => {
     });
   });
 
-  describe('blockedUntil', () => {
-    const ref = { scope: 'login_account_ip' as const, key };
-
-    it('is null for no counters and for counters that were never hit', async () => {
-      expect(await store.blockedUntil([], T0)).toBeNull();
-      expect(await store.blockedUntil([ref], T0)).toBeNull();
-    });
-
-    it('is null while the count is below the limit', async () => {
-      await store.hit('login_account_ip', key, LOCKOUT, T0);
-      expect(await store.blockedUntil([ref], T0)).toBeNull();
-    });
-
-    it('returns the block end while active and null once it has expired', async () => {
-      for (let i = 0; i < 3; i++) await store.hit('login_account_ip', key, LOCKOUT, T0);
-      expect(await store.blockedUntil([ref], after(T0, 499))).toEqual(after(T0, 500));
-      expect(await store.blockedUntil([ref], after(T0, 500))).toBeNull();
-    });
-
-    it('returns the latest end among several counters and ignores counters not asked for', async () => {
-      const accountKey = CounterKey.of('login_account', ['app', 'ana@example.com']);
-      const otherKey = CounterKey.of('login_account', ['app', 'bob@example.com']);
-      for (let i = 0; i < 3; i++) await store.hit('login_account_ip', key, LOCKOUT, T0);
-      for (let i = 0; i < 3; i++) await store.hit('login_account', accountKey, LOCKOUT, after(T0, 10));
-      for (let i = 0; i < 3; i++) await store.hit('login_account', otherKey, LOCKOUT, after(T0, 90));
-
-      const asked = [ref, { scope: 'login_account' as const, key: accountKey }];
-      expect(await store.blockedUntil(asked, after(T0, 20))).toEqual(after(T0, 510));
-    });
-  });
-
   describe('reset', () => {
     it('forgets one counter and leaves the others', async () => {
       const other = CounterKey.of('login_account_ip', ['other']);
@@ -204,6 +177,19 @@ describe('PostgresAbuseCounterStore (integration, ADR 36)', () => {
       expect(await store.deleteExpired(later, 2)).toBe(2);
       expect(await store.deleteExpired(later, 2)).toBe(1);
       expect(await store.deleteExpired(later, 2)).toBe(0);
+    });
+  });
+
+  describe('login pre-count through the guard', () => {
+    it('lets exactly the limit through when attempts for one pair race on the real table', async () => {
+      const guard = new AbuseGuard({ store, policies: DEFAULT_POLICIES, clock: new FixedClock(T0) });
+      const ip = ClientIp.from('203.0.113.9', undefined);
+
+      const decisions = await Promise.all(
+        Array.from({ length: 12 }, () => guard.beginLoginAttempt(ClientRef.resolved('app'), 'ana@example.com', ip)),
+      );
+
+      expect(decisions.filter((d) => d === 'allowed')).toHaveLength(DEFAULT_POLICIES.login_account_ip.limit);
     });
   });
 });

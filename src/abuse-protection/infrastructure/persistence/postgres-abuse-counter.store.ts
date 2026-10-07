@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import type { AbuseCounterStore, CounterRef, ExpiredCounterPurge, HitResult } from '../../domain/abuse-counter.store';
+import type { AbuseCounterStore, ExpiredCounterPurge, HitResult } from '../../domain/abuse-counter.store';
 import type { Policy } from '../../domain/policy';
 import type { Scope } from '../../domain/scope';
 
@@ -26,13 +26,6 @@ const HIT_SQL = `
     "expires_at" = GREATEST(${NEW_WINDOW_END}, ${NEW_BLOCK})
   RETURNING c."count" AS "count", c."blocked_until" AS "blockedUntil",
     c."window_start" + $4::int * interval '1 second' AS "windowEndsAt"`;
-
-const BLOCKED_UNTIL_SQL = `
-  SELECT max(c."blocked_until") AS "until"
-  FROM "abuse_counters" c
-  JOIN unnest($2::text[], $3::text[]) AS t("scope", "key")
-    ON c."scope" = t."scope" AND c."key" = decode(t."key", 'hex')
-  WHERE c."blocked_until" > $1::timestamptz`;
 
 // ctid picks the rows without a sort; the sweeper repeats until a batch comes back short.
 const DELETE_EXPIRED_SQL = `
@@ -64,16 +57,6 @@ export class PostgresAbuseCounterStore implements AbuseCounterStore, ExpiredCoun
     const [row] = rows;
     if (row === undefined) throw new Error('abuse counter upsert returned no row');
     return { count: row.count, blockedUntil: row.blockedUntil, windowEndsAt: row.windowEndsAt };
-  }
-
-  async blockedUntil(counters: readonly CounterRef[], now: Date): Promise<Date | null> {
-    if (counters.length === 0) return null;
-    const rows: { until: Date | null }[] = await this.dataSource.manager.query(BLOCKED_UNTIL_SQL, [
-      now,
-      counters.map((counter) => counter.scope),
-      counters.map((counter) => counter.key.toString('hex')),
-    ]);
-    return rows[0]?.until ?? null;
   }
 
   async deleteExpired(now: Date, limit: number): Promise<number> {

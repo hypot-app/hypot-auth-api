@@ -156,7 +156,7 @@ started by `main.ts` deletes expired rows every 5 minutes. Each scope has `ABUSE
 The client IP is the TCP peer unless `TRUST_PROXY` (default `false`: a hop count, or a comma-separated list of
 `loopback`, `uniquelocal` or CIDRs; `true` is rejected) names the proxies in front of Auth. Behind a load balancer
 set it, or every user shares the proxy's address. IPv6 clients are keyed on their /64. If the counter store fails,
-credential endpoints answer `503 temporarily_unavailable` (logged once a minute at most, with the scope and driver message only), and the `429` and `503` answers are readable from an active app's origin. The guard exists; U14, U17 and U18 call it from the endpoints.
+credential endpoints answer `503 temporarily_unavailable` (logged once a minute at most, with the scope and driver message only), and the `429` and `503` answers are readable from an active app's origin. The login lockout counts the attempt before bcrypt (`beginLoginAttempt`), so parallel guesses cannot outrun it. The guard exists; U14, U17 and U18 call it from the endpoints.
 
 ### Signing keys and JWKS
 

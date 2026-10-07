@@ -82,11 +82,11 @@ Sources: `decisions-round8` (API-only), `round9` (limits in Phase 1), `round10` 
 
 1. Parse the body; resolve the client with origin binding (ADR 38). An unknown, inactive or origin-unbound client is **not** a `400`: the session-auth spec makes it the generic login failure. It skips the user lookup but still goes through steps 3 and 5. The limiter key for such a request uses the sentinel client `unknown` plus the IP, so random `client_id` values neither bypass `login_ip` nor grow the table without bound.
 2. Normalize the email. A malformed email skips the lookup but still runs step 5.
-3. Abuse checks (ADR 36): count the `login_ip` hit, then read the `login_account_ip` and `login_account` blocks. Limited or blocked: generic failure, **no bcrypt**. This is the one deliberate exception to "one bcrypt per attempt": skipping the hash is the point of limiting (CPU protection), and unknown emails are counted and blocked the same way, so the fast path reveals nothing about existence. The session-auth spec states this exception.
+3. Abuse checks (ADR 36): `checkLoginIp(client, ip)`, then `beginLoginAttempt(client, email, ip)`, which counts both lockout counters atomically before bcrypt. Limited or blocked: generic failure, **no bcrypt**. This is the one deliberate exception to "one bcrypt per attempt": skipping the hash is the point of limiting (CPU protection), and unknown emails are counted and blocked the same way, so the fast path reveals nothing about existence. The session-auth spec states this exception.
 4. `findByAppAndEmail`.
 5. Exactly ONE `hasher.verify`, against the user's hash or the boot-time dummy cost-12 hash. A password bcrypt cannot hash as given (NUL, over 72 bytes) is compared as `''`. No early return before this step.
-6. Decide only now. `user === null || !matches || !confirmed` gives `401 invalid_credentials`, one body for every cause, including limited and blocked. A password mismatch (unknown email included) records a failure on both lockout counters.
-7. Success resets `login_account_ip`, then creates the session, the refresh token and the access token in one `UnitOfWork` (ADR 35).
+6. Decide only now. `user === null || !matches || !confirmed` gives `401 invalid_credentials`, one body for every cause, including limited and blocked. Counting already happened in step 3, so a mismatch records nothing more.
+7. Success calls `recordLoginSuccess`, which resets `login_account_ip` only (the pair refund, ADR 36), then creates the session, the refresh token and the access token in one `UnitOfWork` (ADR 35).
 
 ### ADR 35: Refresh tokens and sessions
 
@@ -159,8 +159,8 @@ Properties: the raw successor is never stored or re-issued; grace is at most onc
 | Scope | Key | Counts | Default | When exceeded |
 |-------|-----|--------|---------|---------------|
 | `login_ip` | client + IP | every login request | 100 / 15 min | Generic `401` until the window ends |
-| `login_account_ip` | client + email + IP | password mismatches | 5 / 15 min | That IP is blocked 15 min for that account |
-| `login_account` | client + email | password mismatches from any IP | 50 / 1 h | The account is blocked 15 min |
+| `login_account_ip` | client + email + IP | login attempts, counted before bcrypt | 5 / 15 min | The 6th attempt and later are blocked; that IP is blocked 15 min for that account |
+| `login_account` | client + email | login attempts from any IP, counted before bcrypt | 50 / 1 h | The 51st attempt and later are blocked; the account is blocked 15 min |
 | `email_ip` | client + IP | signup, resend, forgot requests | 20 / 1 h | `429` with `Retry-After` (see below) |
 | `reset_ip` | IP | reset requests | 20 / 1 h | `429` with `Retry-After` |
 | `confirm_ip` | IP | confirm requests (round 11) | 20 / 1 h | `429` with `Retry-After` |
@@ -202,10 +202,17 @@ RETURNING count, blocked_until;
 - **`UNLOGGED`.** No WAL for a table written on every request. A crash or failover empties it, so counters restart and an attacker gets at most one fresh window. `ALTER TABLE … SET LOGGED` reverts this if HA needs change.
 - **Time.** `$now` comes from the injected `Clock`, not `now()`, as with the outbox lease (ADR 30). This keeps tests deterministic.
 - **Cleanup.** An `AbuseCounterSweeper`, started by `main.ts` only (the outbox-poller pattern), deletes expired rows every 5 min in batches of 1,000.
-- **Ordering.** Checks run before the user lookup and before bcrypt. Keys need no user row. Failure increments run after bcrypt.
+- **Ordering.** Checks run before the user lookup and before bcrypt. Keys need no user row. The login lockout counts the attempt BEFORE bcrypt (see "Login pre-count" below), not after it.
 - **Client identity (round 12).** The guard accepts a `ClientRef`, never a raw string. `ClientRef.resolved(id)` is created only for an active, resolved app; `ClientRef.unknown()` is the shared sentinel. A raw `client_id` from a body would mint a counter per random id and bypass `login_ip`, `email_ip` and `refresh_ip` while growing the table; the type makes that a compile error, and every unknown client shares one counter per IP.
 - **CORS on `429` and `503` (round 12).** `AbuseExceptionFilter` grants `Access-Control-Allow-Origin` to the request's candidate origin (stashed by the CORS middleware only for an active app's origin) on both statuses. The bodies are static and carry no app or account data, so no controller has to remember to grant them. A request with no `Origin`, or an unknown one, gets no allow header.
 - **Outage log (round 12).** A limiter store failure logs `abuse limiter store unavailable (<scope>): <driver message>` and nothing else (no keys, IPs or parameters), at most once per 60 s per process, so an outage cannot flood the log.
+
+**Login pre-count (round 12, replaces check-then-act).** A read-only `isLoginBlocked` before bcrypt plus a failure increment after it lets N parallel logins all pass the check before any failure lands: one IP could fire up to its `login_ip` limit (100) in guesses instead of 5. `AbuseGuard.beginLoginAttempt(client, email, ip): 'allowed' | 'blocked'` therefore counts the attempt first, with one atomic upsert per counter:
+
+1. Hit `login_account_ip`. If it is over its limit, or an older block is still active, answer `blocked` and stop.
+2. Otherwise hit `login_account` and apply the same rule.
+
+Exactly `limit` attempts per window are `allowed`; the attempt that reaches the limit starts the block but is the last allowed one. A block older than the hit (it survives a window rollover) blocks even though the count restarted. Step 2 is skipped for a blocked pair so an attacker hammering from a blocked IP cannot lock the account for everyone. `recordLoginSuccess` resets only the pair counter, which refunds that attempt. **Assumption (deviation from the literal "failures" wording):** the global counter counts attempts, and a success does NOT refund it. Successes are rare against the limit of 50, and a refund (a decrement) would reopen the race the pre-count closes. The cost is that legitimate logins use up the account's 50 attempts per hour; that is far above human use. `POST /password/change` uses the same two calls. `recordLoginFailure` and the store's `blockedUntil` read no longer exist.
 
 **Fail mode when a limiter statement errors:**
 
@@ -439,8 +446,7 @@ interface SessionRepository {
 
 // abuse-protection (ADR 36)
 interface AbuseCounterStore {
-  hit(scope: Scope, key: Buffer, policy: Policy, now: Date): Promise<{ count: number; blockedUntil: Date | null }>;
-  blockedUntil(keys: Array<{ scope: Scope; key: Buffer }>, now: Date): Promise<Date | null>;
+  hit(scope: Scope, key: Buffer, policy: Policy, now: Date): Promise<{ count: number; blockedUntil: Date | null; windowEndsAt: Date }>;
   reset(scope: Scope, key: Buffer): Promise<void>;
 }
 ```
