@@ -27,6 +27,16 @@ describe('loadAbusePolicies: ABUSE_<SCOPE>_* (ADR 36)', () => {
     expect(loadAbusePolicies({ ABUSE_EMAIL_IP_BLOCK_SECONDS: '60' }).email_ip).toEqual(DEFAULT_POLICIES.email_ip);
   });
 
+  // The SQL binds these as int4: above 2147483647 every hit would fail, a permanent 503 after a clean boot.
+  it.each(['ABUSE_EMAIL_IP_LIMIT', 'ABUSE_EMAIL_IP_WINDOW_SECONDS', 'ABUSE_LOGIN_ACCOUNT_BLOCK_SECONDS'])(
+    'accepts 2147483647 and rejects 2147483648 for %s',
+    (name) => {
+      expect(() => loadAbusePolicies({ [name]: '2147483647' })).not.toThrow();
+      expect(() => loadAbusePolicies({ [name]: '2147483648' })).toThrow(name);
+      expect(() => loadAbusePolicies({ [name]: '99999999999999999999' })).toThrow(name);
+    },
+  );
+
   it.each(['0', '-5', '1.5', 'abc', ''])('rejects %p as a limit, naming only the variable', (value) => {
     const act = () => loadAbusePolicies({ ABUSE_EMAIL_IP_LIMIT: value });
     expect(act).toThrow(AbuseConfigError);

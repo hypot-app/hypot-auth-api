@@ -100,12 +100,13 @@ describe('PostgresAbuseCounterStore (integration, ADR 36)', () => {
       expect((await row())?.expires_at).toEqual(after(T0, 500));
     });
 
-    it('blocks again on the first failure after an expired block in the same window', async () => {
+    it('restarts the window when a block expires inside it, so the lock really lifts', async () => {
       const policy: Policy = { limit: 3, windowSeconds: 1000, blockSeconds: 100 };
       for (let i = 0; i < 3; i++) await store.hit('login_account_ip', key, policy, T0);
 
       const next = await store.hit('login_account_ip', key, policy, after(T0, 200));
-      expect(next).toMatchObject({ count: 4, blockedUntil: after(T0, 300) });
+      expect(next).toEqual({ count: 1, blockedUntil: null, windowEndsAt: after(T0, 1200) });
+      expect((await row())?.expires_at).toEqual(after(T0, 1200));
     });
 
     it('loses no update under 10 parallel hits and sets the block once', async () => {

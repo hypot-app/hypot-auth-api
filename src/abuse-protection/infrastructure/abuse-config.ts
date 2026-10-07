@@ -15,10 +15,14 @@ export class AbuseConfigError extends Error {
   }
 }
 
+/** The store binds limits and durations as Postgres `int4`; a larger value would fail on every hit (a permanent 503). */
+const MAX_INT4 = 2_147_483_647;
+
 const positiveInt = z
   .string()
   .regex(/^[1-9]\d*$/, 'must be a positive integer')
   .transform(Number)
+  .refine((value) => value <= MAX_INT4, `must be at most ${MAX_INT4}`)
   .optional();
 
 const POLICY_FIELDS = [

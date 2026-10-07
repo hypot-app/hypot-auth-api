@@ -6,7 +6,8 @@ import type { Scope } from '../../domain/scope';
 
 // $1 scope, $2 key, $3 now, $4 window seconds, $5 limit, $6 end of a new block (null without a block length),
 // $7 end of a fresh window. Everything is derived inside the one statement, so concurrent hits serialize on the row.
-const ROLLED = `c."window_start" + $4::int * interval '1 second' <= $3::timestamptz`;
+// A window rolls when it ends or when a lockout inside it ends: a lifted lock starts counting afresh.
+const ROLLED = `(c."window_start" + $4::int * interval '1 second' <= $3::timestamptz OR c."blocked_until" <= $3::timestamptz)`;
 const NEW_COUNT = `CASE WHEN ${ROLLED} THEN 1 ELSE c."count" + 1 END`;
 const NEW_BLOCK = `CASE
   WHEN c."blocked_until" > $3::timestamptz THEN c."blocked_until"

@@ -5,7 +5,7 @@ const SWEEP_INTERVAL_MS = 5 * 60_000;
 const BATCH_SIZE = 1_000;
 
 /**
- * Deletes expired counters on a timer (ADR 36). Started explicitly by main.ts, like the outbox
+ * Deletes expired counters once at start and then on a timer (ADR 36). Started explicitly by main.ts, like the outbox
  * poller: tests and the CLI never start it. Sweeps never overlap.
  */
 export class AbuseCounterSweeper {
@@ -21,6 +21,8 @@ export class AbuseCounterSweeper {
     if (this.timer !== undefined) return;
     this.stopped = false;
     this.timer = setInterval(() => void this.tick(), SWEEP_INTERVAL_MS);
+    // Rows left by a long outage or a restart should not wait a whole interval.
+    void this.tick();
   }
 
   stop(): void {

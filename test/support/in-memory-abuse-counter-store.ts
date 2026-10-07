@@ -19,7 +19,8 @@ export class InMemoryAbuseCounterStore implements AbuseCounterStore {
     const t = now.getTime();
     const id = `${scope}:${key.toString('hex')}`;
     const old = this.rows.get(id);
-    const rolled = old === undefined || old.windowStart + policy.windowSeconds * 1000 <= t;
+    const rolled =
+      old === undefined || old.windowStart + policy.windowSeconds * 1000 <= t || (old.blockedUntil !== null && old.blockedUntil <= t);
     const count = rolled ? 1 : old.count + 1;
     let blockedUntil = old?.blockedUntil != null && old.blockedUntil > t ? old.blockedUntil : null;
     if (blockedUntil === null && count >= policy.limit && policy.blockSeconds !== null) {

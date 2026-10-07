@@ -18,7 +18,7 @@ describe('AbuseCounterSweeper', () => {
     return { sweeper, errors };
   };
 
-  it('does nothing until started, then sweeps every 5 minutes', async () => {
+  it('does nothing until started, then sweeps at once and every 5 minutes', async () => {
     const deleteExpired = jest.fn().mockResolvedValue(0);
     const { sweeper } = setup(deleteExpired);
 
@@ -26,13 +26,16 @@ describe('AbuseCounterSweeper', () => {
     expect(deleteExpired).not.toHaveBeenCalled();
 
     sweeper.start();
-    await jest.advanceTimersByTimeAsync(INTERVAL_MS * 2);
-    expect(deleteExpired).toHaveBeenCalledTimes(2);
+    await jest.advanceTimersByTimeAsync(0);
+    expect(deleteExpired).toHaveBeenCalledTimes(1);
     expect(deleteExpired).toHaveBeenCalledWith(T0, 1000);
+
+    await jest.advanceTimersByTimeAsync(INTERVAL_MS * 2);
+    expect(deleteExpired).toHaveBeenCalledTimes(3);
 
     sweeper.stop();
     await jest.advanceTimersByTimeAsync(INTERVAL_MS * 2);
-    expect(deleteExpired).toHaveBeenCalledTimes(2);
+    expect(deleteExpired).toHaveBeenCalledTimes(3);
   });
 
   it('keeps deleting batches of 1,000 until one comes back short', async () => {
@@ -51,7 +54,7 @@ describe('AbuseCounterSweeper', () => {
     await jest.advanceTimersByTimeAsync(INTERVAL_MS * 2);
 
     expect(errors).toEqual(['abuse counter sweep failed: db down']);
-    expect(deleteExpired).toHaveBeenCalledTimes(2);
+    expect(deleteExpired).toHaveBeenCalledTimes(3);
     sweeper.stop();
   });
 
@@ -60,7 +63,7 @@ describe('AbuseCounterSweeper', () => {
     const deleteExpired = jest.fn().mockImplementation(() => new Promise<number>((resolve) => (release = () => resolve(0))));
     const { sweeper } = setup(deleteExpired);
     sweeper.start();
-    await jest.advanceTimersByTimeAsync(INTERVAL_MS);
+    await jest.advanceTimersByTimeAsync(0);
 
     let drained = false;
     const shutdown = sweeper.onModuleDestroy().then(() => (drained = true));

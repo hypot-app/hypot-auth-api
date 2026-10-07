@@ -125,13 +125,16 @@ describe('AbuseGuard: login lockout (atomic pre-count)', () => {
     expect(await guard.beginLoginAttempt(APP, ANA, ip('192.0.2.2'))).toBe('allowed');
   });
 
-  it('blocks the attempt that would re-lock an account right after a lock ended inside the same window', async () => {
-    const { guard, clock } = setup({ login_account: { limit: 2, blockSeconds: 60 } });
-    await guard.beginLoginAttempt(APP, ANA, IP_X);
-    await guard.beginLoginAttempt(APP, ANA, IP_Y);
-
-    clock.advanceMs(61_000);
+  it('lifts the global lock after 15 minutes and starts counting afresh, even inside the same window', async () => {
+    const { guard, clock } = setup();
+    for (let i = 0; i < 50; i++) await guard.beginLoginAttempt(APP, ANA, ip(`198.51.100.${i}`));
     expect(await guard.beginLoginAttempt(APP, ANA, ip('192.0.2.1'))).toBe('blocked');
+
+    clock.advanceMs(15 * MINUTE_MS - 1);
+    expect(await guard.beginLoginAttempt(APP, ANA, ip('192.0.2.2'))).toBe('blocked');
+    clock.advanceMs(1);
+    expect(await guard.beginLoginAttempt(APP, ANA, ip('192.0.2.3'))).toBe('allowed');
+    expect(await guard.beginLoginAttempt(APP, ANA, ip('192.0.2.4'))).toBe('allowed');
   });
 
   it('counts one email in different apps separately', async () => {

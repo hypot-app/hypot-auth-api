@@ -179,18 +179,22 @@ describe('loadConfig: TRUST_PROXY (ADR 37)', () => {
     expect(trustProxy('false')).toBe(false);
   });
 
-  it('accepts a hop count as a number', () => {
-    expect(trustProxy('2')).toBe(2);
+  it.each([['1', 1], ['2', 2], ['10', 10]])('accepts the hop count %s as a number', (value, expected) => {
+    expect(trustProxy(value)).toBe(expected);
   });
 
-  it.each(['loopback', 'loopback, uniquelocal', '10.0.0.0/8', '10.1.2.3', '2001:db8::/32'])(
+  it.each(['loopback', 'loopback, uniquelocal', '10.0.0.0/8', '10.1.2.3/32', '10.1.2.3', '2000::/16', '2001:db8::/32', '::1'])(
     'passes the list %p through to Express',
     (value) => {
       expect(trustProxy(value)).toBe(value);
     },
   );
 
-  it.each(['true', 'TRUE', '0', '-1', '1.5', '', 'bogus', '10.0.0.0/33', 'loopback,,', '0.0.0.0/0', '::/0'])(
+  // A hop count above 10 or a CIDR wider than /8 (IPv4) or /16 (IPv6) trusts far more than any real proxy chain.
+  it.each([
+    'true', 'TRUE', '0', '-1', '1.5', '', 'bogus', '10.0.0.0/33', 'loopback,,', '0.0.0.0/0', '::/0',
+    '11', '100', '0.0.0.0/1', '10.0.0.0/7', '2000::/15', '::/1', 'loopback, 10.0.0.0/7',
+  ])(
     'rejects %p at boot',
     (value) => {
       expect(() => trustProxy(value)).toThrow(ConfigError);

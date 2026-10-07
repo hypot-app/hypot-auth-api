@@ -154,8 +154,9 @@ started by `main.ts` deletes expired rows every 5 minutes. Each scope has `ABUSE
 `LOGIN_IP` 100 per 15 min, `LOGIN_ACCOUNT_IP` 5 per 15 min, `LOGIN_ACCOUNT` 50 per 1 h (both lockouts last 15 min),
 `EMAIL_IP`, `RESET_IP` and `CONFIRM_IP` 20 per 1 h, `REFRESH_IP` 60 per 15 min, `EMAIL_ACCOUNT` 3 per 1 h.
 The client IP is the TCP peer unless `TRUST_PROXY` (default `false`: a hop count, or a comma-separated list of
-`loopback`, `uniquelocal` or CIDRs; `true` is rejected) names the proxies in front of Auth. Behind a load balancer
-set it, or every user shares the proxy's address. IPv6 clients are keyed on their /64. If the counter store fails,
+`loopback`, `uniquelocal` or CIDRs; `true` is rejected; a hop count is 1 to 10 and a CIDR no wider than /8 for IPv4 or
+/16 for IPv6) names the proxies in front of Auth. Behind a load balancer set it, or every user shares the proxy's
+address. Set it exactly: too FEW hops only over-limits, but too MANY lets a client-supplied `X-Forwarded-For` value win. IPv6 clients are keyed on their /64. If the counter store fails,
 credential endpoints answer `503 temporarily_unavailable` (logged once a minute at most, with the scope and driver message only), and the `429` and `503` answers are readable from an active app's origin. The login lockout counts the attempt before bcrypt (`beginLoginAttempt`), so parallel guesses cannot outrun it. The guard exists; U14, U17 and U18 call it from the endpoints.
 
 ### Signing keys and JWKS
