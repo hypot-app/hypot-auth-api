@@ -206,7 +206,7 @@ Real forks: none. Items 8 and 9 are the closest; both follow the specs, and the 
 
 > **U13f/U13g contract for login.** Login MUST use `AbuseGuard.checkLoginIp`, `AbuseGuard.beginLoginAttempt` and `ClientRef` (never a raw `client_id` string, never `checkClientIp`). The `401` for a limited, blocked or locked login is the generic one; there is no 429 path by construction. `POST /password/change` (U19) uses `beginLoginAttempt` and `recordLoginSuccess` as well.
 
-- [ ] 14.0 RED (first task of U14): an e2e probe (the pattern of `abuse-protection.e2e-spec.ts`) that resolves the client for each request and calls `checkLoginIp` with `ClientRef.resolved` for a known app and `ClientRef.unknown()` otherwise. Many requests with different random `client_id` values from one IP share ONE `login_ip` limit and cannot grow the table without bound. 14.7 repeats the assertion against the real endpoint.
+- [x] 14.0 RED (first task of U14): an e2e probe (the pattern of `abuse-protection.e2e-spec.ts`) that resolves the client for each request and calls `checkLoginIp` with `ClientRef.resolved` for a known app and `ClientRef.unknown()` otherwise. Many requests with different random `client_id` values from one IP share ONE `login_ip` limit and cannot grow the table without bound. 14.7 repeats the assertion against the real endpoint.
 
 **Group 1: session persistence**
 
