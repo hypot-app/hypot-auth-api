@@ -1,3 +1,4 @@
+import { DEFAULT_POLICIES } from '../../abuse-protection/domain/policy';
 import { ConfigError, loadConfig } from './app-config';
 
 const validEnv = {
@@ -18,6 +19,8 @@ describe('loadConfig', () => {
       authPublicBaseUrl: 'https://auth.example.com',
       smtp: { host: 'smtp.example.com', port: 587, secure: false, auth: undefined },
       mailFrom: 'no-reply@example.com',
+      trustProxy: false,
+      abusePolicies: DEFAULT_POLICIES,
     });
   });
 
@@ -167,5 +170,56 @@ describe('loadConfig', () => {
       expect(act).toThrow('PORT');
       expect(act).not.toThrow('PRIVATE-KEY-MARKER');
     });
+  });
+});
+
+describe('loadConfig: TRUST_PROXY (ADR 37)', () => {
+  const trustProxy = (value: string) => loadConfig({ ...validEnv, TRUST_PROXY: value }).trustProxy;
+
+  it('defaults to false, so X-Forwarded-For is ignored', () => {
+    expect(loadConfig(validEnv).trustProxy).toBe(false);
+    expect(trustProxy('false')).toBe(false);
+  });
+
+  it('accepts a hop count as a number', () => {
+    expect(trustProxy('2')).toBe(2);
+  });
+
+  it.each(['loopback', 'loopback, uniquelocal', '10.0.0.0/8', '10.1.2.3', '2001:db8::/32'])(
+    'passes the list %p through to Express',
+    (value) => {
+      expect(trustProxy(value)).toBe(value);
+    },
+  );
+
+  it.each(['true', 'TRUE', '0', '-1', '1.5', '', 'bogus', '10.0.0.0/33', 'loopback,,', '0.0.0.0/0', '::/0'])(
+    'rejects %p at boot',
+    (value) => {
+      expect(() => trustProxy(value)).toThrow(ConfigError);
+      expect(() => trustProxy(value)).toThrow('TRUST_PROXY');
+    },
+  );
+});
+
+describe('loadConfig: ABUSE_<SCOPE>_* (ADR 36)', () => {
+  it('overrides one field and keeps the other defaults', () => {
+    const { abusePolicies } = loadConfig({ ...validEnv, ABUSE_LOGIN_ACCOUNT_IP_LIMIT: '3' });
+    expect(abusePolicies.login_account_ip).toEqual({ limit: 3, windowSeconds: 900, blockSeconds: 900 });
+    expect(abusePolicies.email_account).toEqual(DEFAULT_POLICIES.email_account);
+  });
+
+  it('overrides window and block seconds', () => {
+    const { abusePolicies } = loadConfig({
+      ...validEnv,
+      ABUSE_LOGIN_ACCOUNT_WINDOW_SECONDS: '7200',
+      ABUSE_LOGIN_ACCOUNT_BLOCK_SECONDS: '60',
+      ABUSE_REFRESH_IP_WINDOW_SECONDS: '30',
+    });
+    expect(abusePolicies.login_account).toEqual({ limit: 50, windowSeconds: 7200, blockSeconds: 60 });
+    expect(abusePolicies.refresh_ip).toEqual({ limit: 60, windowSeconds: 30, blockSeconds: null });
+  });
+
+  it.each(['0', '-5', '1.5', 'abc', ''])('rejects %p as a limit', (value) => {
+    expect(() => loadConfig({ ...validEnv, ABUSE_EMAIL_IP_LIMIT: value })).toThrow('ABUSE_EMAIL_IP_LIMIT');
   });
 });

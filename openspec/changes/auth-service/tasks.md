@@ -149,10 +149,10 @@ Real forks: none. Items 8 and 9 are the closest; both follow the specs, and the 
 
 **U13a** `feat/u13a-abuse-domain-config` (315-360 lines)
 
-- [ ] 13.1 RED/GREEN: `ClientIp` value object (`src/abuse-protection/domain/`): IPv4-mapped IPv6 becomes IPv4; IPv6 keyed on its /64; undefined or malformed falls back to the socket peer. Table-driven.
-- [ ] 13.2 RED/GREEN: `Scope`, `Policy` table and `CounterKey` (SHA-256 of scope + normalized parts, scopes cannot collide): defaults `login_ip` 100/15 min, `login_account_ip` 5/15 min block 15 min, `login_account` 50/1 h block 15 min, `email_ip` 20/1 h, `reset_ip` 20/1 h (keyed by IP only), `confirm_ip` 20/1 h (IP only), `refresh_ip` 60/15 min (client + IP), `email_account` 3/1 h. Tests for defaults and env override, and that `reset_ip`, `confirm_ip` and `refresh_ip` keys cannot collide for the same IP.
-- [ ] 13.3 RED/GREEN: zod config `TRUST_PROXY` (`false` default, hop count, or CIDR/Express names; `true` rejected at boot) and `ABUSE_<SCOPE>_LIMIT`, `_WINDOW_SECONDS`, `_BLOCK_SECONDS` (positive integers).
-- [ ] 13.4 RED/GREEN: `configureApp` sets Express `trust proxy` from config. e2e with a test-only echo route: spoofed `X-Forwarded-For` ignored when `false`; behind a trusted proxy the client is the first untrusted address from the right; malformed falls back to the peer. Mutation: `trust proxy = true`, the spoof test fails.
+- [x] 13.1 RED/GREEN: `ClientIp` value object (`src/abuse-protection/domain/`): IPv4-mapped IPv6 becomes IPv4; IPv6 keyed on its /64; undefined or malformed falls back to the socket peer. Table-driven.
+- [x] 13.2 RED/GREEN: `Scope`, `Policy` table and `CounterKey` (SHA-256 of scope + normalized parts, scopes cannot collide): defaults `login_ip` 100/15 min, `login_account_ip` 5/15 min block 15 min, `login_account` 50/1 h block 15 min, `email_ip` 20/1 h, `reset_ip` 20/1 h (keyed by IP only), `confirm_ip` 20/1 h (IP only), `refresh_ip` 60/15 min (client + IP), `email_account` 3/1 h. Tests for defaults and env override, and that `reset_ip`, `confirm_ip` and `refresh_ip` keys cannot collide for the same IP.
+- [x] 13.3 RED/GREEN: zod config `TRUST_PROXY` (`false` default, hop count, or CIDR/Express names; `true` rejected at boot) and `ABUSE_<SCOPE>_LIMIT`, `_WINDOW_SECONDS`, `_BLOCK_SECONDS` (positive integers).
+- [x] 13.4 RED/GREEN: `configureApp` sets Express `trust proxy` from config. e2e with a test-only echo route: spoofed `X-Forwarded-For` ignored when `false`; behind a trusted proxy the client is the first untrusted address from the right; malformed falls back to the peer. Mutation: `trust proxy = true`, the spoof test fails.
 
 **U13b** `feat/u13b-abuse-store` (280-320 lines)
 

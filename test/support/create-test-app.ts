@@ -1,6 +1,7 @@
 import type { INestApplication, Type } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { AppModule } from '../../src/app.module';
+import { DEFAULT_POLICIES } from '../../src/abuse-protection/domain/policy';
 import { APP_CONFIG, type AppConfig } from '../../src/platform/config/app-config';
 import { configureApp } from '../../src/platform/configure-app';
 import { generateKeySet } from '../../src/token-lifecycle/infrastructure/signing-key-generator';
@@ -25,6 +26,8 @@ export function buildTestConfig(options: Pick<TestAppOptions, 'databaseUrl' | 'c
     authPublicBaseUrl: 'http://localhost:3000',
     smtp: { host: 'localhost', port: 1025, secure: false, auth: undefined },
     mailFrom: 'no-reply@example.test',
+    trustProxy: false,
+    abusePolicies: DEFAULT_POLICIES,
     ...options.config,
   };
 }
