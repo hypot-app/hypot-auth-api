@@ -1,4 +1,5 @@
 import { FixedClock } from '../../shared-kernel/clock';
+import { anApp } from '../../../test/support/app-fixture';
 import { InMemoryAbuseCounterStore } from '../../../test/support/in-memory-abuse-counter-store';
 import { ClientIp } from '../domain/client-ip';
 import { ClientRef } from '../domain/client-ref';
@@ -10,7 +11,7 @@ const T0 = new Date('2026-03-01T12:00:00.000Z');
 const MINUTE_MS = 60_000;
 const HOUR_MS = 3_600_000;
 const ANA = 'ana@example.com';
-const APP = ClientRef.resolved('app');
+const APP = ClientRef.resolved(anApp({ id: 'app' }));
 const ip = (address: string): ClientIp => ClientIp.from(address, undefined);
 const IP_X = ip('203.0.113.9');
 const IP_Y = ip('198.51.100.1');
@@ -140,7 +141,7 @@ describe('AbuseGuard: login lockout (atomic pre-count)', () => {
   it('counts one email in different apps separately', async () => {
     const { guard } = setup();
     await attempts(guard, 6);
-    expect(await guard.beginLoginAttempt(ClientRef.resolved('app-b'), ANA, IP_X)).toBe('allowed');
+    expect(await guard.beginLoginAttempt(ClientRef.resolved(anApp({ id: 'app-b' })), ANA, IP_X)).toBe('allowed');
   });
 });
 
@@ -182,10 +183,10 @@ describe('AbuseGuard: per-IP decisions', () => {
 
   it('keys the client-scoped limits by client, with one shared sentinel for unknown clients', async () => {
     const { guard } = setup({ email_ip: { limit: 1 } });
-    await guard.checkClientIp('email_ip', ClientRef.resolved('app-a'), IP_X);
+    await guard.checkClientIp('email_ip', ClientRef.resolved(anApp({ id: 'app-a' })), IP_X);
 
-    expect((await guard.checkClientIp('email_ip', ClientRef.resolved('app-a'), IP_X)).kind).toBe('ip_limited');
-    expect((await guard.checkClientIp('email_ip', ClientRef.resolved('app-b'), IP_X)).kind).toBe('allowed');
+    expect((await guard.checkClientIp('email_ip', ClientRef.resolved(anApp({ id: 'app-a' })), IP_X)).kind).toBe('ip_limited');
+    expect((await guard.checkClientIp('email_ip', ClientRef.resolved(anApp({ id: 'app-b' })), IP_X)).kind).toBe('allowed');
     await guard.checkClientIp('email_ip', ClientRef.unknown(), IP_X);
     expect((await guard.checkClientIp('email_ip', ClientRef.unknown(), IP_X)).kind).toBe('ip_limited');
   });

@@ -10,6 +10,7 @@ import {
 import { PostgresAbuseCounterStore } from '../../src/abuse-protection/infrastructure/persistence/postgres-abuse-counter.store';
 import { FixedClock } from '../../src/shared-kernel/clock';
 import { TypeOrmUnitOfWork } from '../../src/platform/persistence/typeorm-unit-of-work';
+import { anApp } from '../support/app-fixture';
 import { startTestDatabase, type TestDatabase } from '../support/postgres';
 
 const T0 = new Date('2026-03-01T12:00:00.000Z');
@@ -187,7 +188,7 @@ describe('PostgresAbuseCounterStore (integration, ADR 36)', () => {
       const ip = ClientIp.from('203.0.113.9', undefined);
 
       const decisions = await Promise.all(
-        Array.from({ length: 12 }, () => guard.beginLoginAttempt(ClientRef.resolved('app'), 'ana@example.com', ip)),
+        Array.from({ length: 12 }, () => guard.beginLoginAttempt(ClientRef.resolved(anApp({ id: 'app' })), 'ana@example.com', ip)),
       );
 
       expect(decisions.filter((d) => d === 'allowed')).toHaveLength(DEFAULT_POLICIES.login_account_ip.limit);
