@@ -135,7 +135,7 @@ curl -X POST localhost:3000/api/v1/accounts/resend-confirmation -H 'content-type
 
 Signup and resend answer the same fixed body whether or not the address is registered. A duplicate signup sends
 the owner an `account-exists` notice (no token) instead of a confirmation. Confirmation links last 24 hours, work
-once, and a resend invalidates the previous one. Unconfirmed accounts cannot log in (login is planned, U14c).
+once, and a resend invalidates the previous one. Unconfirmed accounts cannot log in.
 Residual timing difference: signup always hashes (so both paths cost one bcrypt); resend does a few more
 database writes for an unconfirmed account than for an unknown one (milliseconds), and a new signup does
 three more writes and one random-token call than a duplicate (about 3-10 ms against the 250 ms hash). Both
@@ -157,7 +157,15 @@ The client IP is the TCP peer unless `TRUST_PROXY` (default `false`: a hop count
 `loopback`, `uniquelocal` or CIDRs; `true` is rejected; a hop count is 1 to 10 and a CIDR no wider than /8 for IPv4 or
 /16 for IPv6) names the proxies in front of Auth. Behind a load balancer set it, or every user shares the proxy's
 address. Set it exactly: too FEW hops only over-limits, but too MANY lets a client-supplied `X-Forwarded-For` value win. IPv6 clients are keyed on their /64. If the counter store fails,
-credential endpoints answer `503 temporarily_unavailable` (logged once a minute at most, with the scope and driver message only), and the `429` and `503` answers are readable from an active app's origin. The login lockout counts the attempt before bcrypt (`beginLoginAttempt`), so parallel guesses cannot outrun it. The account limit is 50 attempts per window; reaching it locks the account for 15 min, and when the lock ends the count restarts. A distributed attacker therefore gets at most about 200 attempts per hour per account, and needs at least 10 distinct IPs for it, because each account and IP pair is capped at about 20 attempts per hour (5 per lock cycle of 15 min). Password change (U19) shares these counters. Both counters count attempts, so a service account or automation that logs in more than 50 times an hour locks itself out; it must reuse its refresh token instead of logging in again. The guard exists; U14, U17 and U18 call it from the endpoints.
+credential endpoints answer `503 temporarily_unavailable` (logged once a minute at most, with the scope and driver message only), and the `429` and `503` answers are readable from an active app's origin. The login lockout counts the attempt before bcrypt (`beginLoginAttempt`), so parallel guesses cannot outrun it. The account limit is 50 attempts per window; reaching it locks the account for 15 min, and when the lock ends the count restarts. A distributed attacker therefore gets at most about 200 attempts per hour per account, and needs at least 10 distinct IPs for it, because each account and IP pair is capped at about 20 attempts per hour (5 per lock cycle of 15 min). Password change (U19) shares these counters. Both counters count attempts, so a service account or automation that logs in more than 50 times an hour locks itself out; it must reuse its refresh token instead of logging in again. Login calls the guard; U17 and U18 call it from the other endpoints.
+
+### Sessions and refresh tokens
+
+Login opens a session (a refresh-token family, bound to the app and the account). The refresh token is 256 bits of
+CSPRNG output, shown once and stored only as its SHA-256. `REFRESH_ABSOLUTE_TTL_SECONDS` (default 2592000, 30 days)
+is the session lifetime from login, and `REFRESH_IDLE_TTL_SECONDS` (default 604800, 7 days) is how long a token
+lives without use, capped at the session end. Both are positive integers of at most 2147483647; an invalid value
+stops the app at boot. Rotation, logout and revocation arrive in U15.
 
 ### Signing keys and JWKS
 
@@ -230,9 +238,10 @@ required variable is missing or invalid (see `.env.example`).
 - `GET /` welcome message
 - `GET /health` liveness plus database ping (200, or 503 when the database is down)
 - `GET /.well-known/jwks.json` public signing keys (see Signing keys and JWKS)
-- Implemented: `POST /api/v1/accounts/signup`, `POST /api/v1/accounts/resend-confirmation`, and the legacy
+- Implemented: `POST /api/v1/accounts/signup`, `POST /api/v1/accounts/resend-confirmation`, `POST /api/v1/auth/login`
+  (JSON `{client_id, email, password}`, one generic `401`, never `429`), and the legacy
   `GET /api/v1/accounts/confirm` (being replaced by `POST /api/v1/accounts/confirm`)
-- Planned: `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`, `GET /api/v1/me`,
+- Planned: `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`, `GET /api/v1/me`,
   `POST /api/v1/password/forgot`, `POST /api/v1/password/reset`, `POST /api/v1/password/change`. Full list and
   contract: [`docs/api-contract.md`](docs/api-contract.md).
 - Business routes are served under `/api/v1`; `/`, `/health` and `/.well-known/jwks.json` stay at the root.

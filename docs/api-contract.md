@@ -181,17 +181,17 @@ Status: PLANNED.
 
 ### `POST /api/v1/auth/login`
 
-Status: PLANNED.
+Status: IMPLEMENTED.
 
 | Item | Value |
 |------|-------|
 | Request | `{ "client_id": string, "email": string, "password": string }` |
 | Success | `200 { "access_token": string, "token_type": "Bearer", "expires_in": 3600, "refresh_token": string }`. No `Set-Cookie`. |
 | Errors | `400 invalid_request` for a missing or non-string `email` or `password` (does not mention account state). `401 invalid_credentials`, one identical response (status, body, headers) for: unknown email, wrong password, unconfirmed account, locked account, blocked (account, IP) pair, IP over its limit, unknown or inactive `client_id`, origin not bound to the app. `503 temporarily_unavailable`. |
-| CORS | Origin bound to body `client_id`. A mismatch is the generic `401`. |
+| CORS | Origin bound to body `client_id`. A mismatch is the generic `401` with no allow header. Once the binding passes, every answer (`200`, the generic `401`, the request-validation `400`) carries the allow header; an unknown `client_id` or an origin not bound to it never does. |
 | Limits | Never `429`. See the rate-limit summary. A request rejected by a limit or block is answered before bcrypt runs. |
 
-The login `401` carries no `WWW-Authenticate` and no `Retry-After`.
+The login `401` is `{ "error": "invalid_credentials", "message": "Email or password is incorrect." }`. It carries no `WWW-Authenticate` and no `Retry-After`. The `400` is `{ "error": "invalid_request", "message": "client_id, email and password must be strings" }`. The session lasts 30 days from login (`REFRESH_ABSOLUTE_TTL_SECONDS`) and the refresh token 7 days without use (`REFRESH_IDLE_TTL_SECONDS`).
 
 ### `POST /api/v1/auth/refresh`
 
