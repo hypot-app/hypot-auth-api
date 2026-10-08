@@ -115,9 +115,10 @@ Default templates live in `src/transactional-email/templates/default/`;
 put files with the same names in `templates/<client_id>/` to override them for one app. The build copies the
 templates into `dist/`.
 
-TODO(U18): pass the token TTL to the templates as a variable. The confirmation template hard-codes
-"24 hours", which matches the confirmation token TTL in `user-accounts/domain/one-time-token.ts`, and the
-password-reset template hard-codes "1 hour" until U18 adds that flow.
+The default confirmation template says the link is valid for 24 hours and the password-reset template says 1 hour.
+These numbers are the token lifetimes in `TOKEN_TTL_HOURS` (`user-accounts/domain/one-time-token.ts`); a test pins
+the wording to that table, so changing a lifetime fails until the templates are updated. A per-app override
+template carries its own wording and must follow the same lifetimes.
 
 ### Accounts
 
