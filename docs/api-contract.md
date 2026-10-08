@@ -247,14 +247,14 @@ Access tokens already issued stay valid until `exp` (no denylist).
 
 ### `POST /api/v1/password/forgot`
 
-Status: PLANNED.
+Status: IMPLEMENTED.
 
 | Item | Value |
 |------|-------|
 | Request | `{ "client_id": string, "email": string }` |
 | Success | Always `202 { "message": "If an account exists for this address, an email is on its way." }`. Fixed text, identical whether the account exists, is unconfirmed or exists only in another app. |
-| Side effects | Confirmed account in that app: a reset email, link `<password_reset_url>#token=<token>`, valid 1 hour, earlier unused reset tokens invalidated. Unconfirmed account: a **confirmation** email instead (link `<email_confirmation_url>#token=<token>`, 24 h, earlier unused confirmation tokens invalidated), no reset. Unknown or other-app-only: nothing. Every email sent counts toward the per-account cap. |
-| Errors | `400 invalid_request`, `400 invalid_client` (unknown or inactive `client_id`, origin not bound, no email sent), `400 unconfigured_client`, `429 rate_limited`, `503 temporarily_unavailable` |
+| Side effects | Confirmed account in that app: a reset email, link `<password_reset_url>#token=<token>`, valid 1 hour, earlier unused reset tokens invalidated. Unconfirmed account: a **confirmation** email instead (link `<email_confirmation_url>#token=<token>`, 24 h, earlier unused confirmation tokens invalidated), no reset. Unknown or other-app-only: nothing. Every email actually queued counts toward the per-account cap; a request that queues nothing (unknown or other-app-only address) does not. |
+| Errors | `400 invalid_request`, `400 invalid_email` (not a valid address; depends only on your input), `400 invalid_client` (unknown or inactive `client_id`, origin not bound, no email sent), `400 unconfigured_client`, `429 rate_limited`, `503 temporarily_unavailable` |
 | CORS | Origin bound to body `client_id` |
 | Limits | Per IP: `429` + `Retry-After`. Per account: silent, no email |
 

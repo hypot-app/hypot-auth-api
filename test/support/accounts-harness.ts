@@ -9,6 +9,8 @@ import { ConfirmEmailUseCase } from '../../src/user-accounts/application/confirm
 import { ConfirmationIssuer } from '../../src/user-accounts/application/confirmation-issuer';
 import { ResendConfirmationUseCase } from '../../src/user-accounts/application/resend-confirmation.use-case';
 import { SignupUseCase } from '../../src/user-accounts/application/signup.use-case';
+import { ForgotPasswordUseCase } from '../../src/password-management/application/forgot-password.use-case';
+import { PasswordResetIssuer } from '../../src/password-management/application/password-reset-issuer';
 import type { OutboxEmail } from '../../src/transactional-email/domain/outbox-email';
 import { InMemoryAbuseCounterStore } from './in-memory-abuse-counter-store';
 import { InMemoryAppRepository, PassThroughUnitOfWork } from './in-memory-app.repository';
@@ -60,7 +62,9 @@ export async function accountsHarness(options: AccountsHarnessOptions = {}) {
   const resolveClient = new ResolveClientUseCase(apps);
   const abuseStore = new InMemoryAbuseCounterStore();
   const abuse = new AbuseGuard({ store: abuseStore, policies: options.policies ?? DEFAULT_POLICIES, clock });
-  const confirmations = new ConfirmationIssuer({ tokens: new CryptoTokenGenerator(), oneTimeTokens, outbox, clock });
+  const tokenGenerator = new CryptoTokenGenerator();
+  const confirmations = new ConfirmationIssuer({ tokens: tokenGenerator, oneTimeTokens, outbox, clock });
+  const resets = new PasswordResetIssuer({ tokens: tokenGenerator, oneTimeTokens, outbox, clock });
 
   const shop = activeApp('11111111-1111-4111-8111-111111111111', SHOP_CLIENT_ID, 'Shop', SHOP_ORIGIN);
   const blog = activeApp('22222222-2222-4222-8222-222222222222', BLOG_CLIENT_ID, 'Blog', BLOG_ORIGIN);
@@ -82,6 +86,7 @@ export async function accountsHarness(options: AccountsHarnessOptions = {}) {
     signup: new SignupUseCase({ resolveClient, abuse, users, hasher, confirmations, outbox, clock, uow }),
     confirm: new ConfirmEmailUseCase({ resolveClient, abuse, oneTimeTokens, users, outbox, clock, uow }),
     resend: new ResendConfirmationUseCase({ resolveClient, abuse, users, confirmations, uow }),
+    forgot: new ForgotPasswordUseCase({ resolveClient, abuse, users, confirmations, resets, uow }),
     /** A copy of the shop app with other email link URLs (null for a legacy app), saved and active. */
     addApp: async (clientId: string, urls: { emailConfirmationUrl: string | null; passwordResetUrl: string | null }) => {
       const app = App.restore({ ...shop, id: crypto.randomUUID(), clientId, ...urls });
@@ -95,6 +100,13 @@ export async function accountsHarness(options: AccountsHarnessOptions = {}) {
       const emails = [...outbox.emails.values()].filter((email) => email.template === 'confirmation');
       const token = emails.at(-1)?.payload['token'];
       if (token === undefined) throw new Error('no confirmation email was queued');
+      return token;
+    },
+    /** The raw token inside the most recent queued password-reset email. */
+    latestResetToken: (): string => {
+      const emails = [...outbox.emails.values()].filter((email) => email.template === 'password-reset');
+      const token = emails.at(-1)?.payload['token'];
+      if (token === undefined) throw new Error('no password-reset email was queued');
       return token;
     },
   };
