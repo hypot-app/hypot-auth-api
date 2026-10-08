@@ -39,6 +39,7 @@ function setup(overrides: PolicyOverrides = {}) {
   const clients: ClientRef[] = [];
   const opened: { session: Session; token: RefreshToken }[] = [];
   const issued: { accountId: string; clientId: string }[] = [];
+  const failures = { openingSession: false };
 
   const originalFind = users.findByAppAndEmail.bind(users);
   users.findByAppAndEmail = async (appId, email) => {
@@ -77,6 +78,7 @@ function setup(overrides: PolicyOverrides = {}) {
   const sessions = {
     async open(session: Session, token: RefreshToken) {
       events.push('open');
+      if (failures.openingSession) throw new Error('database down');
       opened.push({ session, token });
     },
   };
@@ -103,7 +105,7 @@ function setup(overrides: PolicyOverrides = {}) {
   const attempt = (overrides: Partial<LoginInput> = {}) =>
     login.execute({ clientId: 'app_shop', origin: undefined, email: 'ana@example.com', password: PASSWORD, ip: IP_X, ...overrides });
 
-  return { events, store, clock, apps, users, verifies, clients, opened, issued, addUser, attempt, ready: Promise.all([apps.save(shop), apps.save(blog)]) };
+  return { events, failures, store, clock, apps, users, verifies, clients, opened, issued, addUser, attempt, ready: Promise.all([apps.save(shop), apps.save(blog)]) };
 }
 
 describe('LoginUseCase', () => {
@@ -148,7 +150,7 @@ describe('LoginUseCase', () => {
       expect((await t.attempt({ email: '  ANA@Example.COM ' })).ok).toBe(true);
     });
 
-    it('runs in order: IP limit, attempt count, lookup, one verify, success refund, then the session and the access token in one unit of work', async () => {
+    it('runs in order: IP limit, attempt count, lookup, one verify, the session and the access token in one unit of work, then the success refund', async () => {
       const t = setup();
       await t.ready;
       await t.addUser();
@@ -160,11 +162,11 @@ describe('LoginUseCase', () => {
         'beginLoginAttempt',
         'lookup',
         'verify',
-        'recordLoginSuccess',
         'uow:start',
         'open',
         'issue',
         'uow:end',
+        'recordLoginSuccess',
       ]);
     });
 
@@ -180,6 +182,23 @@ describe('LoginUseCase', () => {
 
       // Without the refund the 3rd attempt would already be blocked, and only 3 would reach bcrypt.
       expect(t.verifies).toHaveLength(4);
+    });
+
+    it('does not refund the pair counter when the session cannot be opened', async () => {
+      const t = setup({ login_account_ip: { limit: 2, blockSeconds: 900 } });
+      await t.ready;
+      await t.addUser();
+
+      await t.attempt({ password: 'wrong password' });
+      t.failures.openingSession = true;
+      await expect(t.attempt()).rejects.toThrow('database down');
+      t.failures.openingSession = false;
+      const third = await t.attempt({ password: 'wrong password' });
+
+      // The failed login still counted: wrong + failed success = 2, so the 3rd attempt is blocked before bcrypt.
+      expect(third.ok).toBe(false);
+      expect(t.events).not.toContain('recordLoginSuccess');
+      expect(t.verifies).toHaveLength(2);
     });
 
     it('does not find an account of another app with the same email', async () => {

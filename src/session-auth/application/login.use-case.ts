@@ -92,8 +92,10 @@ export class LoginUseCase {
     const matches = await hasher.verify(password.ok ? password.value : '', user?.passwordHash ?? this.deps.dummyHash);
     if (user === null || !matches || !user.isConfirmed() || !resolved.ok) return failure;
 
+    const tokens = await this.issueSession(resolved.value.id, resolved.value.clientId, user.id);
+    // Refunded only once the session exists: a login that fails to open one stays counted.
     await abuse.recordLoginSuccess(client, emailKey, input.ip);
-    return ok(await this.issueSession(resolved.value.id, resolved.value.clientId, user.id));
+    return ok(tokens);
   }
 
   /** The session, its first token and the access token succeed or fail together. */
