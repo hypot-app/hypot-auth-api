@@ -9,6 +9,8 @@ import {
 import type { User } from '../domain/user';
 import type { UserRepository } from '../domain/user.repository';
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export interface GetProfileDeps {
   authenticate: { execute(input: AuthenticateBearerInput): Promise<Result<AuthenticatedBearer, DomainError>> };
   users: Pick<UserRepository, 'findByIdInApp'>;
@@ -24,6 +26,8 @@ export class GetProfileUseCase {
   async execute(input: AuthenticateBearerInput): Promise<Result<User, DomainError>> {
     const bearer = await this.deps.authenticate.execute(input);
     if (!bearer.ok) return bearer;
+    // A validly signed token can still carry any `sub`; a non-UUID would make Postgres fail the query (a 500).
+    if (!UUID.test(bearer.value.accountId)) return err(new DomainError(UNAUTHORIZED_CODE, UNAUTHORIZED_MESSAGE));
     const user = await this.deps.users.findByIdInApp(bearer.value.appId, bearer.value.accountId);
     if (user === null) return err(new DomainError(UNAUTHORIZED_CODE, UNAUTHORIZED_MESSAGE));
     return ok(user);

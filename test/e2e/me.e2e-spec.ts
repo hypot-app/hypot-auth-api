@@ -35,7 +35,11 @@ describe('GET /api/v1/me (e2e)', () => {
     if (origin !== undefined) req.set('Origin', origin);
     return req;
   };
-  /** Vary: Origin is cache hygiene the CORS middleware adds to any request from an active app origin; it says nothing about the token. */
+  /**
+   * Vary: Origin is cache hygiene the CORS middleware adds to any request from an active app origin; it says nothing about the token.
+   * The byte-identity check ignores it on purpose: the middleware sets it from the request origin alone, never from the failure cause,
+   * so it cannot tell causes apart.
+   */
   const fingerprint = (response: request.Response) => {
     const { date: _date, vary: _vary, ...headers } = response.headers;
     return { status: response.status, body: response.body, text: response.text, headers };
@@ -169,6 +173,7 @@ describe('GET /api/v1/me (e2e)', () => {
         await me(await forge({ aud: parked.clientId, sub: user.id })),
         await me(await forge({ sub: randomUUID() })), // an account that does not exist
         await me(await forge({ sub: other.id })), // an account of another app
+        await me(await forge({ sub: 'not-a-uuid' })), // validly signed, but the subject is no UUID: 401, not a database error
         await me(valid, BLOG_ORIGIN), // origin of another app
         await me(valid, 'https://evil.example'),
       ];

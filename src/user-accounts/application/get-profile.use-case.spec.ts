@@ -23,7 +23,7 @@ function setup(bearer: Result<AuthenticatedBearer, DomainError>) {
   const useCase = new GetProfileUseCase({ authenticate, users });
   const add = (id: string, appId: string, email: string) =>
     users.add(User.register({ id, appId, email, passwordHash: 'hash', now: T0 }));
-  return { useCase, seen, add, run: () => useCase.execute({ authorization: 'Bearer t', origin: 'https://shop.example' }) };
+  return { useCase, users, seen, add, run: () => useCase.execute({ authorization: 'Bearer t', origin: 'https://shop.example' }) };
 }
 
 const bearerOf = (accountId: string, appId = APP_A) => ok({ accountId, appId, clientId: 'app_a' });
@@ -53,6 +53,26 @@ describe('GetProfileUseCase', () => {
     const t = setup(bearerOf(ANA));
 
     expect(await t.run()).toEqual(UNAUTHORIZED);
+  });
+
+  it.each(['user-ana', '', "' OR 1=1 --", '33333333-3333-4333-8333-33333333333', ANA.toUpperCase() + 'x'])(
+    'is the same unauthorized for the non-UUID subject %j, and never reads the repository',
+    async (sub) => {
+      const t = setup(bearerOf(sub));
+      const find = jest.spyOn(t.users, 'findByIdInApp');
+
+      expect(await t.run()).toEqual(UNAUTHORIZED);
+      expect(find).not.toHaveBeenCalled();
+    },
+  );
+
+  it('still reads the account for an upper-case UUID subject', async () => {
+    const t = setup(bearerOf('AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA'));
+    const find = jest.spyOn(t.users, 'findByIdInApp');
+
+    await t.run();
+
+    expect(find).toHaveBeenCalledTimes(1);
   });
 
   it('is unauthorized when the account belongs to another app than the token', async () => {
