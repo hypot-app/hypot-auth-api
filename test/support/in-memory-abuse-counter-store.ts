@@ -13,9 +13,12 @@ export class InMemoryAbuseCounterStore implements AbuseCounterStore {
   private readonly rows = new Map<string, Row>();
   /** Set to make every call fail, as an unavailable database would. */
   failWith: Error | undefined;
+  /** How many hits each scope has seen, so a test can say a request did or did not count. */
+  readonly hitCounts: Partial<Record<Scope, number>> = {};
 
   async hit(scope: Scope, key: Buffer, policy: Policy, now: Date): Promise<HitResult> {
     this.assertAvailable();
+    this.hitCounts[scope] = (this.hitCounts[scope] ?? 0) + 1;
     const t = now.getTime();
     const id = `${scope}:${key.toString('hex')}`;
     const old = this.rows.get(id);

@@ -46,8 +46,9 @@ export interface SignupDeps {
  * to the outbox inside one transaction. The IP limit and the client checks come first (see
  * `admitEmailRequest`); validation failures after them depend only on the caller's own input.
  *
- * Past the per-account email cap the answer is the same `ok`, the password is still hashed and the account
- * is still created, but no token is issued and no email is queued.
+ * The per-account email cap counts only an email that is about to be queued (ADR 36). Past it the answer is
+ * the same `ok`, the password is still hashed and the account is still created, but no token is issued and
+ * no email is queued.
  */
 export class SignupUseCase {
   constructor(private readonly deps: SignupDeps) {}
@@ -60,17 +61,20 @@ export class SignupUseCase {
     if (!email.ok) return err(email.error);
     const password = validatePassword(input.password);
     if (!password.ok) return err(password.error);
-    const cap = await this.deps.abuse.checkEmailAccount(client, email.value);
-    const sendsEmail = cap.kind === 'allowed';
 
     const passwordHash = await this.deps.hasher.hash(password.value);
     const now = this.deps.clock.now();
     const user = User.register({ id: randomUUID(), appId: app.id, email: email.value, passwordHash, now });
 
     await this.deps.uow.run(async () => {
-      if (await this.deps.users.add(user)) {
-        if (sendsEmail) await this.deps.confirmations.issueFor(user);
-      } else if (sendsEmail) {
+      const created = await this.deps.users.add(user);
+      // Either outcome queues exactly one email, so either outcome counts. The cap is hit only here, once the
+      // outcome is known: an email that is not about to be queued never uses up the budget of an address.
+      const cap = await this.deps.abuse.checkEmailAccount(client, email.value);
+      if (cap.kind !== 'allowed') return;
+      if (created) {
+        await this.deps.confirmations.issueFor(user);
+      } else {
         await this.deps.outbox.save(
           OutboxEmail.queue({
             id: randomUUID(),

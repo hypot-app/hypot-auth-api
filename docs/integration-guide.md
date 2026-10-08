@@ -501,7 +501,7 @@ Both counters count attempts, not only failures, and a success does not give the
 
 ### The silent per-account email cap
 
-Signup, resend and forgot send at most 3 emails per account per hour (default), counted together: a confirmation email sent because an unconfirmed user used "forgot password" counts like any other. Above that, Auth still answers the normal `202` and sends **nothing**. There is no error to detect. Your UI should say "If you do not receive an email, check your spam folder and try again later".
+Signup, resend and forgot send at most 3 emails per account per hour (default), counted together: a confirmation email sent because an unconfirmed user used "forgot password" counts like any other. Only an email that is actually queued counts: a resend for a confirmed or unknown address, or a forgot for an unknown address, uses no budget. Above that, Auth still answers the normal `202` and sends **nothing**. There is no error to detect. Your UI should say "If you do not receive an email, check your spam folder and try again later".
 
 ### `503`
 

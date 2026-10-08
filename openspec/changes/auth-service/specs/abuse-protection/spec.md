@@ -69,6 +69,12 @@ The system MUST apply a per-client-IP rate limit to each of: login, signup, rese
 - THEN the generic 202 is returned
 - AND no email is sent
 
+#### Scenario: Requests that queue nothing do not use the cap
+- GIVEN resend-confirmation requests for a confirmed or unknown address, or forgot-password requests for an unknown address or one that exists only in another app
+- WHEN any number of them arrive
+- THEN none of them counts toward the per-account cap, because no email was queued
+- AND a later request that does queue an email is still allowed
+
 ### Requirement: Limited response on non-login endpoints
 
 When a per-IP limit is hit on signup, resend-confirmation, forgot-password, reset, refresh or confirm, the system MUST return 429 with a `Retry-After` header (an integer number of seconds until the window ends) and the generic body `{ "error": "rate_limited", "message": "Too many requests. Try again later." }`. The decision MUST depend only on the caller's IP and the endpoint, never on account state, so it cannot enumerate accounts. Per-account caps MUST NOT produce 429; they silently suppress the email and return the normal generic response. Login MUST NOT return 429 (it returns the generic login failure).

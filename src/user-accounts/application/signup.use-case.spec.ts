@@ -181,6 +181,22 @@ describe('SignupUseCase', () => {
       expect(h.queued()).toHaveLength(4);
     });
 
+    it('counts the cap only once the account outcome is known, after the insert, and once per request', async () => {
+      const h = await accountsHarness();
+      const accountsAtHit: number[] = [];
+      const hit = h.abuseStore.hit.bind(h.abuseStore);
+      jest.spyOn(h.abuseStore, 'hit').mockImplementation((scope, key, policy, now) => {
+        if (scope === 'email_account') accountsAtHit.push(h.users.users.size);
+        return hit(scope, key, policy, now);
+      });
+
+      await h.signup.execute(signupInput());
+      await h.signup.execute(signupInput());
+
+      // The new account already existed when the first email was counted; the duplicate counts too.
+      expect(accountsAtHit).toEqual([1, 1]);
+    });
+
     it('does not count a request that fails validation', async () => {
       const h = await accountsHarness({ policies: resolvePolicies({ email_account: { limit: 1 } }) });
       await h.signup.execute(signupInput({ password: 'short' }));

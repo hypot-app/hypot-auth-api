@@ -29,8 +29,9 @@ export interface ResendConfirmationDeps {
 /**
  * Sends a new confirmation link to an unconfirmed account and invalidates the old one.
  * The result is `ok` for an unknown address and for a confirmed account too, so it never
- * reveals which accounts exist. The IP limit and the per-account cap run before the account is looked up;
- * the cap counts requests for unknown addresses too, and past it nothing is issued or queued.
+ * reveals which accounts exist. The IP limit runs before the account is looked up. The per-account cap counts
+ * only an email that is about to be queued, so it is hit after the lookup and only for an unconfirmed account;
+ * past it nothing is issued or queued and the current token stays valid.
  */
 export class ResendConfirmationUseCase {
   constructor(private readonly deps: ResendConfirmationDeps) {}
@@ -41,13 +42,14 @@ export class ResendConfirmationUseCase {
     const { app, client } = admitted.value;
     const email = normalizeEmail(input.email);
     if (!email.ok) return err(email.error);
+
+    const user = await this.deps.users.findByAppAndEmail(app.id, email.value);
+    // A request that queues nothing (unknown or confirmed address) never touches the cap (ADR 36).
+    if (user === null || user.isConfirmed()) return ok(undefined);
     const cap = await this.deps.abuse.checkEmailAccount(client, email.value);
     if (cap.kind === 'account_suppressed') return ok(undefined);
 
-    const user = await this.deps.users.findByAppAndEmail(app.id, email.value);
-    if (user !== null && !user.isConfirmed()) {
-      await this.deps.uow.run(() => this.deps.confirmations.issueFor(user));
-    }
+    await this.deps.uow.run(() => this.deps.confirmations.issueFor(user));
     return ok(undefined);
   }
 }
