@@ -72,5 +72,7 @@ import { UserSchema } from './infrastructure/persistence/user.schema';
       ) => new ResendConfirmationUseCase({ resolveClient, users, confirmations, uow }),
     },
   ],
+  // The ports session-auth needs (ADR 42): modules never reach into each other's infrastructure.
+  exports: [USER_REPOSITORY, PASSWORD_HASHER],
 })
 export class UserAccountsModule {}

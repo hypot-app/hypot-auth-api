@@ -15,7 +15,7 @@ hypot Auth is an API-only authentication service. Your app builds its own login,
 | `POST /api/v1/accounts/resend-confirmation` | IMPLEMENTED (no rate limits and no browser CORS yet) |
 | `GET /api/v1/accounts/confirm?token=` | IMPLEMENTED, BEING REPLACED. Do not build against it. |
 | `POST /api/v1/accounts/confirm` | PLANNED |
-| `POST /api/v1/auth/login` | PLANNED |
+| `POST /api/v1/auth/login` | IMPLEMENTED |
 | `POST /api/v1/auth/refresh` | PLANNED |
 | `POST /api/v1/auth/logout` | PLANNED |
 | `GET /api/v1/me` | PLANNED |
@@ -182,7 +182,7 @@ The answer is the same whether the account does not exist, is unconfirmed or is 
 
 ### Login
 
-Status: PLANNED.
+Status: IMPLEMENTED.
 
 ```http
 POST /api/v1/auth/login
