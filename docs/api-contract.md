@@ -260,15 +260,15 @@ Status: IMPLEMENTED.
 
 ### `POST /api/v1/password/reset`
 
-Status: PLANNED.
+Status: IMPLEMENTED.
 
 | Item | Value |
 |------|-------|
 | Request | `{ "token": string, "new_password": string }`. The token identifies the account and app. |
 | Success | `204`, no body, no redirect. Password replaced, token used, **all refresh sessions of the account revoked**. |
 | Errors | `400 invalid_or_expired_link` for invalid, expired, used or superseded tokens (and a known token from the wrong origin). `400 invalid_password` for a weak password: the token stays usable. `400 invalid_request`. `429 rate_limited`, `503 temporarily_unavailable`. |
-| CORS | Origin bound to the app that owns the token |
-| Limits | Per IP: `429` + `Retry-After` |
+| CORS | Origin bound to the app that owns the token. The allow header is sent on `204`, on `400 invalid_password` and `400 invalid_request`, and on the `400 invalid_or_expired_link` of a token that belongs to the origin's own app (used, expired or superseded). A malformed or unknown token, a token of another app, or a known token from an unbound origin gets the same body and no allow header (the same rule as confirm). |
+| Limits | Per IP: `429` + `Retry-After`. The password is checked first, so a weak password does not use the limit. |
 
 ### `POST /api/v1/password/change`
 

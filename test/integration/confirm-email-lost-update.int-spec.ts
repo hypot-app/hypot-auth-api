@@ -71,6 +71,7 @@ describe('confirm email does not lose concurrent updates (integration)', () => {
     const users: UserRepository = {
       add: (u) => realUsers.add(u),
       markEmailVerified: (...args) => realUsers.markEmailVerified(...args),
+      updatePassword: (...args) => realUsers.updatePassword(...args),
       findByAppAndEmail: (...args) => realUsers.findByAppAndEmail(...args),
       findByIdInApp: (...args) => realUsers.findByIdInApp(...args),
       findById: async (id) => {

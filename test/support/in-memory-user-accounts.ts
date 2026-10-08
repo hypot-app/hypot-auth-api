@@ -1,7 +1,7 @@
 import { OneTimeToken, type OneTimeTokenPurpose } from '../../src/user-accounts/domain/one-time-token';
 import type { OneTimeTokenRepository, TokenApp } from '../../src/user-accounts/domain/one-time-token.repository';
 import type { PasswordHasher } from '../../src/user-accounts/domain/password-hasher';
-import type { User } from '../../src/user-accounts/domain/user';
+import { User } from '../../src/user-accounts/domain/user';
 import type { UserRepository } from '../../src/user-accounts/domain/user.repository';
 
 /** Unit-test double for UserRepository with the same uniqueness rule as the SQL one. */
@@ -18,6 +18,13 @@ export class InMemoryUserRepository implements UserRepository {
   async markEmailVerified(userId: string, at: Date): Promise<void> {
     const user = this.users.get(userId);
     if (user !== undefined) this.users.set(userId, user.confirm(at));
+  }
+
+  async updatePassword(userId: string, passwordHash: string, at: Date): Promise<boolean> {
+    const user = this.users.get(userId);
+    if (user === undefined) return false;
+    this.users.set(userId, User.restore({ ...user, passwordHash, passwordChangedAt: at, updatedAt: at }));
+    return true;
   }
 
   async findByAppAndEmail(appId: string, email: string): Promise<User | null> {

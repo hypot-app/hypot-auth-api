@@ -11,10 +11,16 @@ import { ResendConfirmationUseCase } from '../../src/user-accounts/application/r
 import { SignupUseCase } from '../../src/user-accounts/application/signup.use-case';
 import { ForgotPasswordUseCase } from '../../src/password-management/application/forgot-password.use-case';
 import { PasswordResetIssuer } from '../../src/password-management/application/password-reset-issuer';
+import { ResetPasswordUseCase } from '../../src/password-management/application/reset-password.use-case';
+import { RevokeAccountSessionsUseCase } from '../../src/session-auth/application/revoke-account-sessions.use-case';
+import { RefreshToken } from '../../src/session-auth/domain/refresh-token';
+import { Session } from '../../src/session-auth/domain/session';
+import type { UnitOfWork } from '../../src/shared-kernel/unit-of-work';
 import type { OutboxEmail } from '../../src/transactional-email/domain/outbox-email';
 import { InMemoryAbuseCounterStore } from './in-memory-abuse-counter-store';
-import { InMemoryAppRepository, PassThroughUnitOfWork } from './in-memory-app.repository';
+import { InMemoryAppRepository } from './in-memory-app.repository';
 import { InMemoryEmailOutbox } from './in-memory-email-outbox';
+import { InMemorySessionRepository } from './in-memory-session.repository';
 import { FakePasswordHasher, InMemoryOneTimeTokenRepository, InMemoryUserRepository } from './in-memory-user-accounts';
 
 export const START = new Date('2026-03-03T10:00:00.000Z');
@@ -58,13 +64,35 @@ export async function accountsHarness(options: AccountsHarnessOptions = {}) {
   });
   const outbox = new InMemoryEmailOutbox();
   const hasher = new FakePasswordHasher();
-  const uow = new PassThroughUnitOfWork();
+  const sessions = new InMemorySessionRepository();
+  /** Runs the work and puts users, tokens and sessions back when it throws, like a rolled-back transaction. */
+  const uow: UnitOfWork = {
+    async run<T>(work: () => Promise<T>): Promise<T> {
+      const restoreSessions = sessions.snapshot();
+      const usersBefore = new Map(users.users);
+      const tokensBefore = new Map(oneTimeTokens.tokens);
+      try {
+        return await work();
+      } catch (error) {
+        restoreSessions();
+        users.users.clear();
+        for (const [key, value] of usersBefore) users.users.set(key, value);
+        oneTimeTokens.tokens.clear();
+        for (const [key, value] of tokensBefore) oneTimeTokens.tokens.set(key, value);
+        throw error;
+      }
+    },
+  };
+  const revokeSessions = new RevokeAccountSessionsUseCase({ sessions, clock });
   const resolveClient = new ResolveClientUseCase(apps);
   const abuseStore = new InMemoryAbuseCounterStore();
   const abuse = new AbuseGuard({ store: abuseStore, policies: options.policies ?? DEFAULT_POLICIES, clock });
   const tokenGenerator = new CryptoTokenGenerator();
   const confirmations = new ConfirmationIssuer({ tokens: tokenGenerator, oneTimeTokens, outbox, clock });
   const resets = new PasswordResetIssuer({ tokens: tokenGenerator, oneTimeTokens, outbox, clock });
+
+  const buildReset = (revoke: { execute(input: { userId: string; reason: 'password_reset' }): Promise<number> }) =>
+    new ResetPasswordUseCase({ resolveClient, abuse, oneTimeTokens, users, hasher, sessions: revoke, clock, uow });
 
   const shop = activeApp('11111111-1111-4111-8111-111111111111', SHOP_CLIENT_ID, 'Shop', SHOP_ORIGIN);
   const blog = activeApp('22222222-2222-4222-8222-222222222222', BLOG_CLIENT_ID, 'Blog', BLOG_ORIGIN);
@@ -87,6 +115,19 @@ export async function accountsHarness(options: AccountsHarnessOptions = {}) {
     confirm: new ConfirmEmailUseCase({ resolveClient, abuse, oneTimeTokens, users, outbox, clock, uow }),
     resend: new ResendConfirmationUseCase({ resolveClient, abuse, users, confirmations, uow }),
     forgot: new ForgotPasswordUseCase({ resolveClient, abuse, users, confirmations, resets, uow }),
+    reset: buildReset(revokeSessions),
+    /** A reset use case over the same fakes with another revocation step, for tests that make it fail. */
+    buildReset,
+    sessions,
+    /** Opens an active session (one refresh token) for the account, like a login would. */
+    openSession: async (user: { id: string; appId: string }) => {
+      const session = Session.open({ id: crypto.randomUUID(), appId: user.appId, userId: user.id, now: clock.now(), absoluteTtlSeconds: 86_400 * 30 });
+      await sessions.open(
+        session,
+        RefreshToken.issue({ tokenHash: tokenGenerator.generate().hash, session, now: clock.now(), idleTtlSeconds: 86_400 * 7 }),
+      );
+      return session.id;
+    },
     /** A copy of the shop app with other email link URLs (null for a legacy app), saved and active. */
     addApp: async (clientId: string, urls: { emailConfirmationUrl: string | null; passwordResetUrl: string | null }) => {
       const app = App.restore({ ...shop, id: crypto.randomUUID(), clientId, ...urls });

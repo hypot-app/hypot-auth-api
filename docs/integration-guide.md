@@ -19,8 +19,8 @@ hypot Auth is an API-only authentication service. Your app builds its own login,
 | `POST /api/v1/auth/refresh` | IMPLEMENTED |
 | `POST /api/v1/auth/logout` | IMPLEMENTED |
 | `GET /api/v1/me` | IMPLEMENTED |
-| `POST /api/v1/password/forgot` | PLANNED |
-| `POST /api/v1/password/reset` | PLANNED |
+| `POST /api/v1/password/forgot` | IMPLEMENTED |
+| `POST /api/v1/password/reset` | IMPLEMENTED |
 | `POST /api/v1/password/change` | PLANNED |
 | `GET /`, `GET /health` | IMPLEMENTED (operational, not part of your integration) |
 
@@ -275,7 +275,7 @@ Your own backend does not need `/me` to authenticate users: validate the JWT loc
 
 ### Forgot and reset password
 
-Status: PLANNED.
+Status: IMPLEMENTED.
 
 ```mermaid
 sequenceDiagram
