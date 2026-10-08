@@ -286,6 +286,8 @@ Real forks: none. Items 8 and 9 are the closest; both follow the specs, and the 
 
 ## U18 Password management
 
+**OPEN DECISION (from the U17 review, W2; decide before 18.1):** `email_account` counts requests, not sent emails, and forgot shares it with signup and resend. Three requests per hour from any IP for a victim's address suppress the victim's confirmation and reset mail for that hour. Options: (a) count only emails actually queued; (b) give reset/forgot its own counter; (c) both. Not decided yet. Record the choice in design.md (ADR 36 residual note) and add tests for it.
+
 **Group 1: forgot**
 
 - [ ] 18.1 RED/GREEN: `ForgotPasswordUseCase` order: client (`invalid_client`, or `unconfigured_client` as `400` when EITHER `email_confirmation_url` OR `password_reset_url` is null, since the unconfirmed-account path sends a confirmation link and the confirmed path a reset link), `email_ip` (`429`), `email_account` (silent), then by account state, in one UoW: confirmed gives a 1 h token that supersedes earlier unused reset tokens plus a `reset` outbox row; UNCONFIRMED gives a new confirmation token that supersedes earlier unused confirmation tokens (reuse the resend code path) plus a `confirmation` outbox row, and never a reset token; unknown or other-app-only gives nothing. Always the fixed generic `202` body `{ "message": "If an account exists for this address, an email is on its way." }`. Unit with fakes.
