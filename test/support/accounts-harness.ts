@@ -11,10 +11,13 @@ import { ResendConfirmationUseCase } from '../../src/user-accounts/application/r
 import { SignupUseCase } from '../../src/user-accounts/application/signup.use-case';
 import { ForgotPasswordUseCase } from '../../src/password-management/application/forgot-password.use-case';
 import { PasswordResetIssuer } from '../../src/password-management/application/password-reset-issuer';
+import { ChangePasswordUseCase } from '../../src/password-management/application/change-password.use-case';
 import { ResetPasswordUseCase } from '../../src/password-management/application/reset-password.use-case';
 import { RevokeAccountSessionsUseCase } from '../../src/session-auth/application/revoke-account-sessions.use-case';
 import { RefreshToken } from '../../src/session-auth/domain/refresh-token';
 import { Session } from '../../src/session-auth/domain/session';
+import { DomainError } from '../../src/shared-kernel/domain-error';
+import { err, ok } from '../../src/shared-kernel/result';
 import type { UnitOfWork } from '../../src/shared-kernel/unit-of-work';
 import type { OutboxEmail } from '../../src/transactional-email/domain/outbox-email';
 import { InMemoryAbuseCounterStore } from './in-memory-abuse-counter-store';
@@ -71,6 +74,7 @@ export async function accountsHarness(options: AccountsHarnessOptions = {}) {
       const restoreSessions = sessions.snapshot();
       const usersBefore = new Map(users.users);
       const tokensBefore = new Map(oneTimeTokens.tokens);
+      const emailsBefore = new Map(outbox.emails);
       try {
         return await work();
       } catch (error) {
@@ -79,6 +83,8 @@ export async function accountsHarness(options: AccountsHarnessOptions = {}) {
         for (const [key, value] of usersBefore) users.users.set(key, value);
         oneTimeTokens.tokens.clear();
         for (const [key, value] of tokensBefore) oneTimeTokens.tokens.set(key, value);
+        outbox.emails.clear();
+        for (const [key, value] of emailsBefore) outbox.emails.set(key, value);
         throw error;
       }
     },
@@ -93,6 +99,27 @@ export async function accountsHarness(options: AccountsHarnessOptions = {}) {
 
   const buildReset = (revoke: { execute(input: { userId: string; reason: 'password_reset' }): Promise<number> }) =>
     new ResetPasswordUseCase({ resolveClient, abuse, oneTimeTokens, users, hasher, sessions: revoke, clock, uow });
+
+  /**
+   * Stands in for `AuthenticateBearerUseCase`: `Bearer fake:<userId>` is a valid token of that account, bound
+   * to its app (and to the app's origin when the request has one); anything else is `unauthorized`.
+   */
+  const authenticate = {
+    execute: async (input: { authorization: string | undefined; origin: string | undefined }) => {
+      const unauthorized = () => err(new DomainError('unauthorized', 'Missing or invalid access token'));
+      const stray = /^Bearer fake-app:([^:]+):(.+)$/.exec(input.authorization ?? '');
+      if (stray !== null) return ok({ accountId: stray[2]!, appId: stray[1]!, clientId: SHOP_CLIENT_ID });
+      const userId = /^Bearer fake:(.+)$/.exec(input.authorization ?? '')?.[1];
+      const user = userId === undefined ? undefined : users.users.get(userId);
+      const app = user === undefined ? undefined : [...apps.apps.values()].find((a) => a.id === user.appId);
+      if (user === undefined || app === undefined) return unauthorized();
+      if (input.origin !== undefined && !app.allowedOrigins.includes(input.origin)) return unauthorized();
+      return ok({ accountId: user.id, appId: app.id, clientId: app.clientId });
+    },
+  };
+
+  const buildChange = (revoke: { execute(input: { userId: string; reason: 'password_changed' }): Promise<number> }) =>
+    new ChangePasswordUseCase({ resolveClient, abuse, authenticate, users, hasher, sessions: revoke, outbox, clock, uow });
 
   const shop = activeApp('11111111-1111-4111-8111-111111111111', SHOP_CLIENT_ID, 'Shop', SHOP_ORIGIN);
   const blog = activeApp('22222222-2222-4222-8222-222222222222', BLOG_CLIENT_ID, 'Blog', BLOG_ORIGIN);
@@ -116,6 +143,13 @@ export async function accountsHarness(options: AccountsHarnessOptions = {}) {
     resend: new ResendConfirmationUseCase({ resolveClient, abuse, users, confirmations, uow }),
     forgot: new ForgotPasswordUseCase({ resolveClient, abuse, users, confirmations, resets, uow }),
     reset: buildReset(revokeSessions),
+    change: buildChange(revokeSessions),
+    /** A change use case over the same fakes with another revocation step, for tests that make it fail. */
+    buildChange,
+    /** The Authorization header of a valid fake access token for the account. */
+    bearer: (user: { id: string }) => `Bearer fake:${user.id}`,
+    /** A valid token whose account does not exist in the given app. */
+    strayBearer: (appId: string, accountId: string) => `Bearer fake-app:${appId}:${accountId}`,
     /** A reset use case over the same fakes with another revocation step, for tests that make it fail. */
     buildReset,
     sessions,

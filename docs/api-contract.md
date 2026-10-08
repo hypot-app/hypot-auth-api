@@ -111,7 +111,7 @@ Status: IMPLEMENTED.
 
 **Issuer and JWKS URL.** `iss` is exactly the operator-configured `AUTH_PUBLIC_BASE_URL`, and the JWKS URL is `${iss}/.well-known/jwks.json`. In production the value is an `https` URL with no trailing slash, for example `https://auth.example` and `https://auth.example/.well-known/jwks.json`. Copy the strings your operator gives you; they are compared exactly.
 
-**Access token format** (IMPLEMENTED, issued after login in the planned units):
+**Access token format** (IMPLEMENTED, issued after login):
 
 | Part | Value |
 |------|-------|
@@ -272,15 +272,15 @@ Status: IMPLEMENTED.
 
 ### `POST /api/v1/password/change`
 
-Status: PLANNED.
+Status: IMPLEMENTED.
 
 | Item | Value |
 |------|-------|
 | Request | Header `Authorization: Bearer <access_token>`, body `{ "current_password": string, "new_password": string }` |
 | Success | `204`, no body. Password replaced, **all sessions revoked including the caller's**, a password-changed notice email is sent. The current access token stays valid until `exp`. |
 | Errors | `401 invalid_token` for a missing or invalid access token. `400 invalid_request`. `400 invalid_password` for a weak new password (no counter touched). `400 invalid_current_password` for a wrong current password, **never `401`**, so it cannot be mistaken for an expired token. |
-| CORS | Origin bound to the app named by the token `aud` |
-| Limits | A wrong current password counts as a failed login for both lockout counters. While the (account, IP) pair is blocked or the account is locked, even the correct current password gets the same `400 invalid_current_password`, without bcrypt. |
+| CORS | Origin bound to the app named by the token `aud`. The allow header is sent on `204` and on every `400`; the `401` never carries one. A valid token sent from another app's origin is the same `401`. |
+| Limits | There is no IP limit. A wrong current password counts as a failed login for both lockout counters. While the (account, IP) pair is blocked or the account is locked, even the correct current password gets the same `400 invalid_current_password`, without bcrypt. |
 
 Order of checks: bearer, body shape, new-password rules, lockout state, current-password comparison.
 

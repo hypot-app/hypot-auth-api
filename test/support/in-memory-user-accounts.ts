@@ -79,6 +79,7 @@ export class InMemoryOneTimeTokenRepository implements OneTimeTokenRepository {
 /** Fast stand-in for bcrypt that records how often it was asked to hash. */
 export class FakePasswordHasher implements PasswordHasher {
   hashCalls = 0;
+  verifyCalls = 0;
 
   async hash(password: string): Promise<string> {
     this.hashCalls += 1;
@@ -86,6 +87,7 @@ export class FakePasswordHasher implements PasswordHasher {
   }
 
   async verify(password: string, hash: string): Promise<boolean> {
+    this.verifyCalls += 1;
     return hash === `hashed:${password}`;
   }
 }

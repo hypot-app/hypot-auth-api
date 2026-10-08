@@ -21,7 +21,7 @@ hypot Auth is an API-only authentication service. Your app builds its own login,
 | `GET /api/v1/me` | IMPLEMENTED |
 | `POST /api/v1/password/forgot` | IMPLEMENTED |
 | `POST /api/v1/password/reset` | IMPLEMENTED |
-| `POST /api/v1/password/change` | PLANNED |
+| `POST /api/v1/password/change` | IMPLEMENTED |
 | `GET /`, `GET /health` | IMPLEMENTED (operational, not part of your integration) |
 
 ## Quick path
@@ -323,7 +323,7 @@ POST /api/v1/password/reset
 
 ### Change password
 
-Status: PLANNED.
+Status: IMPLEMENTED.
 
 ```http
 POST /api/v1/password/change
