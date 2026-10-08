@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from 'node:crypto';
+import { createPrivateKey, generateKeyPairSync } from 'node:crypto';
 import { SignJWT } from 'jose';
 import { ResolveClientUseCase } from '../../app-registry/application/resolve-client.use-case';
 import { FixedClock } from '../../shared-kernel/clock';
@@ -8,7 +8,7 @@ import type { AccessTokenVerifier } from '../domain/access-token';
 import { JoseAccessTokenIssuer } from '../infrastructure/jose-access-token-issuer';
 import { JoseAccessTokenVerifier } from '../infrastructure/jose-access-token-verifier';
 import { JwkSetKeyStore } from '../infrastructure/jwk-set-key-store';
-import { generateKeySet } from '../infrastructure/signing-key-generator';
+import { generateKeySet, type KeySetJson } from '../infrastructure/signing-key-generator';
 import { AuthenticateBearerUseCase } from './authenticate-bearer.use-case';
 
 const ISSUER = 'https://auth.example.com';
@@ -22,9 +22,9 @@ const parked = anApp({ id: '33333333-3333-4333-8333-333333333333', clientId: 'ap
 
 const keySet = generateKeySet({ next: false });
 
-function setup() {
+function setup(keys: KeySetJson = keySet) {
   const clock = new FixedClock(T0);
-  const keyStore = JwkSetKeyStore.fromJson(JSON.stringify(keySet), { clock });
+  const keyStore = JwkSetKeyStore.fromJson(JSON.stringify(keys), { clock, warn: () => undefined });
   const apps = new InMemoryAppRepository();
   const issuer = new JoseAccessTokenIssuer({ keyStore, clock, issuer: ISSUER });
   const verifier = new JoseAccessTokenVerifier({ keyStore, clock, issuer: ISSUER });
@@ -40,11 +40,11 @@ function setup() {
 
   /** A token the issuer would never produce, signed with the real key unless `key` says otherwise. */
   const forge = (
-    options: { alg?: string; typ?: string | null; aud?: string | null; exp?: number; key?: Parameters<SignJWT['sign']>[0] } = {},
+    options: { alg?: string; typ?: string | null; aud?: string | null; exp?: number; kid?: string | null; key?: Parameters<SignJWT['sign']>[0] } = {},
   ): Promise<string> => {
-    const { alg = 'RS256', typ = 'at+jwt', aud = 'app_shop', exp = NOW_SECONDS + 3600, key = signingKey.privateKey } = options;
+    const { alg = 'RS256', typ = 'at+jwt', aud = 'app_shop', exp = NOW_SECONDS + 3600, kid = signingKey.kid, key = signingKey.privateKey } = options;
     const jwt = new SignJWT({})
-      .setProtectedHeader({ alg, kid: signingKey.kid, ...(typ === null ? {} : { typ }) })
+      .setProtectedHeader({ alg, ...(kid === null ? {} : { kid }), ...(typ === null ? {} : { typ }) })
       .setIssuer(ISSUER)
       .setSubject('user-ana')
       .setIssuedAt(NOW_SECONDS)
@@ -158,6 +158,49 @@ describe('AuthenticateBearerUseCase', () => {
     await t.run(t.bearer(await t.issue('app_blog')));
 
     expect(t.verifyCalls).toHaveLength(1);
+  });
+
+  describe('signing keys', () => {
+    const RETENTION_SECONDS = 3600 + 5 + 600;
+    const retiredAgo = (seconds: number) => {
+      const retired = generateKeySet({ next: false }).active;
+      const keys: KeySetJson = {
+        active: keySet.active,
+        retired: [{ ...retired, retiredAt: new Date(T0.getTime() - seconds * 1000).toISOString() }],
+      };
+      return { keys, retired, retiredKid: retired['kid'] as string, retiredKey: createPrivateKey({ key: retired as never, format: 'jwk' }) };
+    };
+
+    it('refuses a token with a kid no key has, and a token with no kid, with the same unauthorized', async () => {
+      const t = setup();
+      await t.ready;
+
+      const unknown = await t.run(t.bearer(await t.forge({ kid: 'no-such-key' })));
+      const missing = await t.run(t.bearer(await t.forge({ kid: null })));
+
+      expect(unknown).toEqual(UNAUTHORIZED);
+      expect(missing).toEqual(unknown);
+    });
+
+    it('accepts a token signed by a retired key still within its retention', async () => {
+      const { keys, retiredKid, retiredKey } = retiredAgo(RETENTION_SECONDS - 60);
+      const t = setup(keys);
+      await t.ready;
+
+      const result = await t.run(t.bearer(await t.forge({ kid: retiredKid, key: retiredKey })));
+
+      expect(result.ok).toBe(true);
+    });
+
+    it('refuses a token signed by a retired key past its retention, with the same unauthorized', async () => {
+      const { keys, retiredKid, retiredKey } = retiredAgo(RETENTION_SECONDS + 60);
+      const t = setup(keys);
+      await t.ready;
+
+      const result = await t.run(t.bearer(await t.forge({ kid: retiredKid, key: retiredKey })));
+
+      expect(result).toEqual(UNAUTHORIZED);
+    });
   });
 
   it('stops accepting a token once the clock passes its expiry', async () => {
