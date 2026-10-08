@@ -70,6 +70,16 @@ describe('App', () => {
     });
   });
 
+  it.each([
+    ['both URLs', 'https://a.example/confirm', 'https://a.example/reset', true],
+    ['no URL', null, null, false],
+    ['only the confirmation URL', 'https://a.example/confirm', null, false],
+    ['only the reset URL', null, 'https://a.example/reset', false],
+  ])('reports whether it can send account emails: %s', (_label, emailConfirmationUrl, passwordResetUrl, expected) => {
+    const app = App.restore(props({ emailConfirmationUrl, passwordResetUrl }));
+    expect(app.hasEmailLinks()).toBe(expected);
+  });
+
   it('reports whether it is active', () => {
     expect(App.restore(props({ status: 'active' })).isActive()).toBe(true);
     expect(App.restore(props({ status: 'inactive' })).isActive()).toBe(false);

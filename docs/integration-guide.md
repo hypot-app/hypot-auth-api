@@ -11,10 +11,10 @@ hypot Auth is an API-only authentication service. Your app builds its own login,
 | Endpoint | Status |
 |----------|--------|
 | `GET /.well-known/jwks.json` | IMPLEMENTED |
-| `POST /api/v1/accounts/signup` | IMPLEMENTED (no rate limits and no browser CORS yet) |
-| `POST /api/v1/accounts/resend-confirmation` | IMPLEMENTED (no rate limits and no browser CORS yet) |
-| `GET /api/v1/accounts/confirm?token=` | IMPLEMENTED, BEING REPLACED. Do not build against it. |
-| `POST /api/v1/accounts/confirm` | PLANNED |
+| `POST /api/v1/accounts/signup` | IMPLEMENTED |
+| `POST /api/v1/accounts/resend-confirmation` | IMPLEMENTED |
+| `GET /api/v1/accounts/confirm?token=` | REMOVED (answers `404`; it never consumes a token) |
+| `POST /api/v1/accounts/confirm` | IMPLEMENTED |
 | `POST /api/v1/auth/login` | IMPLEMENTED |
 | `POST /api/v1/auth/refresh` | IMPLEMENTED |
 | `POST /api/v1/auth/logout` | IMPLEMENTED |
@@ -23,11 +23,6 @@ hypot Auth is an API-only authentication service. Your app builds its own login,
 | `POST /api/v1/password/reset` | PLANNED |
 | `POST /api/v1/password/change` | PLANNED |
 | `GET /`, `GET /health` | IMPLEMENTED (operational, not part of your integration) |
-
-Two things work differently today and will change:
-
-- Confirmation emails currently link to Auth's `GET` confirm endpoint. After the change they link to **your** confirm screen as `<email_confirmation_url>#token=<token>`.
-- Browser CORS is not yet enabled on the account routes. Until it ships you can test signup and resend only from a server or a tool such as curl.
 
 ## Quick path
 
@@ -102,13 +97,13 @@ Consequences:
 
 ## Flows
 
-All calls are JSON (`Content-Type: application/json`) to `https://<auth-host>/api/v1/...`. Examples use `client_id` `app_0123456789abcdef0123456789abcdef`.
+All calls are JSON (send `Content-Type: application/json` on every `POST`; other types get `415`) to `https://<auth-host>/api/v1/...`. Examples use `client_id` `app_0123456789abcdef0123456789abcdef`.
 
 Password rules, for signup, reset and change: at least 8 characters, at most 72 UTF-8 **bytes**, no NUL character. Show the byte limit in your UI if you allow non-ASCII passwords.
 
 ### Signup and confirmation
 
-Status: signup and resend IMPLEMENTED, confirm by POST PLANNED.
+Status: signup, resend and confirm by POST IMPLEMENTED, with rate limits.
 
 ```mermaid
 sequenceDiagram
@@ -162,7 +157,10 @@ On success Auth answers `200 { "message": "Your email address has been confirmed
 | Unknown or inactive `client_id`, or origin not bound to the app | `400 invalid_client` | A configuration error. This is a bug in your setup, not a user problem. |
 | App has no email URLs configured | `400 unconfigured_client` | Contact the operator |
 | Confirm: invalid, used, expired or unknown token | `400 invalid_or_expired_link` | "This link is invalid or expired", with a resend form |
-| IP rate limit, on signup or confirm (planned) | `429 rate_limited` with `Retry-After` | Retry later |
+| Confirm: network or CORS error in the browser | no readable response | Treat it exactly like `invalid_or_expired_link` (see below) |
+| IP rate limit, on signup or confirm | `429 rate_limited` with `Retry-After` | Retry later |
+
+On confirm, only some failures are readable from the browser. Auth sends the CORS allow header on a failure only when your page's origin is bound to the app that owns the token (a used or expired token). A malformed, unknown or other-app token gets the same `400` body but no allow header, so `fetch` rejects with an opaque network error. Handle a rejected `fetch` on confirm the same as `invalid_or_expired_link`: show "This link is invalid or expired" and the resend form.
 
 ### Resend confirmation
 
@@ -465,6 +463,7 @@ Error bodies have the shape `{ "error": "<code>", "message": "<text>" }`. Branch
 | Status | Code | Where | Meaning |
 |--------|------|-------|---------|
 | 400 | `invalid_request` | Every body endpoint | Missing or non-string fields. A bug in your code. |
+| 415 | `unsupported_media_type` | Every `POST` | The `Content-Type` is not `application/json` (or is missing). A bug in your code: always send `Content-Type: application/json`. A `; charset=utf-8` suffix is fine. No CORS header is sent on this answer, so a browser shows it as a network error. |
 | 400 | `invalid_email`, `invalid_password` | Signup (both), reset and change (`invalid_password`) | Validation failure. Safe to show to the user. |
 | 400 | `invalid_client` | Signup, resend, forgot, refresh | Unknown or inactive `client_id`, or (not refresh) origin not bound to it. This is a setup bug. |
 | 400 | `unconfigured_client` | Signup, resend, forgot | The app has no email URLs. |

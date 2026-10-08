@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { AbuseGuard } from '../../src/abuse-protection/application/abuse-guard';
+import { ClientIp } from '../../src/abuse-protection/domain/client-ip';
+import { DEFAULT_POLICIES } from '../../src/abuse-protection/domain/policy';
 import { ResolveClientUseCase } from '../../src/app-registry/application/resolve-client.use-case';
 import { App } from '../../src/app-registry/domain/app';
 import { AppSchema } from '../../src/app-registry/infrastructure/persistence/app.schema';
@@ -15,6 +18,7 @@ import { OneTimeTokenSchema } from '../../src/user-accounts/infrastructure/persi
 import { TypeOrmOneTimeTokenRepository } from '../../src/user-accounts/infrastructure/persistence/typeorm-one-time-token.repository';
 import { TypeOrmUserRepository } from '../../src/user-accounts/infrastructure/persistence/typeorm-user.repository';
 import { UserSchema } from '../../src/user-accounts/infrastructure/persistence/user.schema';
+import { InMemoryAbuseCounterStore } from '../support/in-memory-abuse-counter-store';
 import { FakePasswordHasher } from '../support/in-memory-user-accounts';
 import { startTestDatabase, type TestDatabase } from '../support/postgres';
 
@@ -44,10 +48,10 @@ describe('signup atomicity (integration)', () => {
       clientType: 'public',
       clientSecretHash: null,
       redirectUris: [],
-      allowedOrigins: [],
+      allowedOrigins: ['https://shop.example'],
       emailFrom: null,
-      emailConfirmationUrl: null,
-      passwordResetUrl: null,
+      emailConfirmationUrl: 'https://shop.example/confirm',
+      passwordResetUrl: 'https://shop.example/reset',
       status: 'active',
       createdAt: now,
       updatedAt: now,
@@ -65,6 +69,7 @@ describe('signup atomicity (integration)', () => {
     const oneTimeTokens = new TypeOrmOneTimeTokenRepository(db.dataSource);
     const signup = new SignupUseCase({
       resolveClient: new ResolveClientUseCase(apps),
+      abuse: new AbuseGuard({ store: new InMemoryAbuseCounterStore(), policies: DEFAULT_POLICIES, clock }),
       users: new TypeOrmUserRepository(db.dataSource),
       hasher: new FakePasswordHasher(),
       confirmations: new ConfirmationIssuer({ tokens: new CryptoTokenGenerator(), oneTimeTokens, outbox: brokenOutbox, clock }),
@@ -74,7 +79,12 @@ describe('signup atomicity (integration)', () => {
     });
 
     await expect(
-      signup.execute({ clientId: shop.clientId, email: 'ana@example.com', password: 'correct horse' }),
+      signup.execute({
+        clientId: shop.clientId,
+        email: 'ana@example.com',
+        password: 'correct horse',
+        ip: ClientIp.from('203.0.113.7', undefined),
+      }),
     ).rejects.toThrow('outbox unavailable');
 
     const counts: { users: string; tokens: string }[] = await db.dataSource.query(

@@ -11,7 +11,7 @@ Companion: [`integration-guide.md`](./integration-guide.md).
 | Topic | Rule |
 |-------|------|
 | Base URL | `https://<auth-host>`. Business routes live under `/api/v1`. JWKS, `/` and `/health` are at the root. |
-| Format | JSON in and out (`Content-Type: application/json`). No forms, no cookies, no redirects, no HTML. |
+| Format | JSON in and out (`Content-Type: application/json`, parameters such as `; charset=utf-8` allowed). No forms, no cookies, no redirects, no HTML. Every `POST` under `/api/v1` must send that `Content-Type`; anything else, including no `Content-Type`, is `415`. |
 | Error body | Always `{ "error": "<code>", "message": "<human text>" }`. Branch on `error`, never on `message`. |
 | Email | Trimmed and compared case-insensitively (stored lowercase). |
 | Password | Min 8 characters, max 72 UTF-8 bytes, no NUL. |
@@ -33,6 +33,7 @@ Companion: [`integration-guide.md`](./integration-guide.md).
 
 | Status | `error` | Where |
 |--------|---------|-------|
+| 415 | `unsupported_media_type` | Every `POST` under `/api/v1`: `Content-Type` is not `application/json` (form, multipart, `text/plain`) or missing. Body `{ "error": "unsupported_media_type", "message": "Request body must be JSON." }`. Checked before any limit, lookup or CORS handling, so it never carries an allow header and never counts against a limit. |
 | 400 | `invalid_request` | Any body endpoint: malformed body |
 | 400 | `invalid_email`, `invalid_password` | Signup (both), reset and change (`invalid_password`) |
 | 400 | `invalid_client` | Signup, resend, forgot, refresh: unknown or inactive `client_id`, or (signup, resend, forgot) origin not bound to it |
@@ -67,7 +68,7 @@ Texts: the fixed `message` strings are listed per endpoint where they are fixed.
 
 - No `Origin` header (native clients, servers): not CORS-gated.
 - Allowed-origin lookups may be cached up to 30 seconds.
-- Today the CORS middleware covers all 10 routes and the preflight answer above is live. The origin binding of the actual request is live for signup and resend-confirmation (`400 invalid_client`, no allow header); the other endpoints get it in their own units. `GET accounts/confirm` has no binding, and so no allow header, until U17a.
+- Today the CORS middleware covers all 10 routes and the preflight answer above is live. The origin binding of the actual request is live for signup, resend-confirmation (`400 invalid_client`, no allow header) and confirm (generic `invalid_or_expired_link`, no allow header); the other endpoints get it in their own units.
 
 ### Rate-limit behaviour (summary)
 
@@ -124,7 +125,7 @@ Status: IMPLEMENTED.
 
 ### `POST /api/v1/accounts/signup`
 
-Status: IMPLEMENTED (limits: PLANNED; browser CORS with origin binding: IMPLEMENTED).
+Status: IMPLEMENTED.
 
 | Item | Value |
 |------|-------|
@@ -133,25 +134,25 @@ Status: IMPLEMENTED (limits: PLANNED; browser CORS with origin binding: IMPLEMEN
 | Side effects | New: unconfirmed account (bcrypt cost 12) and a confirmation email (24 h link). Existing: an "account exists" notice with the app's `password_reset_url`, no token. No tokens are issued. |
 | Errors | `400 invalid_request`, `400 invalid_email`, `400 invalid_password` (length, 72 bytes, NUL), `400 invalid_client` (unknown or inactive app, origin not bound), `400 unconfigured_client`, `429 rate_limited`, `503 temporarily_unavailable` |
 | CORS | Origin bound to body `client_id` |
-| Limits | Per IP: `429` + `Retry-After`. Per account: silent, no email |
+| Limits | Per IP (and app): `429` + `Retry-After`, identical for a new and an existing address, checked before any password hashing or account lookup. Per account (3 emails per hour, shared with resend and forgot): the answer stays the usual `202`; a new account is still created but no email is sent. |
 
-Validation errors never reveal whether the address exists.
+Validation errors never reveal whether the address exists. `unconfigured_client` describes the app (it lacks `email_confirmation_url` or `password_reset_url`), is raised before any account work, and never depends on the address.
 
 ### `POST /api/v1/accounts/confirm`
 
-Status: PLANNED. The current `GET /api/v1/accounts/confirm?token=` is IMPLEMENTED (REPLACED): after the change, `GET` returns `404` and never consumes a token.
+Status: IMPLEMENTED. It replaces the former `GET /api/v1/accounts/confirm?token=`: `GET` now returns `404` and never consumes a token, so mail scanners and link prefetchers cannot confirm accounts.
 
 | Item | Value |
 |------|-------|
 | Request | `{ "token": string }`, the value of `#token` from the email link. No `client_id`: the token identifies the app. |
 | Success | `200 { "message": "Your email address has been confirmed." }`. The token is marked used and a welcome email is sent. No tokens are issued. |
 | Errors | `400 invalid_or_expired_link` for malformed, unknown, used or expired tokens, and for a known token sent from the wrong origin (identical, so it is not an oracle). `400 invalid_request` for a missing or non-string `token`. `429 rate_limited`. |
-| CORS | Origin bound to the app that owns the token |
+| CORS | Origin bound to the app that owns the token. The allow header is sent on `200`, and on the `400 invalid_or_expired_link` of a token that belongs to the origin's own app (used or expired). A malformed or unknown token, a token of another app, or a known token from an unbound origin gets no allow header. The body is identical in every case (`invalid_or_expired_link`); only the allow header differs, and only for the owning app's origin. A browser page that is not the owner sees an opaque network/CORS error, not a readable `400`: integrators must treat a network error on confirm like `invalid_or_expired_link`. |
 | Limits | Per IP: `429` + `Retry-After`, checked before the token is looked up |
 
 ### `POST /api/v1/accounts/resend-confirmation`
 
-Status: IMPLEMENTED (limits: PLANNED; browser CORS with origin binding: IMPLEMENTED).
+Status: IMPLEMENTED.
 
 | Item | Value |
 |------|-------|
@@ -160,7 +161,7 @@ Status: IMPLEMENTED (limits: PLANNED; browser CORS with origin binding: IMPLEMEN
 | Side effects | For an unconfirmed account: new token, previous unused tokens invalidated. |
 | Errors | `400 invalid_request`, `400 invalid_client`, `400 unconfigured_client`, `429 rate_limited`, `503 temporarily_unavailable` |
 | CORS | Origin bound to body `client_id` |
-| Limits | As signup |
+| Limits | Per IP (and app): `429` + `Retry-After`, checked before the account is looked up. Per account: the usual `202` and no email once the cap is reached; requests for unknown addresses count too. |
 
 ### `GET /api/v1/me`
 

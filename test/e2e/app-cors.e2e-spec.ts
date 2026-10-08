@@ -66,7 +66,7 @@ describe('CORS origin allowlist (e2e)', () => {
   it.each(['https://a.example', 'https://b.example', 'http://localhost:5173'])(
     'echoes %s, registered by some active app, with no client_id anywhere',
     async (origin) => {
-      const response = await request(server()).post('/api/v1/password/change').set('Origin', origin).expect(201);
+      const response = await request(server()).post('/api/v1/password/change').send({}).set('Origin', origin).expect(201);
 
       expect(response.headers['access-control-allow-origin']).toBe(origin);
       expect(response.headers['vary']).toMatch(/Origin/);
@@ -85,7 +85,7 @@ describe('CORS origin allowlist (e2e)', () => {
   });
 
   it('grants nothing to an unexpected 500', async () => {
-    const response = await request(server()).post('/api/v1/auth/logout').set('Origin', 'https://a.example').expect(500);
+    const response = await request(server()).post('/api/v1/auth/logout').send({}).set('Origin', 'https://a.example').expect(500);
 
     expect(response.headers['access-control-allow-origin']).toBeUndefined();
   });
@@ -129,7 +129,7 @@ describe('CORS origin allowlist (e2e)', () => {
   });
 
   it('returns no CORS headers for an unknown origin', async () => {
-    const response = await request(server()).post('/api/v1/password/change').set('Origin', 'https://other.example').expect(201);
+    const response = await request(server()).post('/api/v1/password/change').send({}).set('Origin', 'https://other.example').expect(201);
 
     expect(response.headers['access-control-allow-origin']).toBeUndefined();
   });
@@ -146,7 +146,7 @@ describe('CORS origin allowlist (e2e)', () => {
   });
 
   it('returns no CORS headers for the origin of an inactive app', async () => {
-    const response = await request(server()).post('/api/v1/password/change').set('Origin', 'https://off.example').expect(201);
+    const response = await request(server()).post('/api/v1/password/change').send({}).set('Origin', 'https://off.example').expect(201);
 
     expect(response.headers['access-control-allow-origin']).toBeUndefined();
   });
@@ -154,20 +154,20 @@ describe('CORS origin allowlist (e2e)', () => {
   it.each(['https://a.example/', 'HTTPS://A.EXAMPLE', 'https://sub.a.example', 'null'])(
     'matches origins exactly: %s is not allowed',
     async (origin) => {
-      const response = await request(server()).post('/api/v1/password/change').set('Origin', origin).expect(201);
+      const response = await request(server()).post('/api/v1/password/change').send({}).set('Origin', origin).expect(201);
 
       expect(response.headers['access-control-allow-origin']).toBeUndefined();
     },
   );
 
   it('adds no CORS headers when the request has no Origin', async () => {
-    const response = await request(server()).post('/api/v1/password/change').expect(201);
+    const response = await request(server()).post('/api/v1/password/change').send({}).expect(201);
 
     expect(response.headers['access-control-allow-origin']).toBeUndefined();
   });
 
   it('never answers with a wildcard origin or credentials', async () => {
-    const response = await request(server()).post('/api/v1/password/change').set('Origin', 'https://a.example');
+    const response = await request(server()).post('/api/v1/password/change').send({}).set('Origin', 'https://a.example');
 
     expect(response.headers['access-control-allow-origin']).not.toBe('*');
     expect(response.headers['access-control-allow-credentials']).toBeUndefined();

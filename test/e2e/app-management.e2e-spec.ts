@@ -29,7 +29,7 @@ describe('app management is CLI-only (e2e)', () => {
     ['DELETE', '/apps/abc'],
   ] as const)('%s %s answers 404', async (method, path) => {
     const server = app.getHttpServer();
-    const call = { POST: request(server).post(path), GET: request(server).get(path), PUT: request(server).put(path), PATCH: request(server).patch(path), DELETE: request(server).delete(path) }[method];
+    const call = { POST: request(server).post(path).send({}), GET: request(server).get(path), PUT: request(server).put(path), PATCH: request(server).patch(path), DELETE: request(server).delete(path) }[method];
     await call.expect(404);
   });
 });

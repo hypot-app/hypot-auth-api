@@ -108,6 +108,14 @@ export class App implements AppProps {
     return this.status === 'active';
   }
 
+  /**
+   * True when both email link URLs are set. The confirmation URL builds confirmation links and the reset URL
+   * builds reset links and the account-exists notice, so account flows that may send any of them need both.
+   */
+  hasEmailLinks(): boolean {
+    return this.emailConfirmationUrl !== null && this.passwordResetUrl !== null;
+  }
+
   // Private member: it keeps `App` nominal, which `ClientRef.resolved(app: App)` relies on.
   private snapshot(): AppProps {
     return { ...this };
