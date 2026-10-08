@@ -311,6 +311,8 @@ The `503` is raised before any account lookup, so it reveals nothing about accou
 **Choice:** `POST /api/v1/accounts/confirm {token}` replaces the GET (the user-accounts spec takes the token alone; the token already identifies the account and app, and the origin is bound to that app, ADR 38). Every failure returns `400 invalid_or_expired_link`.
 
 **Rationale:** consuming on GET let link scanners burn tokens (U5 S3). **Rejected:** keeping the GET behind an interstitial page, which needs a page Auth no longer serves.
+**CORS on a confirm failure (U17 review, W1).** The body of every failure is identical, but the allow header is not. `Access-Control-Allow-Origin` is granted on a failure only when the request `Origin` is bound to the app that owns the token (a used or expired token sent from the app's own page), so that page can read the `400` and show its resend form. A malformed, unknown or other-app token, or a known token from an unbound origin, gets no allow header: the app's page sees an opaque network/CORS error. This keeps the fail-closed grant of ADR 38 (nothing about a token leaks to an origin that does not own it) at the cost of readability. Integrators must treat a network error on confirm the same as `invalid_or_expired_link`. The same rule applies to reset in U18. **Rejected:** granting the header on every confirm failure, because the header difference would then no longer be limited to the owning app and an unrelated origin could read token state.
+
 
 ### ADR 41: No page rendering
 

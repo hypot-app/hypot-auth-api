@@ -146,7 +146,7 @@ Status: IMPLEMENTED. It replaces the former `GET /api/v1/accounts/confirm?token=
 | Request | `{ "token": string }`, the value of `#token` from the email link. No `client_id`: the token identifies the app. |
 | Success | `200 { "message": "Your email address has been confirmed." }`. The token is marked used and a welcome email is sent. No tokens are issued. |
 | Errors | `400 invalid_or_expired_link` for malformed, unknown, used or expired tokens, and for a known token sent from the wrong origin (identical, so it is not an oracle). `400 invalid_request` for a missing or non-string `token`. `429 rate_limited`. |
-| CORS | Origin bound to the app that owns the token. The allow header is sent on `200`, and on the `400 invalid_or_expired_link` of a token that belongs to the origin's own app (used or expired). An unknown token, or a token of another app, gets no allow header. |
+| CORS | Origin bound to the app that owns the token. The allow header is sent on `200`, and on the `400 invalid_or_expired_link` of a token that belongs to the origin's own app (used or expired). A malformed or unknown token, a token of another app, or a known token from an unbound origin gets no allow header. The body is identical in every case (`invalid_or_expired_link`); only the allow header differs, and only for the owning app's origin. A browser page that is not the owner sees an opaque network/CORS error, not a readable `400`: integrators must treat a network error on confirm like `invalid_or_expired_link`. |
 | Limits | Per IP: `429` + `Retry-After`, checked before the token is looked up |
 
 ### `POST /api/v1/accounts/resend-confirmation`

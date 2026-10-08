@@ -157,7 +157,10 @@ On success Auth answers `200 { "message": "Your email address has been confirmed
 | Unknown or inactive `client_id`, or origin not bound to the app | `400 invalid_client` | A configuration error. This is a bug in your setup, not a user problem. |
 | App has no email URLs configured | `400 unconfigured_client` | Contact the operator |
 | Confirm: invalid, used, expired or unknown token | `400 invalid_or_expired_link` | "This link is invalid or expired", with a resend form |
+| Confirm: network or CORS error in the browser | no readable response | Treat it exactly like `invalid_or_expired_link` (see below) |
 | IP rate limit, on signup or confirm | `429 rate_limited` with `Retry-After` | Retry later |
+
+On confirm, only some failures are readable from the browser. Auth sends the CORS allow header on a failure only when your page's origin is bound to the app that owns the token (a used or expired token). A malformed, unknown or other-app token gets the same `400` body but no allow header, so `fetch` rejects with an opaque network error. Handle a rejected `fetch` on confirm the same as `invalid_or_expired_link`: show "This link is invalid or expired" and the resend form.
 
 ### Resend confirmation
 
