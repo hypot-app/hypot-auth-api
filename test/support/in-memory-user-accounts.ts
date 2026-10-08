@@ -27,6 +27,12 @@ export class InMemoryUserRepository implements UserRepository {
     return true;
   }
 
+  async replacePassword(userId: string, currentHash: string, newHash: string, at: Date): Promise<boolean> {
+    const user = this.users.get(userId);
+    if (user === undefined || user.passwordHash !== currentHash) return false;
+    return this.updatePassword(userId, newHash, at);
+  }
+
   async findByAppAndEmail(appId: string, email: string): Promise<User | null> {
     return [...this.users.values()].find((u) => u.appId === appId && u.email === email) ?? null;
   }

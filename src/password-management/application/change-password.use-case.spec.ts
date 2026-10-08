@@ -262,6 +262,40 @@ describe('ChangePasswordUseCase', () => {
     });
   });
 
+  describe('when the password changes while the request is in flight', () => {
+    const RACING = 'racing passphrase';
+    /** Another request (a reset, or a change) commits a new hash after this request read the account and before it writes. */
+    const raceDuringHashing = (ctx: Ctx) => {
+      const hash = ctx.h.hasher.hash.bind(ctx.h.hasher);
+      jest.spyOn(ctx.h.hasher, 'hash').mockImplementationOnce(async (plain) => {
+        await ctx.h.users.updatePassword(ctx.user.id, `hashed:${RACING}`, ctx.h.clock.now());
+        return hash(plain);
+      });
+    };
+
+    it('answers invalid_current_password, keeps the concurrent hash and revokes and queues nothing', async () => {
+      const ctx = await setup();
+      const before = ctx.h.queued().length;
+      raceDuringHashing(ctx);
+
+      expect(failureKind(await change(ctx))).toBe('invalid_current_password');
+
+      expect(await passwordOf(ctx)).toBe(`hashed:${RACING}`);
+      expect(ctx.h.queued()).toHaveLength(before);
+      for (const id of ctx.sessionIds) expect(ctx.h.sessions.sessions.get(id)!.revokedAt).toBeNull();
+    });
+
+    it('does not count as a wrong guess: the caller proved the password they read, so the pair counter is refunded', async () => {
+      const ctx = await setup({ login_account_ip: { limit: 2, blockSeconds: 900 } });
+      raceDuringHashing(ctx);
+      await change(ctx);
+
+      // Without the refund the miss plus this wrong guess would hit the limit of 2 and lock the pair out.
+      expect(failureKind(await change(ctx, { currentPassword: 'wrong passphrase' }))).toBe('invalid_current_password');
+      expect((await change(ctx, { currentPassword: RACING })).ok).toBe(true);
+    });
+  });
+
   describe('atomicity', () => {
     it('rolls the password back and queues no notice when revoking the sessions fails', async () => {
       const ctx = await setup();

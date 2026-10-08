@@ -59,9 +59,13 @@ const fail = (failure: ChangeFailure) => err<ChangeFailure>(failure);
  * The lockout is the login one: the attempt is counted on BOTH counters (pair and account, keyed like login)
  * before bcrypt runs, and a blocked or locked caller gets the same `invalid_current_password` even with the
  * correct password, without bcrypt. A success refunds the pair counter only. Change has no per-IP limit of its
- * own. On success the hash, every session of the account (the caller's too; their access token lives until
+ * own. A password that changed under the request (a reset or change committed while bcrypt ran) is refused as
+ * `invalid_current_password` with nothing written, and is not counted as a wrong guess. On success the hash, every session of the account (the caller's too; their access token lives until
  * `exp`) and the password-changed notice commit together.
  */
+/** The stored hash is no longer the one that was verified; thrown inside the unit of work to roll it back. */
+class PasswordChangedMidRequest extends Error {}
+
 export class ChangePasswordUseCase {
   constructor(private readonly deps: ChangePasswordDeps) {}
 
@@ -95,14 +99,24 @@ export class ChangePasswordUseCase {
     }
 
     const passwordHash = await hasher.hash(newPassword.value);
-    await this.deps.uow.run(async () => {
-      const now = this.deps.clock.now();
-      if (!(await users.updatePassword(user.id, passwordHash, now))) throw new Error('account vanished during a password change');
-      await this.deps.sessions.execute({ userId: user.id, reason: 'password_changed' });
-      await this.deps.outbox.save(
-        OutboxEmail.queue({ id: randomUUID(), appId: user.appId, to: user.email, template: 'password-changed', payload: {}, now }),
-      );
-    });
+    try {
+      await this.deps.uow.run(async () => {
+        const now = this.deps.clock.now();
+        // Compare-and-swap on the hash verified above: bcrypt took a while since the read, and a reset or change
+        // that committed meanwhile must not be silently overwritten by the holder of the old password.
+        if (!(await users.replacePassword(user.id, user.passwordHash, passwordHash, now))) throw new PasswordChangedMidRequest();
+        await this.deps.sessions.execute({ userId: user.id, reason: 'password_changed' });
+        await this.deps.outbox.save(
+          OutboxEmail.queue({ id: randomUUID(), appId: user.appId, to: user.email, template: 'password-changed', payload: {}, now }),
+        );
+      });
+    } catch (error) {
+      if (!(error instanceof PasswordChangedMidRequest)) throw error;
+      // Nothing was written, revoked or queued. The caller proved the password they read, so this is not a wrong
+      // guess: the pair counter is refunded like on a success (the account counter keeps the attempt).
+      await abuse.recordLoginSuccess(client, user.email, input.ip);
+      return fail({ kind: 'invalid_current_password' });
+    }
     // Refunded only once the change is committed: a change that fails to commit stays counted.
     await abuse.recordLoginSuccess(client, user.email, input.ip);
     return ok(undefined);

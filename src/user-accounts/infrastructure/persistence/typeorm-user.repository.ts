@@ -47,6 +47,18 @@ export class TypeOrmUserRepository implements UserRepository {
     return result.raw.length > 0;
   }
 
+  async replacePassword(userId: string, currentHash: string, newHash: string, at: Date): Promise<boolean> {
+    // Compare-and-swap on the hash: a reset or change that committed after the caller read the account is kept.
+    const result = await currentManager(this.dataSource)
+      .createQueryBuilder()
+      .update(UserSchema)
+      .set({ password_hash: newHash, password_changed_at: at, updated_at: at })
+      .where('id = :userId AND password_hash = :currentHash', { userId, currentHash })
+      .returning('id')
+      .execute();
+    return result.raw.length > 0;
+  }
+
   async findByAppAndEmail(appId: string, email: string): Promise<User | null> {
     const row = await currentManager(this.dataSource)
       .getRepository<UserRow>(UserSchema)

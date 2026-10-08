@@ -38,13 +38,13 @@ describe('changing a password on Postgres (integration)', () => {
   let app: App;
   let userId: string;
 
-  const build = (revoke?: { execute(input: { userId: string; reason: 'password_changed' }): Promise<number> }) =>
+  const build = (revoke?: { execute(input: { userId: string; reason: 'password_changed' }): Promise<number> }, hasher = new FakePasswordHasher()) =>
     new ChangePasswordUseCase({
       resolveClient: new ResolveClientUseCase(new TypeOrmAppRepository(db.dataSource)),
       abuse: new AbuseGuard({ store: new InMemoryAbuseCounterStore(), policies: DEFAULT_POLICIES, clock }),
       authenticate: { execute: async () => ok({ accountId: userId, appId: app.id, clientId: app.clientId }) },
       users: new TypeOrmUserRepository(db.dataSource),
-      hasher: new FakePasswordHasher(),
+      hasher,
       sessions: revoke ?? new RevokeAccountSessionsUseCase({ sessions, clock }),
       outbox: new TypeOrmEmailOutbox(db.dataSource),
       clock,
@@ -118,5 +118,34 @@ describe('changing a password on Postgres (integration)', () => {
     expect(await hash()).toBe('hashed:old passphrase');
     expect(await revokedReason(session)).toBeNull();
     expect(await outboxCount()).toBe(0);
+  });
+
+  it('refuses the change, keeping the concurrent hash and revoking and queuing nothing, when the hash changed after the read', async () => {
+    const session = await openSession();
+    const hasher = new FakePasswordHasher();
+    const hashNew = hasher.hash.bind(hasher);
+    // A reset commits while this request is hashing the new password (the window bcrypt opens in production).
+    hasher.hash = async (plain) => {
+      await db.dataSource.query(`UPDATE users SET password_hash = 'hashed:reset passphrase' WHERE id = $1`, [userId]);
+      return hashNew(plain);
+    };
+
+    const result = await build(undefined, hasher).execute(input);
+
+    expect(result).toMatchObject({ ok: false, error: { kind: 'invalid_current_password' } });
+    expect(await hash()).toBe('hashed:reset passphrase');
+    expect(await revokedReason(session)).toBeNull();
+    expect(await outboxCount()).toBe(0);
+  });
+
+  it('replacePassword swaps only while the stored hash is the expected one', async () => {
+    const users = new TypeOrmUserRepository(db.dataSource);
+
+    expect(await users.replacePassword(userId, 'hashed:stale', 'hashed:x', T0)).toBe(false);
+    expect(await users.replacePassword(randomUUID(), 'hashed:old passphrase', 'hashed:x', T0)).toBe(false);
+    expect(await hash()).toBe('hashed:old passphrase');
+
+    expect(await users.replacePassword(userId, 'hashed:old passphrase', 'hashed:x', T0)).toBe(true);
+    expect(await hash()).toBe('hashed:x');
   });
 });
