@@ -14,6 +14,7 @@ import { User } from '../../src/user-accounts/domain/user';
 import { BcryptPasswordHasher } from '../../src/user-accounts/infrastructure/bcrypt-password-hasher';
 import { TypeOrmUserRepository } from '../../src/user-accounts/infrastructure/persistence/typeorm-user.repository';
 import { createTestApp } from '../support/create-test-app';
+import { LowCostPasswordHasher } from '../support/low-cost-password-hasher';
 import { startTestDatabase, type TestDatabase } from '../support/postgres';
 
 const SHOP_ORIGIN = 'https://shop.example';
@@ -30,13 +31,17 @@ describe('POST /api/v1/auth/login (e2e)', () => {
   let app: INestApplication;
   let shop: App;
   let blog: App;
+  /** Cost 4: the bulk tests pay for bcrypt in the logins only, and almost nothing there. */
   let passwordHash: string;
+  /** Cost 12, what production stores. Used by the one suite that runs the real hasher end to end. */
+  let productionHash: string;
   const verifySpy = jest.spyOn(BcryptPasswordHasher.prototype, 'verify');
 
-  const login = (body: Record<string, unknown>, origin?: string) => {
-    const req = request(app.getHttpServer()).post('/api/v1/auth/login').send(body);
+  const loginOn = (target: INestApplication, body: Record<string, unknown>, origin?: string) => {
+    const req = request(target.getHttpServer()).post('/api/v1/auth/login').send(body);
     return origin === undefined ? req : req.set('Origin', origin);
   };
+  const login = (body: Record<string, unknown>, origin?: string) => loginOn(app, body, origin);
   const credentials = (overrides: Record<string, unknown> = {}) => ({
     client_id: shop.clientId,
     email: 'ana@example.com',
@@ -67,8 +72,8 @@ describe('POST /api/v1/auth/login (e2e)', () => {
     await new TypeOrmAppRepository(app.get(DataSource)).save(created);
     return created;
   };
-  const addUser = async (appId: string, email: string, confirmed = true): Promise<User> => {
-    const registered = User.register({ id: randomUUID(), appId, email, passwordHash, now: new Date() });
+  const addUser = async (appId: string, email: string, confirmed = true, hash = passwordHash): Promise<User> => {
+    const registered = User.register({ id: randomUUID(), appId, email, passwordHash: hash, now: new Date() });
     const user = confirmed ? registered.confirm(new Date()) : registered;
     await new TypeOrmUserRepository(app.get(DataSource)).add(user);
     return user;
@@ -83,14 +88,15 @@ describe('POST /api/v1/auth/login (e2e)', () => {
     db = await startTestDatabase();
     app = await createTestApp({
       databaseUrl: db.url,
+      passwordHasher: new LowCostPasswordHasher(),
       abusePolicies: resolvePolicies({
         login_ip: { limit: LOGIN_IP_LIMIT },
         login_account_ip: { limit: PAIR_LIMIT, blockSeconds: 900 },
         login_account: { limit: ACCOUNT_LIMIT, blockSeconds: 900 },
       }),
     });
-    // One cost-12 hash for every account: the e2e pays for bcrypt only in the logins themselves.
-    passwordHash = await new BcryptPasswordHasher().hash(PASSWORD);
+    passwordHash = await new LowCostPasswordHasher().hash(PASSWORD);
+    productionHash = await new BcryptPasswordHasher().hash(PASSWORD);
   }, 180_000);
 
   afterAll(async () => {
@@ -221,7 +227,7 @@ describe('POST /api/v1/auth/login (e2e)', () => {
         cases.map(({ name, verifies }) => ({ name, verifies })),
       );
       expect(await count('auth_sessions')).toBe(0);
-    }, 60_000);
+    });
 
     it('shares ONE login_ip limit between random client_id values and does not grow the counter table', async () => {
       const statuses: number[] = [];
@@ -234,7 +240,7 @@ describe('POST /api/v1/auth/login (e2e)', () => {
       expect(verifySpy).toHaveBeenCalledTimes(LOGIN_IP_LIMIT);
       const rows = await db.dataSource.query(`SELECT scope FROM abuse_counters WHERE scope = 'login_ip'`);
       expect(rows).toHaveLength(1);
-    }, 60_000);
+    });
 
     it('lets the browser read it from the bound origin, because the binding passed', async () => {
       const response = await login(credentials({ password: 'wrong password!!' }), SHOP_ORIGIN);
@@ -258,6 +264,23 @@ describe('POST /api/v1/auth/login (e2e)', () => {
       expect(response.body).toEqual(reference.body);
       expect(response.headers['access-control-allow-origin']).toBeUndefined();
       expect(await count('auth_sessions')).toBe(0);
+    });
+
+    it('does not log an account of one app in through another app, even with the same email and password', async () => {
+      await addUser(blog.id, 'ana@example.com');
+
+      const crossApp = await login(credentials({ client_id: shop.clientId }));
+
+      expect(crossApp.status).toBe(401);
+      expect(crossApp.body).toEqual(GENERIC_401);
+      expect(verifySpy).toHaveBeenCalledTimes(1);
+      expect(await count('auth_sessions')).toBe(0);
+      expect(await count('refresh_tokens')).toBe(0);
+
+      // Control: the very same credentials work in the app where the account lives.
+      const home = await login(credentials({ client_id: blog.clientId }));
+      expect(home.status).toBe(200);
+      expect(await count('auth_sessions')).toBe(1);
     });
 
     it('answers an unknown client_id from an app origin with the same 401 and no allow header', async () => {
@@ -288,6 +311,34 @@ describe('POST /api/v1/auth/login (e2e)', () => {
 
       expect(response.status).toBe(400);
       expect(response.headers['access-control-allow-origin']).toBeUndefined();
+    });
+  });
+
+  describe('with the production hasher (bcrypt cost 12)', () => {
+    let realApp: INestApplication;
+
+    beforeAll(async () => {
+      realApp = await createTestApp({ databaseUrl: db.url });
+    }, 60_000);
+
+    afterAll(async () => {
+      await realApp?.close();
+    });
+
+    it('logs in and fails generically end to end, comparing against a cost-12 hash and a cost-12 dummy', async () => {
+      expect(productionHash).toMatch(/^\$2[aby]\$12\$/);
+      await addUser(shop.id, 'ana@example.com', true, productionHash);
+
+      const ok = await loginOn(realApp, credentials());
+      const wrong = await loginOn(realApp, credentials({ password: 'wrong password!!' }));
+      const unknown = await loginOn(realApp, credentials({ email: 'nobody@example.com' }));
+
+      expect(ok.status).toBe(200);
+      expect(ok.body.access_token).toEqual(expect.any(String));
+      expect([wrong.status, unknown.status]).toEqual([401, 401]);
+      expect([wrong.body, unknown.body]).toEqual([GENERIC_401, GENERIC_401]);
+      expect(verifySpy).toHaveBeenCalledTimes(3);
+      expect(await count('auth_sessions')).toBe(1);
     });
   });
 

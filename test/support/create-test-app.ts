@@ -7,6 +7,7 @@ import { APP_CONFIG, type AppConfig } from '../../src/platform/config/app-config
 import { configureApp } from '../../src/platform/configure-app';
 import { generateKeySet } from '../../src/token-lifecycle/infrastructure/signing-key-generator';
 import { SIGNING_KEYS_SOURCE } from '../../src/token-lifecycle/infrastructure/signing-keys-source';
+import { PASSWORD_HASHER, type PasswordHasher } from '../../src/user-accounts/domain/password-hasher';
 
 export interface TestAppOptions {
   /** Connection URL of the Testcontainers database the app must use. */
@@ -18,6 +19,8 @@ export interface TestAppOptions {
   abusePolicies?: PolicyTable;
   /** Signing key set JSON. Defaults to one freshly generated active key; private keys never live in the repository. */
   signingKeysJson?: string;
+  /** Replaces the production cost-12 hasher, for suites that run hundreds of logins. Omit it to keep bcrypt cost 12. */
+  passwordHasher?: PasswordHasher;
 }
 
 export function buildTestConfig(options: Pick<TestAppOptions, 'databaseUrl' | 'config'>): AppConfig {
@@ -39,7 +42,7 @@ export function buildTestConfig(options: Pick<TestAppOptions, 'databaseUrl' | 'c
  * Tests therefore hit the production route layout (ADR 28).
  */
 export async function createTestApp(options: TestAppOptions): Promise<INestApplication> {
-  const moduleRef = await Test.createTestingModule({
+  const builder = Test.createTestingModule({
     imports: [AppModule],
     controllers: options.controllers ?? [],
   })
@@ -48,8 +51,9 @@ export async function createTestApp(options: TestAppOptions): Promise<INestAppli
     .overrideProvider(ABUSE_POLICIES)
     .useValue(options.abusePolicies ?? DEFAULT_POLICIES)
     .overrideProvider(SIGNING_KEYS_SOURCE)
-    .useValue(() => options.signingKeysJson ?? JSON.stringify(generateKeySet({ next: false })))
-    .compile();
+    .useValue(() => options.signingKeysJson ?? JSON.stringify(generateKeySet({ next: false })));
+  if (options.passwordHasher !== undefined) builder.overrideProvider(PASSWORD_HASHER).useValue(options.passwordHasher);
+  const moduleRef = await builder.compile();
 
   const app = moduleRef.createNestApplication();
   configureApp(app);
