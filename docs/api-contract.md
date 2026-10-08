@@ -196,15 +196,18 @@ The login `401` is `{ "error": "invalid_credentials", "message": "Email or passw
 
 ### `POST /api/v1/auth/refresh`
 
-Status: PLANNED.
+Status: IMPLEMENTED.
 
 | Item | Value |
 |------|-------|
 | Request | `{ "client_id": string, "refresh_token": string }` |
 | Success | `200`, same body shape as login. New access token and new refresh token in the same session. The presented token is marked used. |
 | Errors | `401 invalid_grant`, identical for unknown, expired, other-app, revoked and reused tokens (outside the grace rule below), and for an `Origin` not bound to `client_id`. `400 invalid_request`. `400 invalid_client` (unknown or inactive `client_id`). `429 rate_limited`. |
-| CORS | Origin bound to body `client_id` |
+| CORS | Origin bound to body `client_id`. An `Origin` not bound to it gets the `401 invalid_grant` with no allow header, and the token is not consumed. Once the binding passes, the `200`, the `401`, the request-validation `400` and the `429` carry the allow header; `invalid_client` and a `500` never do. |
 | Limits | Per (app, IP): `429` + `Retry-After`, checked before the token is looked up. A `429` is not `invalid_grant`: do not log the user out. |
+| Headers | Every answer, errors included, carries `Cache-Control: no-store` and `Pragma: no-cache`. |
+
+The `401` is `{ "error": "invalid_grant", "message": "The refresh token is invalid or has expired." }` and the `400` is `{ "error": "invalid_request", "message": "client_id and refresh_token must be strings" }`. Every successful refresh also records the session as used (`last_used_at`).
 
 **Reuse and the grace window.** Presenting a token that was already rotated revokes the whole session, with one exception. If a rotated token R1 (rotated into R2) is presented again:
 
@@ -222,7 +225,7 @@ Lifetimes: session 30 days absolute from login, not extended by rotation. A toke
 
 ### `POST /api/v1/auth/logout`
 
-Status: PLANNED.
+Status: IMPLEMENTED.
 
 | Item | Value |
 |------|-------|
@@ -231,6 +234,9 @@ Status: PLANNED.
 | Errors | `400 invalid_request` for a malformed body. An `Origin` not bound to `client_id` still gets `204`, but nothing is revoked and no CORS allow header is sent. |
 | CORS | Origin bound to body `client_id` |
 | Limits | None |
+| Headers | Every answer, the `400` included, carries `Cache-Control: no-store` and `Pragma: no-cache`. |
+
+`400` is `{ "error": "invalid_request", "message": "client_id and refresh_token must be strings" }`. An unknown or inactive `client_id` also gets `204`, with no effect and no allow header. The allow header is sent on the `204` and on the `400` only once the origin is bound to `client_id`.
 
 Access tokens already issued stay valid until `exp` (no denylist).
 

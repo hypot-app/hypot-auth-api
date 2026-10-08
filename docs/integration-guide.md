@@ -16,8 +16,8 @@ hypot Auth is an API-only authentication service. Your app builds its own login,
 | `GET /api/v1/accounts/confirm?token=` | IMPLEMENTED, BEING REPLACED. Do not build against it. |
 | `POST /api/v1/accounts/confirm` | PLANNED |
 | `POST /api/v1/auth/login` | IMPLEMENTED |
-| `POST /api/v1/auth/refresh` | PLANNED |
-| `POST /api/v1/auth/logout` | PLANNED |
+| `POST /api/v1/auth/refresh` | IMPLEMENTED |
+| `POST /api/v1/auth/logout` | IMPLEMENTED |
 | `GET /api/v1/me` | PLANNED |
 | `POST /api/v1/password/forgot` | PLANNED |
 | `POST /api/v1/password/reset` | PLANNED |
@@ -208,7 +208,7 @@ Show one message such as "Email or password is incorrect". Do not try to infer m
 
 ### Refresh with rotation
 
-Status: PLANNED.
+Status: IMPLEMENTED.
 
 ```http
 POST /api/v1/auth/refresh
@@ -246,7 +246,7 @@ The window is a configurable server setting (default 10 s): do not hard-code it.
 
 ### Logout
 
-Status: PLANNED.
+Status: IMPLEMENTED.
 
 ```http
 POST /api/v1/auth/logout

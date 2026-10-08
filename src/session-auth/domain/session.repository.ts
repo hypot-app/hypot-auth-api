@@ -40,10 +40,21 @@ export interface SessionRepository {
    */
   consume(hash: Buffer, appId: string, now: Date, successorHash: Buffer, ipHash: Buffer): Promise<ConsumedToken | null>;
   findTokenState(hash: Buffer): Promise<TokenState | null>;
+  /**
+   * Records that the session was used (a refresh, normal or grace), in the current unit of work. Only a
+   * session still open and inside its absolute expiry is touched; false means it closed meanwhile, and the
+   * caller must abort so its unit of work rolls back. The row lock it takes holds until commit.
+   */
+  touch(sessionId: string, now: Date): Promise<boolean>;
   /** Revokes one session. Idempotent: the first reason and time are kept. */
   revoke(sessionId: string, reason: SessionRevokedReason, now: Date): Promise<void>;
   /** Revokes every active session of an account. Returns how many it revoked. */
   revokeAllForUser(userId: string, reason: SessionRevokedReason, now: Date): Promise<number>;
+  /**
+   * Revokes every session that is still open, of every account and app (the key-compromise procedure).
+   * Sessions already revoked or already past their end are left alone. Returns how many it revoked.
+   */
+  revokeAll(reason: SessionRevokedReason, now: Date): Promise<number>;
   /**
    * Claims the one-time grace of a rotated, unrevoked token. Returns the hash of its successor the first
    * time, and null every other time (concurrent claims yield exactly one winner).

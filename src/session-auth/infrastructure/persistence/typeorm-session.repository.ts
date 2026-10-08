@@ -41,6 +41,12 @@ const REVOKE_TOKEN_SQL = `
   WHERE "token_hash" = $2 AND "consumed_at" IS NULL AND "revoked_at" IS NULL
   RETURNING 1`;
 
+/** Conditional on purpose: a logout or revoke-all that committed after the caller's read must be seen here. */
+const TOUCH_SESSION_SQL = `
+  UPDATE "auth_sessions" SET "last_used_at" = $1
+  WHERE "id" = $2 AND "revoked_at" IS NULL AND "expires_at" > $1
+  RETURNING 1`;
+
 /** `revoked_at IS NULL` keeps the first reason and time. */
 const REVOKE_SESSION_SQL = `
   UPDATE "auth_sessions" SET "revoked_at" = $1, "revoked_reason" = $2
@@ -50,6 +56,11 @@ const REVOKE_ALL_FOR_USER_SQL = `
   UPDATE "auth_sessions" SET "revoked_at" = $1, "revoked_reason" = $2
   WHERE "user_id" = $3 AND "revoked_at" IS NULL
   RETURNING 1`;
+
+/** Only sessions still open: the count is the sessions that stopped working, not rows that were dead already. */
+const REVOKE_ALL_SQL = `
+  UPDATE "auth_sessions" SET "revoked_at" = $1, "revoked_reason" = $2
+  WHERE "revoked_at" IS NULL AND "expires_at" > $1`;
 
 interface TokenStateRow {
   session_id: string;
@@ -109,6 +120,11 @@ export class TypeOrmSessionRepository implements SessionRepository {
     };
   }
 
+  async touch(sessionId: string, now: Date): Promise<boolean> {
+    const [rows]: [unknown[], number] = await currentManager(this.dataSource).query(TOUCH_SESSION_SQL, [now, sessionId]);
+    return rows.length > 0;
+  }
+
   async revoke(sessionId: string, reason: SessionRevokedReason, now: Date): Promise<void> {
     await currentManager(this.dataSource).query(REVOKE_SESSION_SQL, [now, reason, sessionId]);
   }
@@ -116,6 +132,12 @@ export class TypeOrmSessionRepository implements SessionRepository {
   async revokeAllForUser(userId: string, reason: SessionRevokedReason, now: Date): Promise<number> {
     const [rows]: [unknown[], number] = await currentManager(this.dataSource).query(REVOKE_ALL_FOR_USER_SQL, [now, reason, userId]);
     return rows.length;
+  }
+
+  async revokeAll(reason: SessionRevokedReason, now: Date): Promise<number> {
+    // No RETURNING: the number of rows is the driver's affected count, not a result set to carry around.
+    const [, affected]: [unknown[], number] = await currentManager(this.dataSource).query(REVOKE_ALL_SQL, [now, reason]);
+    return affected;
   }
 
   async claimGrace(hash: Buffer, now: Date): Promise<Buffer | null> {

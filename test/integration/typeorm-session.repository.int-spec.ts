@@ -280,6 +280,113 @@ describe('SessionRepository (integration, ADR 35)', () => {
     });
   });
 
+  describe('revokeAll', () => {
+    it('revokes every open session of every account and app, with the reason, and returns how many', async () => {
+      const first = await open();
+      const second = await open({ userId: userB });
+      const otherApp = await open({ appId: appB });
+
+      const revoked = await sessions.revokeAll('ops_revoke_all', at(10));
+
+      expect(revoked).toBe(3);
+      for (const { session } of [first, second, otherApp]) {
+        expect(await sessionRow(session.id)).toEqual({ revoked_at: at(10), revoked_reason: 'ops_revoke_all' });
+      }
+    });
+
+    it('leaves a session that was revoked before, or is already over, as it was, and does not count it', async () => {
+      const live = await open();
+      const done = await open();
+      await sessions.revoke(done.session.id, 'logout', at(5));
+      const over = await open({ sessionTtl: 60 });
+
+      const revoked = await sessions.revokeAll('ops_revoke_all', at(120));
+
+      expect(revoked).toBe(1);
+      expect(await sessionRow(live.session.id)).toEqual({ revoked_at: at(120), revoked_reason: 'ops_revoke_all' });
+      expect(await sessionRow(done.session.id)).toEqual({ revoked_at: at(5), revoked_reason: 'logout' });
+      expect(await sessionRow(over.session.id)).toEqual({ revoked_at: null, revoked_reason: null });
+    });
+
+    it('returns 0 when there is nothing to revoke', async () => {
+      expect(await sessions.revokeAll('ops_revoke_all', at(10))).toBe(0);
+    });
+
+    it('makes every token of those sessions unusable for a rotation', async () => {
+      const { token } = await open();
+
+      await sessions.revokeAll('ops_revoke_all', at(10));
+
+      expect(await sessions.consume(token.tokenHash, appA, at(20), hash(), hash())).toBeNull();
+    });
+  });
+
+  describe('touch', () => {
+    const lastUsedAt = async (id: string): Promise<Date> =>
+      (await db.dataSource.query(`SELECT last_used_at FROM auth_sessions WHERE id = $1`, [id]))[0].last_used_at;
+
+    it('records when the session was last used, for that session only', async () => {
+      const first = await open();
+      const second = await open();
+
+      expect(await sessions.touch(first.session.id, at(90))).toBe(true);
+
+      expect(await lastUsedAt(first.session.id)).toEqual(at(90));
+      expect(await lastUsedAt(second.session.id)).toEqual(T0);
+    });
+
+    it('returns false and changes nothing for a revoked session, an expired one and an unknown one', async () => {
+      const revoked = await open();
+      await sessions.revoke(revoked.session.id, 'logout', at(10));
+      const expired = await open({ sessionTtl: 60 });
+
+      expect(await sessions.touch(revoked.session.id, at(90))).toBe(false);
+      expect(await sessions.touch(expired.session.id, at(60))).toBe(false);
+      expect(await sessions.touch(randomUUID(), at(90))).toBe(false);
+
+      expect(await lastUsedAt(revoked.session.id)).toEqual(T0);
+      expect(await lastUsedAt(expired.session.id)).toEqual(T0);
+    });
+
+    it('rolls a grace back when the session was revoked after it was read: grace_used_at stays unset and no R3 is stored', async () => {
+      const { session, token } = await open();
+      const r2 = hash();
+      await sessions.consume(token.tokenHash, appA, at(100), r2, hash());
+      await sessions.addToken(RefreshToken.issue({ tokenHash: r2, session, now: at(100), idleTtlSeconds: 7 * DAY }));
+      const r3 = hash();
+      const tokenRows = async (): Promise<number> => (await db.dataSource.query(`SELECT 1 FROM refresh_tokens`)).length;
+
+      // The eligibility read saw an open session; the logout commits before the unit of work starts.
+      await sessions.revoke(session.id, 'logout', at(101));
+      await expect(
+        uow.run(async () => {
+          await sessions.claimGrace(token.tokenHash, at(102));
+          await sessions.revokeToken(r2, at(102));
+          await sessions.addToken(RefreshToken.issue({ tokenHash: r3, session, now: at(102), idleTtlSeconds: 7 * DAY }));
+          if (!(await sessions.touch(session.id, at(102)))) throw new Error('session closed');
+        }),
+      ).rejects.toThrow('session closed');
+
+      expect(await sessions.findTokenState(token.tokenHash)).toMatchObject({ graceUsedAt: null });
+      expect(await sessions.findTokenState(r2)).toMatchObject({ tokenRevokedAt: null });
+      expect(await tokenRows()).toBe(2);
+      expect(await lastUsedAt(session.id)).toEqual(T0);
+    });
+
+    it('joins the unit of work: a rollback leaves last_used_at as it was', async () => {
+      const { session } = await open();
+
+      await expect(
+        uow.run(async () => {
+          await sessions.touch(session.id, at(90));
+          throw new Error('abort');
+        }),
+      ).rejects.toThrow('abort');
+
+      expect(await lastUsedAt(session.id)).toEqual(T0);
+    });
+  });
+
   describe('reuse grace window storage', () => {
     it('claims the grace once for a rotated token and returns the successor hash', async () => {
       const { token } = await open();

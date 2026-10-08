@@ -5,6 +5,7 @@ import { AppCliModule } from '../../src/app-registry/infrastructure/cli/app-cli.
 import { CLI_OUTPUT, type CliOutput } from '../../src/app-registry/infrastructure/cli/cli-output';
 import { APP_CONFIG, type AppConfig } from '../../src/platform/config/app-config';
 import { PersistenceModule } from '../../src/platform/persistence/persistence.module';
+import { SessionCliModule } from '../../src/session-auth/infrastructure/cli/session-cli.module';
 import { SharedKernelModule } from '../../src/shared-kernel/shared-kernel.module';
 import { buildTestConfig } from './create-test-app';
 
@@ -38,7 +39,7 @@ export async function runCli(
   })
   class TestSupportModule {}
 
-  @Module({ imports: [SharedKernelModule, TestSupportModule, PersistenceModule, AppCliModule] })
+  @Module({ imports: [SharedKernelModule, TestSupportModule, PersistenceModule, AppCliModule, SessionCliModule] })
   class TestCliModule {}
 
   const context = await CommandFactory.createWithoutRunning(TestCliModule, {
