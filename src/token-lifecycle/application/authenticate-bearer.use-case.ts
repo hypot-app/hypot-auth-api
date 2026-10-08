@@ -27,8 +27,8 @@ export interface AuthenticateBearerDeps {
 }
 
 /** One error for every cause: a caller must not learn why a token was refused. */
-const UNAUTHORIZED_CODE = 'unauthorized';
-const UNAUTHORIZED_MESSAGE = 'Missing or invalid access token';
+export const UNAUTHORIZED_CODE = 'unauthorized';
+export const UNAUTHORIZED_MESSAGE = 'Missing or invalid access token';
 
 /** RFC 6750 `Bearer` followed by a token68 value; the scheme is case-insensitive. */
 const BEARER_HEADER = /^Bearer ([A-Za-z0-9\-._~+/]+=*)$/i;

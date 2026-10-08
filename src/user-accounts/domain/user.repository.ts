@@ -17,6 +17,8 @@ export interface UserRepository {
   /** `email` must be normalized. */
   findByAppAndEmail(appId: string, email: string): Promise<User | null>;
   findById(id: string): Promise<User | null>;
+  /** Like findById, but only when the account belongs to that app: an id of another app is not found. */
+  findByIdInApp(appId: string, id: string): Promise<User | null>;
 }
 
 export const USER_REPOSITORY = Symbol('UserRepository');

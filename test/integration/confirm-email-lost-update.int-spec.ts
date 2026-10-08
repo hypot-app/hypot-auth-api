@@ -67,6 +67,7 @@ describe('confirm email does not lose concurrent updates (integration)', () => {
       add: (u) => realUsers.add(u),
       markEmailVerified: (...args) => realUsers.markEmailVerified(...args),
       findByAppAndEmail: (...args) => realUsers.findByAppAndEmail(...args),
+      findByIdInApp: (...args) => realUsers.findByIdInApp(...args),
       findById: async (id) => {
         const found = await realUsers.findById(id);
         await db.dataSource.query(`UPDATE users SET password_hash = 'new-hash' WHERE id = $1`, [id]);

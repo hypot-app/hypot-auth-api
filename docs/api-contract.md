@@ -164,13 +164,13 @@ Status: IMPLEMENTED (limits: PLANNED; browser CORS with origin binding: IMPLEMEN
 
 ### `GET /api/v1/me`
 
-Status: PLANNED.
+Status: IMPLEMENTED.
 
 | Item | Value |
 |------|-------|
 | Request | Header `Authorization: Bearer <access_token>` |
-| Success | `200 { "id": string, "email": string, "email_verified": boolean, "created_at": string }`. `id` is the account id and equals the token's `sub`. `created_at` is ISO 8601 UTC. Exactly these four keys. |
-| Errors | `401 { "error": "invalid_token", ... }` with `WWW-Authenticate: Bearer`, one identical response for: no token, expired token, bad signature, wrong `typ` or algorithm, missing, unknown or inactive `aud`, unknown account. |
+| Success | `200 { "id": string, "email": string, "email_verified": boolean, "created_at": string }`. `id` is the account id and equals the token's `sub`. `created_at` is ISO 8601 UTC. Exactly these four keys. `Cache-Control: no-store`, `Pragma: no-cache`. |
+| Errors | `401 { "error": "invalid_token", ... }` with `WWW-Authenticate: Bearer`, one identical response for: no token, expired token, bad signature, wrong `typ` or algorithm, missing, unknown or inactive `aud`, unknown account, an account of another app than the token's `aud`, an `Origin` that is not an allowed origin of the `aud` app. Body: `{ "error": "invalid_token", "message": "Missing or invalid access token" }`. Never an allow header. |
 | CORS | Origin bound to the app named by the token `aud` |
 | Limits | None. Bearer verification is a local signature check. |
 
