@@ -11,7 +11,7 @@ Companion: [`integration-guide.md`](./integration-guide.md).
 | Topic | Rule |
 |-------|------|
 | Base URL | `https://<auth-host>`. Business routes live under `/api/v1`. JWKS, `/` and `/health` are at the root. |
-| Format | JSON in and out (`Content-Type: application/json`). No forms, no cookies, no redirects, no HTML. |
+| Format | JSON in and out (`Content-Type: application/json`, parameters such as `; charset=utf-8` allowed). No forms, no cookies, no redirects, no HTML. Every `POST` under `/api/v1` must send that `Content-Type`; anything else, including no `Content-Type`, is `415`. |
 | Error body | Always `{ "error": "<code>", "message": "<human text>" }`. Branch on `error`, never on `message`. |
 | Email | Trimmed and compared case-insensitively (stored lowercase). |
 | Password | Min 8 characters, max 72 UTF-8 bytes, no NUL. |
@@ -33,6 +33,7 @@ Companion: [`integration-guide.md`](./integration-guide.md).
 
 | Status | `error` | Where |
 |--------|---------|-------|
+| 415 | `unsupported_media_type` | Every `POST` under `/api/v1`: `Content-Type` is not `application/json` (form, multipart, `text/plain`) or missing. Body `{ "error": "unsupported_media_type", "message": "Request body must be JSON." }`. Checked before any limit, lookup or CORS handling, so it never carries an allow header and never counts against a limit. |
 | 400 | `invalid_request` | Any body endpoint: malformed body |
 | 400 | `invalid_email`, `invalid_password` | Signup (both), reset and change (`invalid_password`) |
 | 400 | `invalid_client` | Signup, resend, forgot, refresh: unknown or inactive `client_id`, or (signup, resend, forgot) origin not bound to it |

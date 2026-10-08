@@ -97,7 +97,7 @@ Consequences:
 
 ## Flows
 
-All calls are JSON (`Content-Type: application/json`) to `https://<auth-host>/api/v1/...`. Examples use `client_id` `app_0123456789abcdef0123456789abcdef`.
+All calls are JSON (send `Content-Type: application/json` on every `POST`; other types get `415`) to `https://<auth-host>/api/v1/...`. Examples use `client_id` `app_0123456789abcdef0123456789abcdef`.
 
 Password rules, for signup, reset and change: at least 8 characters, at most 72 UTF-8 **bytes**, no NUL character. Show the byte limit in your UI if you allow non-ASCII passwords.
 
@@ -463,6 +463,7 @@ Error bodies have the shape `{ "error": "<code>", "message": "<text>" }`. Branch
 | Status | Code | Where | Meaning |
 |--------|------|-------|---------|
 | 400 | `invalid_request` | Every body endpoint | Missing or non-string fields. A bug in your code. |
+| 415 | `unsupported_media_type` | Every `POST` | The `Content-Type` is not `application/json` (or is missing). A bug in your code: always send `Content-Type: application/json`. A `; charset=utf-8` suffix is fine. No CORS header is sent on this answer, so a browser shows it as a network error. |
 | 400 | `invalid_email`, `invalid_password` | Signup (both), reset and change (`invalid_password`) | Validation failure. Safe to show to the user. |
 | 400 | `invalid_client` | Signup, resend, forgot, refresh | Unknown or inactive `client_id`, or (not refresh) origin not bound to it. This is a setup bug. |
 | 400 | `unconfigured_client` | Signup, resend, forgot | The app has no email URLs. |
