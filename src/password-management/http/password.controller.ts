@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { ClientIp } from '../../abuse-protection/domain/client-ip';
 import { RateLimitedException } from '../../abuse-protection/http/abuse-exception.filter';
 import { CorsGrant } from '../../platform/http/cors-grant';
-import { grantUnlessClientRejected, parseBody, unwrap, type RequestSource } from '../../user-accounts/http/request-helpers';
+import { grantUnlessClientRejected, parseBody, unwrap, type RequestSource } from '../../platform/http/request-helpers';
 import { ChangePasswordUseCase } from '../application/change-password.use-case';
 import { ForgotPasswordUseCase } from '../application/forgot-password.use-case';
 import { ResetPasswordUseCase } from '../application/reset-password.use-case';

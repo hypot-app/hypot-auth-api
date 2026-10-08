@@ -6,7 +6,7 @@ import { CorsGrant } from '../../platform/http/cors-grant';
 import { ConfirmEmailUseCase } from '../application/confirm-email.use-case';
 import { ResendConfirmationUseCase } from '../application/resend-confirmation.use-case';
 import { SignupUseCase } from '../application/signup.use-case';
-import { grantUnlessClientRejected, parseBody, unwrap, type RequestSource } from './request-helpers';
+import { grantUnlessClientRejected, parseBody, unwrap, type RequestSource } from '../../platform/http/request-helpers';
 
 /** `client_id` is looked up in the database, so its length is bounded before it gets there. */
 const clientId = z.string().max(128);
