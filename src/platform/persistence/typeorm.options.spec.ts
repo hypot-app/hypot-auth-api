@@ -1,4 +1,4 @@
-import { buildTypeOrmOptions, DB_POOL_MAX } from './typeorm.options';
+import { buildTypeOrmOptions, DB_CONNECTION_TIMEOUT_MS, DB_POOL_MAX } from './typeorm.options';
 
 describe('buildTypeOrmOptions', () => {
   const options = buildTypeOrmOptions({ url: 'postgres://u:p@localhost:5432/db' });
@@ -11,6 +11,11 @@ describe('buildTypeOrmOptions', () => {
   it('sets the pg pool size explicitly instead of relying on the driver default', () => {
     expect(DB_POOL_MAX).toBe(10);
     expect(options).toMatchObject({ extra: { max: DB_POOL_MAX } });
+  });
+
+  it('bounds the wait for a pooled connection so pool exhaustion is an error, not a hang', () => {
+    expect(DB_CONNECTION_TIMEOUT_MS).toBe(5000);
+    expect(options).toMatchObject({ extra: { max: DB_POOL_MAX, connectionTimeoutMillis: DB_CONNECTION_TIMEOUT_MS } });
   });
 
   it('never syncs the schema or auto-runs migrations', () => {

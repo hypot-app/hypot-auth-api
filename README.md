@@ -42,6 +42,11 @@ Stale `dist/`: `npm run build` and `npm run start:dev` now remove `dist/` first.
 stale `dist/` that applied `CreateAuthorizationCodes` (a discarded branch), recreate the local database with
 `docker compose down -v`.
 
+Database pool: the service keeps at most 10 connections (`DB_POOL_MAX` in `src/platform/persistence/typeorm.options.ts`,
+a code constant, not an environment variable) and waits at most 5000 ms for a free one (`DB_CONNECTION_TIMEOUT_MS`).
+When the pool is exhausted a request fails with a connection timeout error instead of hanging the API forever. The
+abuse counters use their own connection outside any transaction, so they are never counted inside a unit of work.
+
 ### Migrations in containers
 
 The runtime image is distroless (no npm, no shell), so `npm run migration:*` is not available
