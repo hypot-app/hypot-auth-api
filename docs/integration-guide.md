@@ -18,7 +18,7 @@ hypot Auth is an API-only authentication service. Your app builds its own login,
 | `POST /api/v1/auth/login` | IMPLEMENTED |
 | `POST /api/v1/auth/refresh` | IMPLEMENTED |
 | `POST /api/v1/auth/logout` | IMPLEMENTED |
-| `GET /api/v1/me` | PLANNED |
+| `GET /api/v1/me` | IMPLEMENTED |
 | `POST /api/v1/password/forgot` | PLANNED |
 | `POST /api/v1/password/reset` | PLANNED |
 | `POST /api/v1/password/change` | PLANNED |
@@ -257,7 +257,7 @@ POST /api/v1/auth/logout
 
 ### Get the profile (`GET /me`)
 
-Status: PLANNED.
+Status: IMPLEMENTED.
 
 ```http
 GET /api/v1/me
@@ -269,7 +269,7 @@ Authorization: Bearer eyJ...
 { "id": "7f0c...", "email": "ana@example.com", "email_verified": true, "created_at": "2026-10-05T15:04:05.000Z" }
 ```
 
-Exactly four keys. `id` is the account id and equals the token's `sub`. A missing, expired or invalid token, or one whose `aud` is not an active app, returns `401 { "error": "invalid_token", ... }` with `WWW-Authenticate: Bearer`, one identical response for every cause. `/me` has no rate limit.
+Exactly four keys. `id` is the account id and equals the token's `sub`. A missing, expired or invalid token, or one whose `aud` is not an active app, returns `401 { "error": "invalid_token", ... }` with `WWW-Authenticate: Bearer`, one identical response for every cause (the body is `{ "error": "invalid_token", "message": "Missing or invalid access token" }`). A browser call also needs an `Origin` that is an allowed origin of the app named by the token `aud`; from any other origin it is the same `401` with no `Access-Control-Allow-Origin`. Answers are `Cache-Control: no-store`. `/me` has no rate limit.
 
 **Profiles are yours.** Auth stores identity and credentials only: there is no name, avatar or other profile data. Keep your own profile table and link each row to the account by `id` (the `sub` claim). Create it on first login or when you confirm the account.
 

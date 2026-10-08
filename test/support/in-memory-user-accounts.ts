@@ -27,6 +27,11 @@ export class InMemoryUserRepository implements UserRepository {
   async findById(id: string): Promise<User | null> {
     return this.users.get(id) ?? null;
   }
+
+  async findByIdInApp(appId: string, id: string): Promise<User | null> {
+    const user = this.users.get(id);
+    return user !== undefined && user.appId === appId ? user : null;
+  }
 }
 
 /** Unit-test double for OneTimeTokenRepository with the same consume rules as the SQL one. */

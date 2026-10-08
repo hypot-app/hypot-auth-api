@@ -89,6 +89,15 @@ describe('user and one-time-token repositories (integration)', () => {
       expect(await users.findByAppAndEmail(appB, 'ana@example.com')).toBeNull();
     });
 
+    it('finds an account by id only inside its own app', async () => {
+      const user = newUser(appA);
+      await users.add(user);
+
+      expect(await users.findByIdInApp(appA, user.id)).toEqual(user);
+      expect(await users.findByIdInApp(appB, user.id)).toBeNull();
+      expect(await users.findByIdInApp(appA, randomUUID())).toBeNull();
+    });
+
     it('returns false for a taken email in the same app, ignoring case, and keeps the first account', async () => {
       const first = newUser(appA, 'ana@example.com', 'hash-first');
       await users.add(first);

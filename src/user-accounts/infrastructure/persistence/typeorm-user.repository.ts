@@ -46,4 +46,11 @@ export class TypeOrmUserRepository implements UserRepository {
     const row = await currentManager(this.dataSource).getRepository<UserRow>(UserSchema).findOneBy({ id });
     return row ? UserMapper.toDomain(row) : null;
   }
+
+  async findByIdInApp(appId: string, id: string): Promise<User | null> {
+    const row = await currentManager(this.dataSource)
+      .getRepository<UserRow>(UserSchema)
+      .findOneBy({ id, app_id: appId });
+    return row ? UserMapper.toDomain(row) : null;
+  }
 }

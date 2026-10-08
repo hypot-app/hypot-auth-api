@@ -256,10 +256,10 @@ required variable is missing or invalid (see `.env.example`).
 - `GET /` welcome message
 - `GET /health` liveness plus database ping (200, or 503 when the database is down)
 - `GET /.well-known/jwks.json` public signing keys (see Signing keys and JWKS)
-- Implemented: `POST /api/v1/accounts/signup`, `POST /api/v1/accounts/resend-confirmation`, `POST /api/v1/auth/login`
-  (JSON `{client_id, email, password}`, one generic `401`, never `429`), and the legacy
+- Implemented: `GET /api/v1/me` (bearer access token, `{id, email, email_verified, created_at}`, one generic `401 invalid_token`), `POST /api/v1/accounts/signup`, `POST /api/v1/accounts/resend-confirmation`, `POST /api/v1/auth/login`,
+  `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`
+  (login takes JSON `{client_id, email, password}`, one generic `401`, never `429`), and the legacy
   `GET /api/v1/accounts/confirm` (being replaced by `POST /api/v1/accounts/confirm`)
-- Planned: `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`, `GET /api/v1/me`,
-  `POST /api/v1/password/forgot`, `POST /api/v1/password/reset`, `POST /api/v1/password/change`. Full list and
+- Planned: `POST /api/v1/password/forgot`, `POST /api/v1/password/reset`, `POST /api/v1/password/change`. Full list and
   contract: [`docs/api-contract.md`](docs/api-contract.md).
 - Business routes are served under `/api/v1`; `/`, `/health` and `/.well-known/jwks.json` stay at the root.
