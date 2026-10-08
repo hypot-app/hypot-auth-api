@@ -21,6 +21,7 @@ describe('user and one-time-token repositories (integration)', () => {
   let uow: TypeOrmUnitOfWork;
   let appA: string;
   let appB: string;
+  const clientIds = new Map<string, string>();
 
   const newApp = async (): Promise<string> => {
     const app = App.restore({
@@ -39,6 +40,7 @@ describe('user and one-time-token repositories (integration)', () => {
       updatedAt: T0,
     });
     await new TypeOrmAppRepository(db.dataSource).save(app);
+    clientIds.set(app.id, app.clientId);
     return app.id;
   };
 
@@ -185,6 +187,36 @@ describe('user and one-time-token repositories (integration)', () => {
       await tokens.save(token);
       expect(await tokens.consumeByHash(token.tokenHash, 'email_verification', at(1))).toBeNull();
       expect((await tokens.consumeByHash(token.tokenHash, 'password_reset', at(2)))?.id).toBe(token.id);
+    });
+
+    it("finds the token's app by hash and purpose, read-only, whatever the token's state", async () => {
+      const token = newToken(userId);
+      const otherAppUser = newUser(appB, 'bo@example.com');
+      await users.add(otherAppUser);
+      const otherAppToken = newToken(otherAppUser.id);
+      await Promise.all([token, otherAppToken].map((t) => tokens.save(t)));
+
+      expect(await tokens.findAppByTokenHash(token.tokenHash, 'email_verification')).toEqual({
+        appId: appA,
+        clientId: clientIds.get(appA),
+      });
+      expect(await tokens.findAppByTokenHash(otherAppToken.tokenHash, 'email_verification')).toEqual({
+        appId: appB,
+        clientId: clientIds.get(appB),
+      });
+      expect(await tokens.findAppByTokenHash(token.tokenHash, 'password_reset')).toBeNull();
+      expect(await tokens.findAppByTokenHash(Buffer.alloc(32, 9), 'email_verification')).toBeNull();
+
+      await tokens.consumeByHash(token.tokenHash, 'email_verification', at(1));
+      expect(await tokens.findAppByTokenHash(token.tokenHash, 'email_verification')).toEqual({
+        appId: appA,
+        clientId: clientIds.get(appA),
+      });
+      const rows: { consumed_at: Date | null }[] = await db.dataSource.query(
+        `SELECT consumed_at FROM one_time_tokens WHERE id = $1`,
+        [otherAppToken.id],
+      );
+      expect(rows[0]?.consumed_at).toBeNull();
     });
 
     it('lets exactly one of two concurrent consumes win', async () => {

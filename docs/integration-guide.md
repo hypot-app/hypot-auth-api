@@ -11,10 +11,10 @@ hypot Auth is an API-only authentication service. Your app builds its own login,
 | Endpoint | Status |
 |----------|--------|
 | `GET /.well-known/jwks.json` | IMPLEMENTED |
-| `POST /api/v1/accounts/signup` | IMPLEMENTED (no rate limits and no browser CORS yet) |
-| `POST /api/v1/accounts/resend-confirmation` | IMPLEMENTED (no rate limits and no browser CORS yet) |
-| `GET /api/v1/accounts/confirm?token=` | IMPLEMENTED, BEING REPLACED. Do not build against it. |
-| `POST /api/v1/accounts/confirm` | PLANNED |
+| `POST /api/v1/accounts/signup` | IMPLEMENTED (no rate limits yet) |
+| `POST /api/v1/accounts/resend-confirmation` | IMPLEMENTED (no rate limits yet) |
+| `GET /api/v1/accounts/confirm?token=` | REMOVED (answers `404`; it never consumes a token) |
+| `POST /api/v1/accounts/confirm` | IMPLEMENTED |
 | `POST /api/v1/auth/login` | IMPLEMENTED |
 | `POST /api/v1/auth/refresh` | IMPLEMENTED |
 | `POST /api/v1/auth/logout` | IMPLEMENTED |
@@ -24,10 +24,9 @@ hypot Auth is an API-only authentication service. Your app builds its own login,
 | `POST /api/v1/password/change` | PLANNED |
 | `GET /`, `GET /health` | IMPLEMENTED (operational, not part of your integration) |
 
-Two things work differently today and will change:
+One thing works differently today and will change:
 
-- Confirmation emails currently link to Auth's `GET` confirm endpoint. After the change they link to **your** confirm screen as `<email_confirmation_url>#token=<token>`.
-- Browser CORS is not yet enabled on the account routes. Until it ships you can test signup and resend only from a server or a tool such as curl.
+- Signup and resend-confirmation are not rate limited yet and do not check that the app has both email URLs. Both arrive in the next unit.
 
 ## Quick path
 
@@ -108,7 +107,7 @@ Password rules, for signup, reset and change: at least 8 characters, at most 72 
 
 ### Signup and confirmation
 
-Status: signup and resend IMPLEMENTED, confirm by POST PLANNED.
+Status: signup, resend and confirm by POST IMPLEMENTED (rate limits on signup and resend follow in the next unit).
 
 ```mermaid
 sequenceDiagram

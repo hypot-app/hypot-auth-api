@@ -18,8 +18,8 @@ describe('ResendConfirmationUseCase', () => {
     expect(h.queued().filter((email) => email.template === 'confirmation')).toHaveLength(2);
     const secondToken = h.latestConfirmationToken();
     expect(secondToken).not.toBe(firstToken);
-    expect((await h.confirm.execute(firstToken)).ok).toBe(false);
-    expect((await h.confirm.execute(secondToken)).ok).toBe(true);
+    expect((await h.confirm.execute({ token: firstToken, ip: h.ip })).ok).toBe(false);
+    expect((await h.confirm.execute({ token: secondToken, ip: h.ip })).ok).toBe(true);
   });
 
   it('answers the same way and queues nothing for an unknown email', async () => {
@@ -32,7 +32,7 @@ describe('ResendConfirmationUseCase', () => {
 
   it('answers the same way and queues nothing for an already confirmed account', async () => {
     const { h, firstToken } = await signedUp();
-    await h.confirm.execute(firstToken);
+    await h.confirm.execute({ token: firstToken, ip: h.ip });
     const before = h.queued().length;
 
     expect(await h.resend.execute({ clientId: SHOP_CLIENT_ID, email: 'ana@example.com' })).toEqual(OK);

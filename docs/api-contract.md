@@ -67,7 +67,7 @@ Texts: the fixed `message` strings are listed per endpoint where they are fixed.
 
 - No `Origin` header (native clients, servers): not CORS-gated.
 - Allowed-origin lookups may be cached up to 30 seconds.
-- Today the CORS middleware covers all 10 routes and the preflight answer above is live. The origin binding of the actual request is live for signup and resend-confirmation (`400 invalid_client`, no allow header); the other endpoints get it in their own units. `GET accounts/confirm` has no binding, and so no allow header, until U17a.
+- Today the CORS middleware covers all 10 routes and the preflight answer above is live. The origin binding of the actual request is live for signup, resend-confirmation (`400 invalid_client`, no allow header) and confirm (generic `invalid_or_expired_link`, no allow header); the other endpoints get it in their own units.
 
 ### Rate-limit behaviour (summary)
 
@@ -139,14 +139,14 @@ Validation errors never reveal whether the address exists.
 
 ### `POST /api/v1/accounts/confirm`
 
-Status: PLANNED. The current `GET /api/v1/accounts/confirm?token=` is IMPLEMENTED (REPLACED): after the change, `GET` returns `404` and never consumes a token.
+Status: IMPLEMENTED. It replaces the former `GET /api/v1/accounts/confirm?token=`: `GET` now returns `404` and never consumes a token, so mail scanners and link prefetchers cannot confirm accounts.
 
 | Item | Value |
 |------|-------|
 | Request | `{ "token": string }`, the value of `#token` from the email link. No `client_id`: the token identifies the app. |
 | Success | `200 { "message": "Your email address has been confirmed." }`. The token is marked used and a welcome email is sent. No tokens are issued. |
 | Errors | `400 invalid_or_expired_link` for malformed, unknown, used or expired tokens, and for a known token sent from the wrong origin (identical, so it is not an oracle). `400 invalid_request` for a missing or non-string `token`. `429 rate_limited`. |
-| CORS | Origin bound to the app that owns the token |
+| CORS | Origin bound to the app that owns the token. The allow header is sent on `200`, and on the `400 invalid_or_expired_link` of a token that belongs to the origin's own app (used or expired). An unknown token, or a token of another app, gets no allow header. |
 | Limits | Per IP: `429` + `Retry-After`, checked before the token is looked up |
 
 ### `POST /api/v1/accounts/resend-confirmation`

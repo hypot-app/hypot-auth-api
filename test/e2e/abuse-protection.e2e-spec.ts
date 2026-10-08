@@ -1,28 +1,11 @@
-import { Controller, Post, Req, type INestApplication } from '@nestjs/common';
-import { ModuleRef } from '@nestjs/core';
+import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { RegisterAppUseCase } from '../../src/app-registry/application/register-app.use-case';
 import { AbuseCounterSweeper } from '../../src/abuse-protection/application/abuse-counter-sweeper';
 import { AbuseGuard } from '../../src/abuse-protection/application/abuse-guard';
-import { ClientIp } from '../../src/abuse-protection/domain/client-ip';
 import { resolvePolicies } from '../../src/abuse-protection/domain/policy';
-import { RateLimitedException } from '../../src/abuse-protection/http/abuse-exception.filter';
 import { createTestApp } from '../support/create-test-app';
 import { startTestDatabase, type TestDatabase } from '../support/postgres';
-
-// Stands in for an endpoint of a later unit: limit by IP first. It never grants CORS itself: the filter does (W3).
-@Controller('accounts')
-class ConfirmProbeController {
-  constructor(private readonly moduleRef: ModuleRef) {}
-
-  @Post('confirm')
-  async confirm(@Req() req: { ip?: string; socket: { remoteAddress?: string } }): Promise<{ ok: true }> {
-    const guard = this.moduleRef.get(AbuseGuard, { strict: false });
-    const decision = await guard.checkIp('confirm_ip', ClientIp.from(req.ip, req.socket.remoteAddress));
-    if (decision.kind === 'ip_limited') throw new RateLimitedException(decision.retryAfterSeconds);
-    return { ok: true };
-  }
-}
 
 describe('abuse protection wiring (e2e)', () => {
   let db: TestDatabase;
@@ -33,7 +16,6 @@ describe('abuse protection wiring (e2e)', () => {
     db = await startTestDatabase();
     app = await createTestApp({
       databaseUrl: db.url,
-      controllers: [ConfirmProbeController],
       abusePolicies: resolvePolicies({ confirm_ip: { limit: 1 } }),
     });
     const registered = await app.get(RegisterAppUseCase).execute({
@@ -54,13 +36,14 @@ describe('abuse protection wiring (e2e)', () => {
     await db?.teardown();
   }, 60_000);
 
+  // The real confirm endpoint: the limit runs before the token is looked up, so any token body will do.
   const confirm = (origin?: string) => {
-    const req = request(app.getHttpServer()).post('/api/v1/accounts/confirm');
+    const req = request(app.getHttpServer()).post('/api/v1/accounts/confirm').send({ token: 'A'.repeat(43) });
     return origin === undefined ? req : req.set('Origin', origin);
   };
 
   it('limits by IP with a 429, an integer Retry-After and a body a browser on the app origin can read', async () => {
-    await confirm('https://a.example').expect(201);
+    await confirm('https://a.example').expect(400);
 
     const limited = await confirm('https://a.example').expect(429);
 

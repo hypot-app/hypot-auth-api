@@ -27,6 +27,7 @@ const SIGNUP_BODY = {
 const RESEND_BODY = {
   message: 'If an unconfirmed account exists for this address, a new confirmation email is on its way.',
 };
+const CONFIRMED = { message: 'Your email address has been confirmed.' };
 const INVALID_LINK = {
   error: 'invalid_or_expired_link',
   message: 'The confirmation link is invalid or has expired',
@@ -42,7 +43,9 @@ describe('account routes (e2e)', () => {
   const signup = (body: Record<string, unknown>) => request(server()).post('/api/v1/accounts/signup').send(body);
   const resend = (body: Record<string, unknown>) =>
     request(server()).post('/api/v1/accounts/resend-confirmation').send(body);
-  const confirm = (token: string) => request(server()).get('/api/v1/accounts/confirm').query({ token });
+  const confirm = (token: unknown) => request(server()).post('/api/v1/accounts/confirm').send({ token });
+  const tokenRows = (): Promise<{ consumed_at: Date | null }[]> =>
+    db.dataSource.query(`SELECT consumed_at FROM one_time_tokens ORDER BY expires_at`);
   const credentials = (overrides: Record<string, unknown> = {}) => ({
     client_id: shop.clientId,
     email: 'Ana@Example.com',
@@ -73,8 +76,8 @@ describe('account routes (e2e)', () => {
       redirectUris: [],
       allowedOrigins: [origin],
       emailFrom: null,
-      emailConfirmationUrl: null,
-      passwordResetUrl: null,
+      emailConfirmationUrl: `${origin}/confirm`,
+      passwordResetUrl: `${origin}/reset`,
       status: 'active',
       createdAt: now,
       updatedAt: now,
@@ -165,6 +168,70 @@ describe('account routes (e2e)', () => {
       expect(await users()).toEqual([]);
     });
 
+    it('answers a preflight for confirm from an active app origin', async () => {
+      const response = await request(server())
+        .options('/api/v1/accounts/confirm')
+        .set('Origin', SHOP_ORIGIN)
+        .set('Access-Control-Request-Method', 'POST')
+        .set('Access-Control-Request-Headers', 'content-type');
+
+      expect(response.status).toBe(204);
+      expect(response.headers['access-control-allow-origin']).toBe(SHOP_ORIGIN);
+      expect(response.headers['access-control-allow-credentials']).toBeUndefined();
+    });
+
+    it("confirms from the token's own origin with the allow header and no credentials header", async () => {
+      await signup(credentials());
+
+      const response = await confirm(await latestToken()).set('Origin', SHOP_ORIGIN);
+
+      expect([response.status, response.body]).toEqual([200, CONFIRMED]);
+      expect(response.headers['access-control-allow-origin']).toBe(SHOP_ORIGIN);
+      expect(response.headers['vary']).toMatch(/Origin/);
+      expect(response.headers['access-control-allow-credentials']).toBeUndefined();
+    });
+
+    it("lets the app's own origin read the generic error of a token that is already used", async () => {
+      await signup(credentials());
+      const token = await latestToken();
+      await confirm(token);
+
+      const response = await confirm(token).set('Origin', SHOP_ORIGIN);
+
+      expect([response.status, response.body]).toEqual([400, INVALID_LINK]);
+      expect(response.headers['access-control-allow-origin']).toBe(SHOP_ORIGIN);
+    });
+
+    it.each([
+      ['another active app', BLOG_ORIGIN],
+      ['an origin no app owns', 'https://evil.example'],
+    ])('rejects a valid token posted from %s with the generic error, no allow header, and leaves it unused', async (_label, origin) => {
+      await signup(credentials());
+      const token = await latestToken();
+
+      const response = await confirm(token).set('Origin', origin);
+
+      expect([response.status, response.body]).toEqual([400, INVALID_LINK]);
+      expect(response.headers['access-control-allow-origin']).toBeUndefined();
+      expect(await tokenRows()).toEqual([{ consumed_at: null }]);
+      expect((await users())[0]?.email_verified_at).toBeNull();
+      expect((await confirm(token)).status).toBe(200);
+    });
+
+    it('answers an unknown token like a wrong origin: the same body and no allow header', async () => {
+      const unknown = await confirm('A'.repeat(43)).set('Origin', SHOP_ORIGIN);
+
+      expect([unknown.status, unknown.body]).toEqual([400, INVALID_LINK]);
+      expect(unknown.headers['access-control-allow-origin']).toBeUndefined();
+    });
+
+    it('lets the browser read the invalid_request 400 of a missing token from an active app origin', async () => {
+      const response = await request(server()).post('/api/v1/accounts/confirm').send({}).set('Origin', SHOP_ORIGIN);
+
+      expect(response.status).toBe(400);
+      expect(response.headers['access-control-allow-origin']).toBe(SHOP_ORIGIN);
+    });
+
     it('answers an unknown client_id from a known origin with the same body and no allow header', async () => {
       const response = await signup(credentials({ client_id: 'app_unknown' })).set('Origin', SHOP_ORIGIN);
 
@@ -230,7 +297,7 @@ describe('account routes (e2e)', () => {
     });
   });
 
-  describe('GET /api/v1/accounts/confirm', () => {
+  describe('POST /api/v1/accounts/confirm', () => {
     it('confirms the account from the emailed token, queues the welcome email and refuses a second use', async () => {
       await signup(credentials());
       const token = await latestToken();
@@ -238,7 +305,8 @@ describe('account routes (e2e)', () => {
       const response = await confirm(token);
 
       expect(response.status).toBe(200);
-      expect(response.body).toEqual({ message: 'Your email address is confirmed.' });
+      expect(response.body).toEqual(CONFIRMED);
+      expect(response.headers['set-cookie']).toBeUndefined();
       expect((await users())[0]?.email_verified_at).toEqual(expect.any(Date));
       expect(await outbox('welcome')).toMatchObject([{ to_address: 'ana@example.com' }]);
 
@@ -247,24 +315,54 @@ describe('account routes (e2e)', () => {
       expect(await outbox('welcome')).toHaveLength(1);
     });
 
-    it.each([['a token never issued', 'A'.repeat(43)], ['a malformed token', 'nope']])(
-      'answers %s with the generic invalid link error',
-      async (_label, token) => {
-        await signup(credentials());
+    it.each([
+      ['a token never issued', 'A'.repeat(43)],
+      ['a malformed token', 'nope'],
+      ['an empty token', ''],
+    ])('answers %s with the generic invalid link error', async (_label, token) => {
+      await signup(credentials());
 
-        const response = await confirm(token);
+      const response = await confirm(token);
 
-        expect([response.status, response.body]).toEqual([400, INVALID_LINK]);
-        expect((await users())[0]?.email_verified_at).toBeNull();
-      },
-    );
+      expect([response.status, response.body]).toEqual([400, INVALID_LINK]);
+      expect((await users())[0]?.email_verified_at).toBeNull();
+    });
 
-    it('answers a missing token and a repeated token parameter with the same generic error', async () => {
-      const missing = await request(server()).get('/api/v1/accounts/confirm');
-      const repeated = await request(server()).get('/api/v1/accounts/confirm?token=a&token=b');
+    it('answers the token of another purpose like any invalid link and leaves it unused', async () => {
+      await signup(credentials());
+      const token = await latestToken();
+      await db.dataSource.query(`UPDATE one_time_tokens SET purpose = 'password_reset'`);
 
-      expect([missing.status, missing.body]).toEqual([400, INVALID_LINK]);
-      expect([repeated.status, repeated.body]).toEqual([400, INVALID_LINK]);
+      const response = await confirm(token);
+
+      expect([response.status, response.body]).toEqual([400, INVALID_LINK]);
+      expect(await tokenRows()).toEqual([{ consumed_at: null }]);
+    });
+
+    it.each([
+      ['a missing token', {}],
+      ['a non-string token', { token: 42 }],
+      ['a null token', { token: null }],
+      ['an array token', { token: ['a', 'b'] }],
+    ])('answers 400 invalid_request for %s', async (_label, body) => {
+      const response = await request(server()).post('/api/v1/accounts/confirm').send(body);
+
+      expect([response.status, response.body]).toEqual([
+        400,
+        { error: 'invalid_request', message: 'token must be a string' },
+      ]);
+    });
+
+    it('answers 404 to GET and does not consume the token (mail scanners cannot confirm)', async () => {
+      await signup(credentials());
+      const token = await latestToken();
+
+      const response = await request(server()).get('/api/v1/accounts/confirm').query({ token });
+
+      expect(response.status).toBe(404);
+      expect(await tokenRows()).toEqual([{ consumed_at: null }]);
+      expect((await users())[0]?.email_verified_at).toBeNull();
+      expect(await outbox('welcome')).toEqual([]);
     });
   });
 

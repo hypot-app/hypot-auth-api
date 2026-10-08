@@ -1,5 +1,7 @@
 import { Module, type MiddlewareConsumer, type NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AbuseGuard } from '../abuse-protection/application/abuse-guard';
+import { AbuseProtectionModule } from '../abuse-protection/abuse-protection.module';
 import { ResolveClientUseCase } from '../app-registry/application/resolve-client.use-case';
 import { AppRegistryModule } from '../app-registry/app-registry.module';
 import { noStore } from '../platform/http/no-store.middleware';
@@ -28,7 +30,13 @@ import { UserSchema } from './infrastructure/persistence/user.schema';
 
 /** Use cases are plain classes (no Nest decorators); they are wired with factories here (ADR 2). */
 @Module({
-  imports: [TypeOrmModule.forFeature([UserSchema, OneTimeTokenSchema]), AppRegistryModule, TransactionalEmailModule, BearerAuthModule],
+  imports: [
+    TypeOrmModule.forFeature([UserSchema, OneTimeTokenSchema]),
+    AbuseProtectionModule,
+    AppRegistryModule,
+    TransactionalEmailModule,
+    BearerAuthModule,
+  ],
   controllers: [AccountsController, MeController],
   providers: [
     TypeOrmUserRepository,
@@ -57,14 +65,16 @@ import { UserSchema } from './infrastructure/persistence/user.schema';
     },
     {
       provide: ConfirmEmailUseCase,
-      inject: [ONE_TIME_TOKEN_REPOSITORY, USER_REPOSITORY, EMAIL_OUTBOX, CLOCK, UNIT_OF_WORK],
+      inject: [ResolveClientUseCase, AbuseGuard, ONE_TIME_TOKEN_REPOSITORY, USER_REPOSITORY, EMAIL_OUTBOX, CLOCK, UNIT_OF_WORK],
       useFactory: (
+        resolveClient: ResolveClientUseCase,
+        abuse: AbuseGuard,
         oneTimeTokens: OneTimeTokenRepository,
         users: UserRepository,
         outbox: EmailOutbox,
         clock: Clock,
         uow: UnitOfWork,
-      ) => new ConfirmEmailUseCase({ oneTimeTokens, users, outbox, clock, uow }),
+      ) => new ConfirmEmailUseCase({ resolveClient, abuse, oneTimeTokens, users, outbox, clock, uow }),
     },
     {
       provide: ResendConfirmationUseCase,

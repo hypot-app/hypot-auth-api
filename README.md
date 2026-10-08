@@ -128,9 +128,8 @@ Accounts are per app: unique on `(app_id, email)`, email stored lowercase. Passw
 ```bash
 curl -X POST localhost:3000/api/v1/accounts/signup -H 'content-type: application/json'   -d '{"client_id":"app_...","email":"ana@example.com","password":"correct horse"}'   # 202, email in Mailpit
 curl -X POST localhost:3000/api/v1/accounts/resend-confirmation -H 'content-type: application/json'   -d '{"client_id":"app_...","email":"ana@example.com"}'                                   # 202 always
-# Confirm is a POST with the token from the email link fragment (planned, U17a). The current
-# GET /api/v1/accounts/confirm?token=... is being replaced and will return 404:
-#   curl -X POST localhost:3000/api/v1/accounts/confirm -H 'content-type: application/json' -d '{"token":"<token>"}'   # 200 {"message"} once, then 400
+# Confirm is a POST with the token from the email link fragment (GET /api/v1/accounts/confirm is 404 and never consumes a token):
+curl -X POST localhost:3000/api/v1/accounts/confirm -H 'content-type: application/json' -d '{"token":"<token>"}'   # 200 {"message"} once, then 400
 ```
 
 Signup and resend answer the same fixed body whether or not the address is registered. A duplicate signup sends
@@ -142,8 +141,8 @@ three more writes and one random-token call than a duplicate (about 3-10 ms agai
 gaps are accepted and bounded by the per-IP and per-account limits (planned, U13 and U17b).
 
 Signup, confirm and resend are called by app frontends from the browser, so they follow the origin-bound CORS
-rules above (signup and resend: built in U11c; confirm: planned, U17a). They are rate limited per IP (`429` with `Retry-After`) and per target account
-(silent cap, 3 emails per hour). The "no CORS on accounts" rule of the hosted-UI design is gone: Auth has no
+rules above (signup and resend are bound to `client_id`; confirm is bound to the app that owns the token). They are
+rate limited per IP (`429` with `Retry-After`) and per target account (silent cap, 3 emails per hour). The "no CORS on accounts" rule of the hosted-UI design is gone: Auth has no
 hosted UI.
 
 ### Abuse protection
@@ -256,10 +255,10 @@ required variable is missing or invalid (see `.env.example`).
 - `GET /` welcome message
 - `GET /health` liveness plus database ping (200, or 503 when the database is down)
 - `GET /.well-known/jwks.json` public signing keys (see Signing keys and JWKS)
-- Implemented: `GET /api/v1/me` (bearer access token, `{id, email, email_verified, created_at}`, one generic `401 invalid_token`), `POST /api/v1/accounts/signup`, `POST /api/v1/accounts/resend-confirmation`, `POST /api/v1/auth/login`,
+- Implemented: `GET /api/v1/me` (bearer access token, `{id, email, email_verified, created_at}`, one generic `401 invalid_token`), `POST /api/v1/accounts/signup`, `POST /api/v1/accounts/confirm` (`{token}`; the old `GET` answers `404`),
+  `POST /api/v1/accounts/resend-confirmation`, `POST /api/v1/auth/login`,
   `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`
-  (login takes JSON `{client_id, email, password}`, one generic `401`, never `429`), and the legacy
-  `GET /api/v1/accounts/confirm` (being replaced by `POST /api/v1/accounts/confirm`)
+  (login takes JSON `{client_id, email, password}`, one generic `401`, never `429`)
 - Planned: `POST /api/v1/password/forgot`, `POST /api/v1/password/reset`, `POST /api/v1/password/change`. Full list and
   contract: [`docs/api-contract.md`](docs/api-contract.md).
 - Business routes are served under `/api/v1`; `/`, `/health` and `/.well-known/jwks.json` stay at the root.

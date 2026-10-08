@@ -1,5 +1,5 @@
 import { OneTimeToken, type OneTimeTokenPurpose } from '../../src/user-accounts/domain/one-time-token';
-import type { OneTimeTokenRepository } from '../../src/user-accounts/domain/one-time-token.repository';
+import type { OneTimeTokenRepository, TokenApp } from '../../src/user-accounts/domain/one-time-token.repository';
 import type { PasswordHasher } from '../../src/user-accounts/domain/password-hasher';
 import type { User } from '../../src/user-accounts/domain/user';
 import type { UserRepository } from '../../src/user-accounts/domain/user.repository';
@@ -38,8 +38,16 @@ export class InMemoryUserRepository implements UserRepository {
 export class InMemoryOneTimeTokenRepository implements OneTimeTokenRepository {
   readonly tokens = new Map<string, OneTimeToken>();
 
+  /** `appOfUser` stands in for the users and apps join of the SQL lookup. */
+  constructor(private readonly appOfUser: (userId: string) => TokenApp | null = () => null) {}
+
   async save(token: OneTimeToken): Promise<void> {
     this.tokens.set(token.id, token);
+  }
+
+  async findAppByTokenHash(hash: Buffer, purpose: OneTimeTokenPurpose): Promise<TokenApp | null> {
+    const found = [...this.tokens.values()].find((t) => t.tokenHash.equals(hash) && t.purpose === purpose);
+    return found === undefined ? null : this.appOfUser(found.userId);
   }
 
   async consumeByHash(hash: Buffer, purpose: OneTimeTokenPurpose, now: Date): Promise<OneTimeToken | null> {

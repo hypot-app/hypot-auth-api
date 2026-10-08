@@ -1,4 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { AbuseGuard } from '../../src/abuse-protection/application/abuse-guard';
+import { ClientIp } from '../../src/abuse-protection/domain/client-ip';
+import { DEFAULT_POLICIES } from '../../src/abuse-protection/domain/policy';
+import { ResolveClientUseCase } from '../../src/app-registry/application/resolve-client.use-case';
 import { App } from '../../src/app-registry/domain/app';
 import { AppSchema } from '../../src/app-registry/infrastructure/persistence/app.schema';
 import { TypeOrmAppRepository } from '../../src/app-registry/infrastructure/persistence/typeorm-app.repository';
@@ -15,6 +19,7 @@ import { OneTimeTokenSchema } from '../../src/user-accounts/infrastructure/persi
 import { TypeOrmOneTimeTokenRepository } from '../../src/user-accounts/infrastructure/persistence/typeorm-one-time-token.repository';
 import { TypeOrmUserRepository } from '../../src/user-accounts/infrastructure/persistence/typeorm-user.repository';
 import { UserSchema } from '../../src/user-accounts/infrastructure/persistence/user.schema';
+import { InMemoryAbuseCounterStore } from '../support/in-memory-abuse-counter-store';
 import { startTestDatabase, type TestDatabase } from '../support/postgres';
 
 /** Confirming must change only the verification columns, never rewrite the whole row. */
@@ -74,15 +79,18 @@ describe('confirm email does not lose concurrent updates (integration)', () => {
         return found;
       },
     };
+    const clock = new SystemClock();
     const confirm = new ConfirmEmailUseCase({
+      resolveClient: new ResolveClientUseCase(new TypeOrmAppRepository(db.dataSource)),
+      abuse: new AbuseGuard({ store: new InMemoryAbuseCounterStore(), policies: DEFAULT_POLICIES, clock }),
       oneTimeTokens,
       users,
       outbox: new TypeOrmEmailOutbox(db.dataSource),
-      clock: new SystemClock(),
+      clock,
       uow: new TypeOrmUnitOfWork(db.dataSource),
     });
 
-    expect(await confirm.execute(raw)).toEqual({ ok: true, value: undefined });
+    expect(await confirm.execute({ token: raw, ip: ClientIp.from('203.0.113.7', undefined) })).toEqual({ ok: true, value: undefined });
 
     const rows: { password_hash: string; email_verified_at: Date | null }[] = await db.dataSource.query(
       `SELECT password_hash, email_verified_at FROM users WHERE id = $1`,
