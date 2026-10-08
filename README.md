@@ -94,12 +94,11 @@ with `Access-Control-Allow-Methods: GET, POST, OPTIONS`, `Access-Control-Allow-H
 matches `--origin` of the app it identifies (body `client_id`, the token's owner for confirm and reset, the
 access token's `aud` for `/api/v1/me` and password change). Auth never sends credentials headers or cookies.
 Answers are cached for 30 seconds, so deactivating an app or changing its origins can take that long to apply.
-The binding and the preflight header set land in U11c and U17a (planned); today the middleware still allows any
-active app's origin on the legacy route list.
+The binding and the fixed preflight header set are live on login, refresh, logout, signup, confirm, resend and
+`/me`; forgot, reset and change get their binding with the password-management unit.
 
 The origin of an app's `email_confirmation_url` and `password_reset_url` must be one of its allowed origins,
-otherwise its confirm and reset screens could not call Auth. The CLI enforces this on create and update (planned,
-U11b).
+otherwise its confirm and reset screens could not call Auth. The CLI enforces this on create and update.
 
 ### Transactional email
 
@@ -138,7 +137,7 @@ once, and a resend invalidates the previous one. Unconfirmed accounts cannot log
 Residual timing difference: signup always hashes (so both paths cost one bcrypt); resend does a few more
 database writes for an unconfirmed account than for an unknown one (milliseconds), and a new signup does
 three more writes and one random-token call than a duplicate (about 3-10 ms against the 250 ms hash). Both
-gaps are accepted and bounded by the per-IP and per-account limits (planned, U13 and U17b).
+gaps are accepted and bounded by the per-IP (`email_ip`) and per-account (`email_account`) limits.
 
 Signup, confirm and resend are called by app frontends from the browser, so they follow the origin-bound CORS
 rules above (signup and resend are bound to `client_id`; confirm is bound to the app that owns the token). They are

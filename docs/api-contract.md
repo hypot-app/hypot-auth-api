@@ -124,7 +124,7 @@ Status: IMPLEMENTED.
 
 ### `POST /api/v1/accounts/signup`
 
-Status: IMPLEMENTED (limits: PLANNED; browser CORS with origin binding: IMPLEMENTED).
+Status: IMPLEMENTED.
 
 | Item | Value |
 |------|-------|
@@ -133,9 +133,9 @@ Status: IMPLEMENTED (limits: PLANNED; browser CORS with origin binding: IMPLEMEN
 | Side effects | New: unconfirmed account (bcrypt cost 12) and a confirmation email (24 h link). Existing: an "account exists" notice with the app's `password_reset_url`, no token. No tokens are issued. |
 | Errors | `400 invalid_request`, `400 invalid_email`, `400 invalid_password` (length, 72 bytes, NUL), `400 invalid_client` (unknown or inactive app, origin not bound), `400 unconfigured_client`, `429 rate_limited`, `503 temporarily_unavailable` |
 | CORS | Origin bound to body `client_id` |
-| Limits | Per IP: `429` + `Retry-After`. Per account: silent, no email |
+| Limits | Per IP (and app): `429` + `Retry-After`, identical for a new and an existing address, checked before any password hashing or account lookup. Per account (3 emails per hour, shared with resend and forgot): the answer stays the usual `202`; a new account is still created but no email is sent. |
 
-Validation errors never reveal whether the address exists.
+Validation errors never reveal whether the address exists. `unconfigured_client` describes the app (it lacks `email_confirmation_url` or `password_reset_url`), is raised before any account work, and never depends on the address.
 
 ### `POST /api/v1/accounts/confirm`
 
@@ -151,7 +151,7 @@ Status: IMPLEMENTED. It replaces the former `GET /api/v1/accounts/confirm?token=
 
 ### `POST /api/v1/accounts/resend-confirmation`
 
-Status: IMPLEMENTED (limits: PLANNED; browser CORS with origin binding: IMPLEMENTED).
+Status: IMPLEMENTED.
 
 | Item | Value |
 |------|-------|
@@ -160,7 +160,7 @@ Status: IMPLEMENTED (limits: PLANNED; browser CORS with origin binding: IMPLEMEN
 | Side effects | For an unconfirmed account: new token, previous unused tokens invalidated. |
 | Errors | `400 invalid_request`, `400 invalid_client`, `400 unconfigured_client`, `429 rate_limited`, `503 temporarily_unavailable` |
 | CORS | Origin bound to body `client_id` |
-| Limits | As signup |
+| Limits | Per IP (and app): `429` + `Retry-After`, checked before the account is looked up. Per account: the usual `202` and no email once the cap is reached; requests for unknown addresses count too. |
 
 ### `GET /api/v1/me`
 

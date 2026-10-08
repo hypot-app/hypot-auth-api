@@ -79,9 +79,15 @@ export async function accountsHarness(options: AccountsHarnessOptions = {}) {
     abuseStore,
     /** A client address for use cases that take one. */
     ip: ClientIp.from('203.0.113.7', undefined),
-    signup: new SignupUseCase({ resolveClient, users, hasher, confirmations, outbox, clock, uow }),
+    signup: new SignupUseCase({ resolveClient, abuse, users, hasher, confirmations, outbox, clock, uow }),
     confirm: new ConfirmEmailUseCase({ resolveClient, abuse, oneTimeTokens, users, outbox, clock, uow }),
-    resend: new ResendConfirmationUseCase({ resolveClient, users, confirmations, uow }),
+    resend: new ResendConfirmationUseCase({ resolveClient, abuse, users, confirmations, uow }),
+    /** A copy of the shop app with other email link URLs (null for a legacy app), saved and active. */
+    addApp: async (clientId: string, urls: { emailConfirmationUrl: string | null; passwordResetUrl: string | null }) => {
+      const app = App.restore({ ...shop, id: crypto.randomUUID(), clientId, ...urls });
+      await apps.save(app);
+      return app;
+    },
     /** Emails queued so far, oldest first. */
     queued: (): OutboxEmail[] => [...outbox.emails.values()],
     /** The raw token inside the most recent queued confirmation email. */

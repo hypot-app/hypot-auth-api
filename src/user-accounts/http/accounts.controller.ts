@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, Headers, HttpCode, Post, Req } from '@nestjs/common';
 import { z } from 'zod';
+import { RateLimitedError } from '../../abuse-protection/domain/rate-limited-error';
 import type { DomainError } from '../../shared-kernel/domain-error';
 import type { Result } from '../../shared-kernel/result';
 import { ClientIp } from '../../abuse-protection/domain/client-ip';
@@ -36,8 +37,12 @@ function parseBody<T>(schema: z.ZodType<T>, body: unknown, message: string, gran
   return parsed.data;
 }
 
-/** Every use case failure here is the caller's input: a 400 with the stable code and message. */
+/**
+ * An IP limit is a 429 with `Retry-After` (the exception filter writes it and grants CORS). Every other
+ * use case failure here is the caller's input: a 400 with the stable code and message.
+ */
 function unwrap(result: Result<void, DomainError>): void {
+  if (!result.ok && result.error instanceof RateLimitedError) throw new RateLimitedException(result.error.retryAfterSeconds);
   if (!result.ok) throw new BadRequestException({ error: result.error.code, message: result.error.message });
 }
 
@@ -62,6 +67,7 @@ export class AccountsController {
   async signup(
     @Body() body: unknown,
     @Headers('origin') origin: string | undefined,
+    @Req() req: RequestSource,
     @CorsGrant() grantCors: () => void,
   ): Promise<typeof SIGNUP_ACCEPTED> {
     const input = parseBody(signupBody, body, 'client_id, email and password must be strings', grantCors);
@@ -70,6 +76,7 @@ export class AccountsController {
       email: input.email,
       password: input.password,
       origin,
+      ip: ClientIp.from(req.ip, req.socket.remoteAddress),
     });
     grantUnlessClientRejected(result, grantCors);
     unwrap(result);
@@ -107,10 +114,16 @@ export class AccountsController {
   async resend(
     @Body() body: unknown,
     @Headers('origin') origin: string | undefined,
+    @Req() req: RequestSource,
     @CorsGrant() grantCors: () => void,
   ): Promise<typeof RESEND_ACCEPTED> {
     const input = parseBody(resendBody, body, 'client_id and email must be strings', grantCors);
-    const result = await this.resendUseCase.execute({ clientId: input.client_id, email: input.email, origin });
+    const result = await this.resendUseCase.execute({
+      clientId: input.client_id,
+      email: input.email,
+      origin,
+      ip: ClientIp.from(req.ip, req.socket.remoteAddress),
+    });
     grantUnlessClientRejected(result, grantCors);
     unwrap(result);
     return RESEND_ACCEPTED;

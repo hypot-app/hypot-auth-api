@@ -11,8 +11,8 @@ hypot Auth is an API-only authentication service. Your app builds its own login,
 | Endpoint | Status |
 |----------|--------|
 | `GET /.well-known/jwks.json` | IMPLEMENTED |
-| `POST /api/v1/accounts/signup` | IMPLEMENTED (no rate limits yet) |
-| `POST /api/v1/accounts/resend-confirmation` | IMPLEMENTED (no rate limits yet) |
+| `POST /api/v1/accounts/signup` | IMPLEMENTED |
+| `POST /api/v1/accounts/resend-confirmation` | IMPLEMENTED |
 | `GET /api/v1/accounts/confirm?token=` | REMOVED (answers `404`; it never consumes a token) |
 | `POST /api/v1/accounts/confirm` | IMPLEMENTED |
 | `POST /api/v1/auth/login` | IMPLEMENTED |
@@ -23,10 +23,6 @@ hypot Auth is an API-only authentication service. Your app builds its own login,
 | `POST /api/v1/password/reset` | PLANNED |
 | `POST /api/v1/password/change` | PLANNED |
 | `GET /`, `GET /health` | IMPLEMENTED (operational, not part of your integration) |
-
-One thing works differently today and will change:
-
-- Signup and resend-confirmation are not rate limited yet and do not check that the app has both email URLs. Both arrive in the next unit.
 
 ## Quick path
 
@@ -107,7 +103,7 @@ Password rules, for signup, reset and change: at least 8 characters, at most 72 
 
 ### Signup and confirmation
 
-Status: signup, resend and confirm by POST IMPLEMENTED (rate limits on signup and resend follow in the next unit).
+Status: signup, resend and confirm by POST IMPLEMENTED, with rate limits.
 
 ```mermaid
 sequenceDiagram
@@ -161,7 +157,7 @@ On success Auth answers `200 { "message": "Your email address has been confirmed
 | Unknown or inactive `client_id`, or origin not bound to the app | `400 invalid_client` | A configuration error. This is a bug in your setup, not a user problem. |
 | App has no email URLs configured | `400 unconfigured_client` | Contact the operator |
 | Confirm: invalid, used, expired or unknown token | `400 invalid_or_expired_link` | "This link is invalid or expired", with a resend form |
-| IP rate limit, on signup or confirm (planned) | `429 rate_limited` with `Retry-After` | Retry later |
+| IP rate limit, on signup or confirm | `429 rate_limited` with `Retry-After` | Retry later |
 
 ### Resend confirmation
 

@@ -6,7 +6,7 @@ const invalid = (clientBound: boolean) => ({ ok: false, error: { kind: 'invalid_
 
 const signedUp = async (options?: AccountsHarnessOptions) => {
   const h = await accountsHarness(options);
-  await h.signup.execute({ clientId: SHOP_CLIENT_ID, email: 'ana@example.com', password: 'correct horse' });
+  await h.signup.execute({ clientId: SHOP_CLIENT_ID, email: 'ana@example.com', password: 'correct horse', ip: h.ip });
   const user = [...h.users.users.values()][0]!;
   const token = h.latestConfirmationToken();
   const confirm = (input: { token?: unknown; origin?: string } = {}) =>

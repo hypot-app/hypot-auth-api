@@ -52,16 +52,17 @@ import { UserSchema } from './infrastructure/persistence/user.schema';
     },
     {
       provide: SignupUseCase,
-      inject: [ResolveClientUseCase, USER_REPOSITORY, PASSWORD_HASHER, ConfirmationIssuer, EMAIL_OUTBOX, CLOCK, UNIT_OF_WORK],
+      inject: [ResolveClientUseCase, AbuseGuard, USER_REPOSITORY, PASSWORD_HASHER, ConfirmationIssuer, EMAIL_OUTBOX, CLOCK, UNIT_OF_WORK],
       useFactory: (
         resolveClient: ResolveClientUseCase,
+        abuse: AbuseGuard,
         users: UserRepository,
         hasher: PasswordHasher,
         confirmations: ConfirmationIssuer,
         outbox: EmailOutbox,
         clock: Clock,
         uow: UnitOfWork,
-      ) => new SignupUseCase({ resolveClient, users, hasher, confirmations, outbox, clock, uow }),
+      ) => new SignupUseCase({ resolveClient, abuse, users, hasher, confirmations, outbox, clock, uow }),
     },
     {
       provide: ConfirmEmailUseCase,
@@ -78,13 +79,14 @@ import { UserSchema } from './infrastructure/persistence/user.schema';
     },
     {
       provide: ResendConfirmationUseCase,
-      inject: [ResolveClientUseCase, USER_REPOSITORY, ConfirmationIssuer, UNIT_OF_WORK],
+      inject: [ResolveClientUseCase, AbuseGuard, USER_REPOSITORY, ConfirmationIssuer, UNIT_OF_WORK],
       useFactory: (
         resolveClient: ResolveClientUseCase,
+        abuse: AbuseGuard,
         users: UserRepository,
         confirmations: ConfirmationIssuer,
         uow: UnitOfWork,
-      ) => new ResendConfirmationUseCase({ resolveClient, users, confirmations, uow }),
+      ) => new ResendConfirmationUseCase({ resolveClient, abuse, users, confirmations, uow }),
     },
     {
       provide: GetProfileUseCase,
