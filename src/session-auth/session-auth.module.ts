@@ -15,6 +15,7 @@ import { USER_REPOSITORY, type UserRepository } from '../user-accounts/domain/us
 import { UserAccountsModule } from '../user-accounts/user-accounts.module';
 import { createDummyPasswordHash, DUMMY_PASSWORD_HASH } from './application/dummy-password-hash';
 import { LoginUseCase } from './application/login.use-case';
+import { RefreshSessionUseCase } from './application/refresh-session.use-case';
 import { SESSION_REPOSITORY } from './domain/session.repository';
 import { AuthController } from './http/auth.controller';
 import { RefreshTokenSchema } from './infrastructure/persistence/refresh-token.schema';
@@ -66,6 +67,29 @@ import { SESSION_CONFIG_PROVIDERS, SESSION_TTLS, type SessionTtls } from './infr
         uow: UnitOfWork,
         ttls: SessionTtls,
       ) => new LoginUseCase({ resolveClient, abuse, users, hasher, dummyHash, sessions, tokens, accessTokens, clock, uow, ttls }),
+    },
+    {
+      provide: RefreshSessionUseCase,
+      inject: [
+        ResolveClientUseCase,
+        AbuseGuard,
+        SESSION_REPOSITORY,
+        TOKEN_GENERATOR,
+        ACCESS_TOKEN_ISSUER,
+        CLOCK,
+        UNIT_OF_WORK,
+        SESSION_TTLS,
+      ],
+      useFactory: (
+        resolveClient: ResolveClientUseCase,
+        abuse: AbuseGuard,
+        sessions: TypeOrmSessionRepository,
+        tokens: TokenGenerator,
+        accessTokens: AccessTokenIssuer,
+        clock: Clock,
+        uow: UnitOfWork,
+        ttls: SessionTtls,
+      ) => new RefreshSessionUseCase({ resolveClient, abuse, sessions, tokens, accessTokens, clock, uow, ttls }),
     },
   ],
 })

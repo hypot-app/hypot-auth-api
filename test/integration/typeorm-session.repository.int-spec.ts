@@ -280,6 +280,34 @@ describe('SessionRepository (integration, ADR 35)', () => {
     });
   });
 
+  describe('touch', () => {
+    const lastUsedAt = async (id: string): Promise<Date> =>
+      (await db.dataSource.query(`SELECT last_used_at FROM auth_sessions WHERE id = $1`, [id]))[0].last_used_at;
+
+    it('records when the session was last used, for that session only', async () => {
+      const first = await open();
+      const second = await open();
+
+      await sessions.touch(first.session.id, at(90));
+
+      expect(await lastUsedAt(first.session.id)).toEqual(at(90));
+      expect(await lastUsedAt(second.session.id)).toEqual(T0);
+    });
+
+    it('joins the unit of work: a rollback leaves last_used_at as it was', async () => {
+      const { session } = await open();
+
+      await expect(
+        uow.run(async () => {
+          await sessions.touch(session.id, at(90));
+          throw new Error('abort');
+        }),
+      ).rejects.toThrow('abort');
+
+      expect(await lastUsedAt(session.id)).toEqual(T0);
+    });
+  });
+
   describe('reuse grace window storage', () => {
     it('claims the grace once for a rotated token and returns the successor hash', async () => {
       const { token } = await open();
