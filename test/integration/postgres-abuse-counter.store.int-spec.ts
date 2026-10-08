@@ -121,17 +121,14 @@ describe('PostgresAbuseCounterStore (integration, ADR 36)', () => {
       expect(await row()).toMatchObject({ count: 10, blocked_until: after(T0, 500) });
     });
 
-    it('keeps the count when the surrounding business transaction rolls back', async () => {
+    it('refuses to run inside a unit of work, where its own pool connection could deadlock the pool', async () => {
       const unitOfWork = new TypeOrmUnitOfWork(db.dataSource);
 
-      await expect(
-        unitOfWork.run(async () => {
-          await store.hit('login_account_ip', key, WINDOW, T0);
-          throw new Error('business failure');
-        }),
-      ).rejects.toThrow('business failure');
+      await expect(unitOfWork.run(() => store.hit('login_account_ip', key, WINDOW, T0))).rejects.toThrow(/inside a unit of work/);
+      await expect(unitOfWork.run(() => store.reset('login_account_ip', key))).rejects.toThrow(/inside a unit of work/);
+      await expect(unitOfWork.run(() => store.deleteExpired(T0, 10))).rejects.toThrow(/inside a unit of work/);
 
-      expect((await row())?.count).toBe(1);
+      expect(await row()).toBeNull();
     });
   });
 

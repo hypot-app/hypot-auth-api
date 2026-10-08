@@ -68,6 +68,8 @@ export async function accountsHarness(options: AccountsHarnessOptions = {}) {
   const outbox = new InMemoryEmailOutbox();
   const hasher = new FakePasswordHasher();
   const sessions = new InMemorySessionRepository();
+  /** How many units of work are open; the abuse store below refuses calls while it is above zero. */
+  let uowDepth = 0;
   /** Runs the work and puts users, tokens and sessions back when it throws, like a rolled-back transaction. */
   const uow: UnitOfWork = {
     async run<T>(work: () => Promise<T>): Promise<T> {
@@ -75,6 +77,7 @@ export async function accountsHarness(options: AccountsHarnessOptions = {}) {
       const usersBefore = new Map(users.users);
       const tokensBefore = new Map(oneTimeTokens.tokens);
       const emailsBefore = new Map(outbox.emails);
+      uowDepth += 1;
       try {
         return await work();
       } catch (error) {
@@ -86,12 +89,23 @@ export async function accountsHarness(options: AccountsHarnessOptions = {}) {
         outbox.emails.clear();
         for (const [key, value] of emailsBefore) outbox.emails.set(key, value);
         throw error;
+      } finally {
+        uowDepth -= 1;
       }
     },
   };
   const revokeSessions = new RevokeAccountSessionsUseCase({ sessions, clock });
   const resolveClient = new ResolveClientUseCase(apps);
   const abuseStore = new InMemoryAbuseCounterStore();
+  // The Postgres store runs on its own pool connection, so a counter call inside a unit of work can deadlock the
+  // pool (C1). Every use case wired here fails loudly if it ever does that.
+  for (const method of ['hit', 'reset'] as const) {
+    const original = abuseStore[method].bind(abuseStore) as (...args: never[]) => Promise<unknown>;
+    (abuseStore as unknown as Record<string, unknown>)[method] = (...args: never[]) => {
+      if (uowDepth > 0) throw new Error(`abuse counter ${method} called inside a unit of work`);
+      return original(...args);
+    };
+  }
   const abuse = new AbuseGuard({ store: abuseStore, policies: options.policies ?? DEFAULT_POLICIES, clock });
   const tokenGenerator = new CryptoTokenGenerator();
   const confirmations = new ConfirmationIssuer({ tokens: tokenGenerator, oneTimeTokens, outbox, clock });

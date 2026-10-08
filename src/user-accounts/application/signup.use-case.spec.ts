@@ -181,20 +181,15 @@ describe('SignupUseCase', () => {
       expect(h.queued()).toHaveLength(4);
     });
 
-    it('counts the cap only once the account outcome is known, after the insert, and once per request', async () => {
+    it('counts the cap once per request, for a new account and a duplicate, outside the unit of work', async () => {
+      // The harness store throws if it is called inside a unit of work (the real store would need a second pool
+      // connection while the transaction holds the first, and deadlock under concurrency), so a green run proves it.
       const h = await accountsHarness();
-      const accountsAtHit: number[] = [];
-      const hit = h.abuseStore.hit.bind(h.abuseStore);
-      jest.spyOn(h.abuseStore, 'hit').mockImplementation((scope, key, policy, now) => {
-        if (scope === 'email_account') accountsAtHit.push(h.users.users.size);
-        return hit(scope, key, policy, now);
-      });
 
       await h.signup.execute(signupInput());
+      expect(h.abuseStore.hitCounts.email_account).toBe(1);
       await h.signup.execute(signupInput());
-
-      // The new account already existed when the first email was counted; the duplicate counts too.
-      expect(accountsAtHit).toEqual([1, 1]);
+      expect(h.abuseStore.hitCounts.email_account).toBe(2);
     });
 
     it('does not count a request that fails validation', async () => {
