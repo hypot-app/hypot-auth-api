@@ -196,7 +196,7 @@ The login `401` is `{ "error": "invalid_credentials", "message": "Email or passw
 
 ### `POST /api/v1/auth/refresh`
 
-Status: IMPLEMENTED (reuse grace window: PLANNED, until then every reuse revokes the session).
+Status: IMPLEMENTED.
 
 | Item | Value |
 |------|-------|

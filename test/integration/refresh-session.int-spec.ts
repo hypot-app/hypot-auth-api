@@ -82,7 +82,7 @@ describe('RefreshSessionUseCase on Postgres (integration, ADR 35)', () => {
       accessTokens: issuer,
       clock,
       uow: new TypeOrmUnitOfWork(db.dataSource),
-      ttls: { idleSeconds: 7 * DAY, absoluteSeconds: 30 * DAY },
+      ttls: { idleSeconds: 7 * DAY, absoluteSeconds: 30 * DAY, reuseGraceSeconds: 10 },
     });
   });
 
@@ -96,21 +96,68 @@ describe('RefreshSessionUseCase on Postgres (integration, ADR 35)', () => {
   const sessionRow = async (id: string) =>
     (await db.dataSource.query(`SELECT revoked_at, revoked_reason, expires_at, last_used_at FROM auth_sessions WHERE id = $1`, [id]))[0];
 
-  it('lets exactly one of many parallel refreshes of one token win, and ends the session including the winner successor', async () => {
+  it('lets one rotation and at most one grace win among many parallel refreshes of one token, and ends the session', async () => {
     const { token, sessionId } = await login();
 
     const results = await Promise.all(Array.from({ length: PARALLEL }, () => attempt(token)));
 
-    const winners = results.filter((result) => result.ok);
-    expect(winners).toHaveLength(1);
-    expect(results.filter((result) => !result.ok)).toHaveLength(PARALLEL - 1);
+    // One call wins the rotation; the next is the first reuse of R1 inside the window, so it is forgiven
+    // once; every other call is a second reuse and revokes the session (ADR 35, Concurrency).
+    expect(results.filter((result) => result.ok)).toHaveLength(2);
+    expect(results.filter((result) => !result.ok)).toHaveLength(PARALLEL - 2);
     expect(await sessionRow(sessionId)).toMatchObject({ revoked_reason: 'reuse_detected' });
-    // The winner holds a pair, but its session is over: its refresh token is worthless.
-    const winner = winners[0]!;
-    if (!winner.ok) throw new Error('unreachable');
-    expect((await attempt(winner.value.refreshToken)).ok).toBe(false);
-    const tokens = await db.dataSource.query(`SELECT token_hash FROM refresh_tokens`);
-    expect(tokens).toHaveLength(2);
+    for (const result of results) if (result.ok) expect((await attempt(result.value.refreshToken)).ok).toBe(false);
+  });
+
+  it('lets exactly one of many parallel presentations of a rotated token win the grace, and the next concurrent reuse ends the session', async () => {
+    const { token, sessionId } = await login();
+    const rotation = await attempt(token);
+    if (!rotation.ok) throw new Error('expected a successful rotation');
+    clock.advanceMs(3_000);
+
+    const results = await Promise.all(Array.from({ length: PARALLEL }, () => attempt(token)));
+
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(await sessionRow(sessionId)).toMatchObject({ revoked_reason: 'reuse_detected' });
+    const [consumed] = await db.dataSource.query(`SELECT grace_used_at FROM refresh_tokens WHERE token_hash = $1`, [sha256(token)]);
+    expect(consumed.grace_used_at).toEqual(new Date(T0.getTime() + 3_000));
+    // The rotation winner's R2 was revoked by the grace and R3 sits unused in a revoked session.
+    const [r2] = await db.dataSource.query(`SELECT revoked_at FROM refresh_tokens WHERE token_hash = $1`, [sha256(rotation.value.refreshToken)]);
+    expect(r2.revoked_at).toEqual(new Date(T0.getTime() + 3_000));
+  });
+
+  it('forgives a lost response once and keeps the session, with hashes only in the table', async () => {
+    const { token, sessionId } = await login();
+    const lost = await attempt(token);
+    if (!lost.ok) throw new Error('expected a successful rotation');
+    clock.advanceMs(4_000);
+
+    const retry = await attempt(token);
+
+    if (!retry.ok) throw new Error('expected the grace retry to succeed');
+    expect(retry.value.refreshToken).not.toBe(lost.value.refreshToken);
+    expect(await sessionRow(sessionId)).toMatchObject({ revoked_at: null, last_used_at: new Date(T0.getTime() + 4_000) });
+    expect((await attempt(retry.value.refreshToken)).ok).toBe(true);
+    const dump = JSON.stringify(await db.dataSource.query(`SELECT * FROM refresh_tokens`));
+    for (const raw of [token, lost.value.refreshToken, retry.value.refreshToken]) expect(dump).not.toContain(raw);
+    const hashes = await db.dataSource.query(`SELECT token_hash FROM refresh_tokens`);
+    expect(hashes.map((row: { token_hash: Buffer }) => row.token_hash.toString('hex'))).toEqual(
+      expect.arrayContaining([sha256(retry.value.refreshToken).toString('hex')]),
+    );
+  });
+
+  it('rolls a grace back as a whole: R2 already used leaves grace_used_at unset and the successor unrevoked', async () => {
+    const { token, sessionId } = await login();
+    const first = await attempt(token);
+    if (!first.ok) throw new Error('expected a successful rotation');
+    expect((await attempt(first.value.refreshToken)).ok).toBe(true);
+    clock.advanceMs(2_000);
+
+    expect((await attempt(token)).ok).toBe(false);
+
+    const [consumed] = await db.dataSource.query(`SELECT grace_used_at FROM refresh_tokens WHERE token_hash = $1`, [sha256(token)]);
+    expect(consumed.grace_used_at).toBeNull();
+    expect(await sessionRow(sessionId)).toMatchObject({ revoked_reason: 'reuse_detected' });
   });
 
   it('revokes R2 and R3 when R1 is replayed after R1 to R2 to R3', async () => {
@@ -118,6 +165,7 @@ describe('RefreshSessionUseCase on Postgres (integration, ADR 35)', () => {
     const second = await attempt(r1);
     const third = await attempt(second.ok ? second.value.refreshToken : '');
     if (!second.ok || !third.ok) throw new Error('expected two successful rotations');
+    clock.advanceMs(11_000);
 
     expect((await attempt(r1)).ok).toBe(false);
 
@@ -166,7 +214,7 @@ describe('RefreshSessionUseCase on Postgres (integration, ADR 35)', () => {
       accessTokens: { issue: async () => ({ token: 'jwt', expiresAt: T0 }) },
       clock,
       uow: new TypeOrmUnitOfWork(db.dataSource),
-      ttls: { idleSeconds: 7 * DAY, absoluteSeconds: 30 * DAY },
+      ttls: { idleSeconds: 7 * DAY, absoluteSeconds: 30 * DAY, reuseGraceSeconds: 10 },
     });
 
     await expect(broken.execute({ clientId: shop.clientId, origin: undefined, refreshToken: token, ip: IP })).rejects.toThrow('disk full');

@@ -4,12 +4,13 @@ import { ClientRef } from '../../abuse-protection/domain/client-ref';
 import type { ResolveClientUseCase } from '../../app-registry/application/resolve-client.use-case';
 import type { Clock } from '../../shared-kernel/clock';
 import { err, ok, type Result } from '../../shared-kernel/result';
-import { hashToken, isWellFormedToken, type TokenGenerator } from '../../shared-kernel/token-generator';
+import { hashToken, isWellFormedToken, type GeneratedToken, type TokenGenerator } from '../../shared-kernel/token-generator';
 import type { UnitOfWork } from '../../shared-kernel/unit-of-work';
 import { ACCESS_TOKEN_TTL_SECONDS, type AccessTokenIssuer } from '../../token-lifecycle/domain/access-token';
 import { hashClientIp } from '../domain/ip-hash';
 import { RefreshToken } from '../domain/refresh-token';
-import type { SessionRepository } from '../domain/session.repository';
+import { isGraceEligible } from '../domain/reuse-grace';
+import type { SessionRepository, TokenState } from '../domain/session.repository';
 import type { LoginTokens } from './login.use-case';
 
 export interface RefreshSessionInput {
@@ -33,12 +34,12 @@ export type RefreshFailure =
 export interface RefreshSessionDeps {
   resolveClient: ResolveClientUseCase;
   abuse: AbuseGuard;
-  sessions: Pick<SessionRepository, 'consume' | 'findTokenState' | 'addToken' | 'touch' | 'revoke'>;
+  sessions: Pick<SessionRepository, 'consume' | 'findTokenState' | 'addToken' | 'touch' | 'revoke' | 'claimGrace' | 'revokeToken'>;
   tokens: TokenGenerator;
   accessTokens: AccessTokenIssuer;
   clock: Clock;
   uow: UnitOfWork;
-  ttls: { idleSeconds: number; absoluteSeconds: number };
+  ttls: { idleSeconds: number; absoluteSeconds: number; reuseGraceSeconds: number };
 }
 
 /**
@@ -72,33 +73,72 @@ export class RefreshSessionUseCase {
     const rotated = await this.deps.uow.run(async () => {
       const consumed = await sessions.consume(hash, app.id, now, successor.hash, hashClientIp(input.ip));
       if (consumed === null) return null;
-      await sessions.addToken(
-        RefreshToken.issue({
-          tokenHash: successor.hash,
-          session: { id: consumed.sessionId, expiresAt: consumed.sessionExpiresAt },
-          now,
-          idleTtlSeconds: this.deps.ttls.idleSeconds,
-        }),
-      );
-      await sessions.touch(consumed.sessionId, now);
-      const access = await this.deps.accessTokens.issue({ accountId: consumed.userId, clientId: app.clientId });
-      return { accessToken: access.token, expiresIn: ACCESS_TOKEN_TTL_SECONDS, refreshToken: successor.token };
+      return this.issuePair(app.clientId, consumed.userId, consumed.sessionId, consumed.sessionExpiresAt, successor, now);
     });
     if (rotated !== null) return ok(rotated);
 
-    await this.revokeOnReuse(hash, app.id, now);
-    return invalid;
+    const reused = await this.handleReuse(hash, app.id, app.clientId, input.ip, now);
+    return reused === null ? invalid : ok(reused);
+  }
+
+  /** The successor token, the touched session and the access token: shared by rotation and the grace path. */
+  private async issuePair(
+    clientId: string,
+    userId: string,
+    sessionId: string,
+    sessionExpiresAt: Date,
+    successor: GeneratedToken,
+    now: Date,
+  ): Promise<LoginTokens> {
+    const { sessions } = this.deps;
+    await sessions.addToken(
+      RefreshToken.issue({
+        tokenHash: successor.hash,
+        session: { id: sessionId, expiresAt: sessionExpiresAt },
+        now,
+        idleTtlSeconds: this.deps.ttls.idleSeconds,
+      }),
+    );
+    await sessions.touch(sessionId, now);
+    const access = await this.deps.accessTokens.issue({ accountId: userId, clientId });
+    return { accessToken: access.token, expiresIn: ACCESS_TOKEN_TTL_SECONDS, refreshToken: successor.token };
   }
 
   /**
-   * Nothing was consumed. A token that was used or revoked, of THIS app, is a reuse and ends its
-   * session; anything else (unknown, another app, expired, session already over) changes nothing.
+   * Nothing was consumed. A token that was used or revoked, of THIS app, is a reuse: inside the grace
+   * window it may be forgiven once, otherwise its session ends. Anything else (unknown, another app,
+   * expired, session already over) changes nothing. Returns the fresh pair, or null for `invalid_grant`.
    */
-  private async revokeOnReuse(hash: Buffer, appId: string, now: Date): Promise<void> {
+  private async handleReuse(hash: Buffer, appId: string, clientId: string, ip: ClientIp, now: Date): Promise<LoginTokens | null> {
     const { sessions } = this.deps;
     const state = await sessions.findTokenState(hash);
-    if (state === null || state.appId !== appId) return;
-    if (state.consumedAt === null && state.tokenRevokedAt === null) return;
+    if (state === null || state.appId !== appId) return null;
+    if (state.consumedAt === null && state.tokenRevokedAt === null) return null;
+
+    const eligible = isGraceEligible(state, { now, ipHash: hashClientIp(ip), graceSeconds: this.deps.ttls.reuseGraceSeconds });
+    if (eligible) {
+      try {
+        return await this.deps.uow.run(() => this.forgive(hash, clientId, state, now));
+      } catch (error) {
+        if (!(error instanceof GraceRefused)) throw error;
+      }
+    }
     await sessions.revoke(state.sessionId, 'reuse_detected', now);
+    return null;
+  }
+
+  /**
+   * ADR 35 steps 2 to 4, in the caller's unit of work: claim the grace, revoke the unused successor, mint
+   * a fresh pair. Any zero-row step throws, which rolls the whole unit back.
+   */
+  private async forgive(hash: Buffer, clientId: string, state: TokenState, now: Date): Promise<LoginTokens> {
+    const { sessions } = this.deps;
+    const successorHash = await sessions.claimGrace(hash, now);
+    if (successorHash === null) throw new GraceRefused();
+    if (!(await sessions.revokeToken(successorHash, now))) throw new GraceRefused();
+    return this.issuePair(clientId, state.userId, state.sessionId, state.sessionExpiresAt, this.deps.tokens.generate(), now);
   }
 }
+
+/** Thrown inside the grace unit of work to roll it back; the session is then revoked as for any reuse. */
+class GraceRefused extends Error {}

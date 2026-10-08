@@ -5,6 +5,7 @@ import { DEFAULT_POLICIES, type PolicyTable } from '../../src/abuse-protection/d
 import { ABUSE_POLICIES } from '../../src/abuse-protection/infrastructure/abuse-config';
 import { APP_CONFIG, type AppConfig } from '../../src/platform/config/app-config';
 import { configureApp } from '../../src/platform/configure-app';
+import { CLOCK, type Clock } from '../../src/shared-kernel/clock';
 import { generateKeySet } from '../../src/token-lifecycle/infrastructure/signing-key-generator';
 import { SIGNING_KEYS_SOURCE } from '../../src/token-lifecycle/infrastructure/signing-keys-source';
 import { PASSWORD_HASHER, type PasswordHasher } from '../../src/user-accounts/domain/password-hasher';
@@ -21,6 +22,8 @@ export interface TestAppOptions {
   signingKeysJson?: string;
   /** Replaces the production cost-12 hasher, for suites that run hundreds of logins. Omit it to keep bcrypt cost 12. */
   passwordHasher?: PasswordHasher;
+  /** Replaces the system clock, for suites that move time (token windows, expiries). Omit it to use real time. */
+  clock?: Clock;
 }
 
 export function buildTestConfig(options: Pick<TestAppOptions, 'databaseUrl' | 'config'>): AppConfig {
@@ -53,6 +56,7 @@ export async function createTestApp(options: TestAppOptions): Promise<INestAppli
     .overrideProvider(SIGNING_KEYS_SOURCE)
     .useValue(() => options.signingKeysJson ?? JSON.stringify(generateKeySet({ next: false })));
   if (options.passwordHasher !== undefined) builder.overrideProvider(PASSWORD_HASHER).useValue(options.passwordHasher);
+  if (options.clock !== undefined) builder.overrideProvider(CLOCK).useValue(options.clock);
   const moduleRef = await builder.compile();
 
   const app = moduleRef.createNestApplication();

@@ -3,6 +3,7 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { resolvePolicies } from '../../src/abuse-protection/domain/policy';
+import { FixedClock } from '../../src/shared-kernel/clock';
 import { App } from '../../src/app-registry/domain/app';
 import { TypeOrmAppRepository } from '../../src/app-registry/infrastructure/persistence/typeorm-app.repository';
 import { ACCESS_TOKEN_VERIFIER, type AccessTokenVerifier } from '../../src/token-lifecycle/domain/access-token';
@@ -25,6 +26,7 @@ describe('POST /api/v1/auth/refresh (e2e)', () => {
   let app: INestApplication;
   let shop: App;
   let blog: App;
+  let clock: FixedClock;
 
   const post = (body: unknown, origin?: string) => {
     const req = request(app.getHttpServer()).post('/api/v1/auth/refresh').send(body as object);
@@ -71,8 +73,10 @@ describe('POST /api/v1/auth/refresh (e2e)', () => {
 
   beforeAll(async () => {
     db = await startTestDatabase();
+    clock = new FixedClock(new Date());
     app = await createTestApp({
       databaseUrl: db.url,
+      clock,
       passwordHasher: new LowCostPasswordHasher(),
       abusePolicies: resolvePolicies({ refresh_ip: { limit: REFRESH_IP_LIMIT, windowSeconds: 900 } }),
     });
@@ -130,7 +134,7 @@ describe('POST /api/v1/auth/refresh (e2e)', () => {
     it('updates last_used_at of the session and leaves its absolute expiry alone', async () => {
       const first = await loginTo(shop);
       const [before] = await rows(`SELECT last_used_at, expires_at FROM auth_sessions`);
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      clock.advanceMs(60_000);
 
       await refresh(first.refresh).expect(200);
 
@@ -254,6 +258,7 @@ describe('POST /api/v1/auth/refresh (e2e)', () => {
     it('revokes the session on a replay and then refuses the successor too', async () => {
       const first = await loginTo(shop);
       const second = await refresh(first.refresh).expect(200);
+      clock.advanceMs(11_000);
 
       const replay = await refresh(first.refresh);
       const successor = await refresh(second.body.refresh_token);
@@ -261,6 +266,51 @@ describe('POST /api/v1/auth/refresh (e2e)', () => {
       expect(replay.status).toBe(401);
       expect(replay.body).toEqual(INVALID_GRANT);
       expect(successor.status).toBe(401);
+      expect((await sessionState()).map((s) => s.revoked_reason)).toEqual(['reuse_detected']);
+    });
+  });
+
+  describe('reuse grace window', () => {
+    it('forgives a lost response: the retry of the old token from the same IP gets a fresh pair and the session survives', async () => {
+      const first = await loginTo(shop);
+      const lost = await refresh(first.refresh).expect(200);
+      clock.advanceMs(3_000);
+
+      const retry = await refresh(first.refresh, {}, SHOP_ORIGIN);
+
+      expect(retry.status).toBe(200);
+      expect(retry.headers['cache-control']).toBe('no-store');
+      expect(retry.headers['access-control-allow-origin']).toBe(SHOP_ORIGIN);
+      expect(Object.keys(retry.body).sort()).toEqual(['access_token', 'expires_in', 'refresh_token', 'token_type']);
+      expect(retry.body.refresh_token).not.toBe(lost.body.refresh_token);
+      expect((await sessionState()).map((s) => s.revoked_reason)).toEqual([null]);
+      // The lost pair is dead, the retried one works.
+      expect((await refresh(retry.body.refresh_token).expect(200)).status).toBe(200);
+      const dump = JSON.stringify(await rows(`SELECT * FROM refresh_tokens`));
+      for (const raw of [first.refresh, lost.body.refresh_token, retry.body.refresh_token]) expect(dump).not.toContain(raw);
+    });
+
+    it('logs the user out when the same retry comes after the window', async () => {
+      const first = await loginTo(shop);
+      await refresh(first.refresh).expect(200);
+      clock.advanceMs(11_000);
+
+      const retry = await refresh(first.refresh);
+
+      expect(retry.status).toBe(401);
+      expect(retry.body).toEqual(INVALID_GRANT);
+      expect((await sessionState()).map((s) => s.revoked_reason)).toEqual(['reuse_detected']);
+    });
+
+    it('logs the user out when the successor R2 is used after a grace retry', async () => {
+      const first = await loginTo(shop);
+      const lost = await refresh(first.refresh).expect(200);
+      clock.advanceMs(1_000);
+      await refresh(first.refresh).expect(200);
+
+      const stale = await refresh(lost.body.refresh_token);
+
+      expect(stale.status).toBe(401);
       expect((await sessionState()).map((s) => s.revoked_reason)).toEqual(['reuse_detected']);
     });
   });

@@ -10,6 +10,8 @@ export interface SessionTtls {
   idleSeconds: number;
   /** A session ends this long after login; rotating a token never extends it. */
   absoluteSeconds: number;
+  /** A rotated token presented again inside this window, from the same IP, is forgiven once. 0 disables it (ADR 35). */
+  reuseGraceSeconds: number;
 }
 
 /** Thrown at startup when a `REFRESH_*` value is invalid. Never includes values. */
@@ -22,6 +24,7 @@ export class SessionConfigError extends Error {
 
 const DEFAULT_IDLE_SECONDS = 604_800;
 const DEFAULT_ABSOLUTE_SECONDS = 2_592_000;
+const DEFAULT_REUSE_GRACE_SECONDS = 10;
 /** Keeps `now + ttl` a valid date and a value Postgres can compare. */
 const MAX_INT4 = 2_147_483_647;
 
@@ -32,12 +35,23 @@ const positiveSeconds = z
   .refine((value) => value <= MAX_INT4, `must be at most ${MAX_INT4}`)
   .optional();
 
+const nonNegativeSeconds = z
+  .string()
+  .regex(/^(0|[1-9]\d*)$/, 'must be a non-negative integer')
+  .transform(Number)
+  .refine((value) => value <= MAX_INT4, `must be at most ${MAX_INT4}`)
+  .optional();
+
 const sessionEnvSchema = z.object({
   REFRESH_IDLE_TTL_SECONDS: positiveSeconds,
   REFRESH_ABSOLUTE_TTL_SECONDS: positiveSeconds,
+  REFRESH_REUSE_GRACE_SECONDS: nonNegativeSeconds,
 });
 
-/** Parses `REFRESH_IDLE_TTL_SECONDS` (default 7 d) and `REFRESH_ABSOLUTE_TTL_SECONDS` (default 30 d). */
+/**
+ * Parses `REFRESH_IDLE_TTL_SECONDS` (default 7 d), `REFRESH_ABSOLUTE_TTL_SECONDS` (default 30 d) and
+ * `REFRESH_REUSE_GRACE_SECONDS` (default 10 s, `0` disables the grace window).
+ */
 export function loadSessionTtls(env: Record<string, string | undefined>): SessionTtls {
   const parsed = sessionEnvSchema.safeParse(env);
   if (!parsed.success) {
@@ -48,6 +62,7 @@ export function loadSessionTtls(env: Record<string, string | undefined>): Sessio
   return {
     idleSeconds: parsed.data.REFRESH_IDLE_TTL_SECONDS ?? DEFAULT_IDLE_SECONDS,
     absoluteSeconds: parsed.data.REFRESH_ABSOLUTE_TTL_SECONDS ?? DEFAULT_ABSOLUTE_SECONDS,
+    reuseGraceSeconds: parsed.data.REFRESH_REUSE_GRACE_SECONDS ?? DEFAULT_REUSE_GRACE_SECONDS,
   };
 }
 

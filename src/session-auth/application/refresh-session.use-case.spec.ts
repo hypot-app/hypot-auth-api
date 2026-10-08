@@ -26,7 +26,7 @@ const shop = anApp({ id: '11111111-1111-4111-8111-111111111111', clientId: 'app_
 const blog = anApp({ id: '22222222-2222-4222-8222-222222222222', clientId: 'app_blog', allowedOrigins: ['https://blog.example'] });
 const parked = anApp({ id: '33333333-3333-4333-8333-333333333333', clientId: 'app_parked', status: 'inactive' });
 
-function setup(overrides: PolicyOverrides = {}) {
+function setup(overrides: PolicyOverrides = {}, reuseGraceSeconds = 10) {
   const events: string[] = [];
   const clock = new FixedClock(T0);
   const apps = new InMemoryAppRepository();
@@ -84,7 +84,7 @@ function setup(overrides: PolicyOverrides = {}) {
     accessTokens: issuer,
     clock,
     uow,
-    ttls: { idleSeconds: 7 * DAY_SECONDS, absoluteSeconds: 30 * DAY_SECONDS },
+    ttls: { idleSeconds: 7 * DAY_SECONDS, absoluteSeconds: 30 * DAY_SECONDS, reuseGraceSeconds },
   });
 
   /** A session opened at T0 with a first token whose raw value the test holds. */
@@ -304,10 +304,14 @@ describe('RefreshSessionUseCase', () => {
       await t.ready;
       const { token, sessionId } = await t.login();
       await t.ok(token);
+      t.clock.advanceMs(11_000);
 
       expect(await t.attempt(token)).toEqual(INVALID_GRANT);
 
-      expect(t.sessions.sessions.get(sessionId)).toMatchObject({ revokedAt: T0, revokedReason: 'reuse_detected' });
+      expect(t.sessions.sessions.get(sessionId)).toMatchObject({
+        revokedAt: new Date(T0.getTime() + 11_000),
+        revokedReason: 'reuse_detected',
+      });
     });
 
     it('revokes the session when a revoked token of the same app is presented', async () => {
@@ -340,12 +344,250 @@ describe('RefreshSessionUseCase', () => {
       const { token: r1, sessionId } = await t.login();
       const r2 = (await t.ok(r1)).refreshToken;
       const r3 = (await t.ok(r2)).refreshToken;
+      t.clock.advanceMs(11_000);
 
       expect(await t.attempt(r1)).toEqual(INVALID_GRANT);
 
       expect(t.sessions.sessions.get(sessionId)!.revokedReason).toBe('reuse_detected');
       expect(await t.attempt(r3)).toEqual(INVALID_GRANT);
       expect(await t.attempt(r2)).toEqual(INVALID_GRANT);
+    });
+  });
+
+  describe('reuse grace window (ADR 35)', () => {
+    const IP_Y = ClientIp.from('198.51.100.7', undefined);
+    const stateOf = (t: ReturnType<typeof setup>, token: string) => t.sessions.token(hashToken(token))!;
+
+    /** R1 rotated into R2 at T0, from IP_X. */
+    async function rotated(t: ReturnType<typeof setup>) {
+      await t.ready;
+      const { token: r1, sessionId } = await t.login();
+      const r2 = (await t.ok(r1)).refreshToken;
+      t.events.length = 0;
+      return { r1, r2, sessionId };
+    }
+
+    it('(a) forgives a reuse of R1 inside the window from the same IP: a fresh pair R3, R2 revoked, the session alive', async () => {
+      const t = setup();
+      const { r1, r2, sessionId } = await rotated(t);
+      t.clock.advanceMs(5_000);
+
+      const r3 = await t.ok(r1);
+
+      expect(r3).toEqual({
+        accessToken: 'jwt-for-user-ana-2',
+        expiresIn: 3600,
+        refreshToken: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+      });
+      expect(r3.refreshToken).not.toBe(r2);
+      expect(stateOf(t, r2)).toMatchObject({ revokedAt: new Date(T0.getTime() + 5_000), consumedAt: null });
+      expect(stateOf(t, r3.refreshToken)).toMatchObject({ consumedAt: null, revokedAt: null, sessionId });
+      expect(stateOf(t, r1).graceUsedAt).toEqual(new Date(T0.getTime() + 5_000));
+      expect(t.sessions.sessions.get(sessionId)).toMatchObject({ revokedAt: null, lastUsedAt: new Date(T0.getTime() + 5_000) });
+      expect(t.issued.at(-1)).toEqual({ accountId: 'user-ana', clientId: 'app_shop' });
+    });
+
+    it('claims, revokes the successor, stores R3, touches the session and signs in ONE unit of work', async () => {
+      const t = setup();
+      const { r1 } = await rotated(t);
+      t.clock.advanceMs(5_000);
+
+      await t.ok(r1);
+
+      expect(t.events).toEqual([
+        'check:refresh_ip',
+        'uow:start',
+        'consume',
+        'uow:end',
+        'findTokenState',
+        'uow:start',
+        'claimGrace',
+        'revokeToken',
+        'addToken',
+        'touch',
+        'issue',
+        'uow:end',
+      ]);
+    });
+
+    it('keeps the absolute expiry and caps R3 at the session expiry', async () => {
+      const t = setup();
+      await t.ready;
+      const { token, sessionId } = await t.login({ absoluteSeconds: 8 * DAY_SECONDS });
+      t.clock.advanceMs(5 * DAY_SECONDS * 1000);
+      await t.ok(token);
+      t.clock.advanceMs(3_000);
+
+      const r3 = await t.ok(token);
+
+      const session = t.sessions.sessions.get(sessionId)!;
+      expect(session.expiresAt).toEqual(new Date(T0.getTime() + 8 * DAY_SECONDS * 1000));
+      expect(stateOf(t, r3.refreshToken).expiresAt).toEqual(session.expiresAt);
+    });
+
+    it('(b) revokes the session for a reuse inside the window from a different IP', async () => {
+      const t = setup();
+      const { r1, r2, sessionId } = await rotated(t);
+      t.clock.advanceMs(5_000);
+
+      expect(await t.attempt(r1, { ip: IP_Y })).toEqual(INVALID_GRANT);
+
+      expect(t.sessions.sessions.get(sessionId)!.revokedReason).toBe('reuse_detected');
+      expect(t.events).not.toContain('claimGrace');
+      expect(stateOf(t, r2).revokedAt).toBeNull();
+    });
+
+    it('(c) revokes the session after the window, and accepts the exact end of it', async () => {
+      const t = setup();
+      const late = await rotated(t);
+      t.clock.advanceMs(10_001);
+      expect(await t.attempt(late.r1)).toEqual(INVALID_GRANT);
+      expect(t.sessions.sessions.get(late.sessionId)!.revokedReason).toBe('reuse_detected');
+
+      const edge = setup();
+      const onTime = await rotated(edge);
+      edge.clock.advanceMs(10_000);
+      expect((await edge.attempt(onTime.r1)).ok).toBe(true);
+    });
+
+    it('(d) revokes the session on a second reuse of R1 inside the window', async () => {
+      const t = setup();
+      const { r1, sessionId } = await rotated(t);
+      t.clock.advanceMs(2_000);
+      const r3 = await t.ok(r1);
+      t.clock.advanceMs(2_000);
+
+      expect(await t.attempt(r1)).toEqual(INVALID_GRANT);
+
+      expect(t.sessions.sessions.get(sessionId)!.revokedReason).toBe('reuse_detected');
+      // The first grace stays recorded: it is what refuses the second one.
+      expect(stateOf(t, r1).graceUsedAt).toEqual(new Date(T0.getTime() + 2_000));
+      expect(await t.attempt(r3.refreshToken)).toEqual(INVALID_GRANT);
+    });
+
+    it('(e) revokes the session when R2 was already used (R1 to R2 to R3), rolling the claim back', async () => {
+      const t = setup();
+      const { r1, r2, sessionId } = await rotated(t);
+      await t.ok(r2);
+      t.clock.advanceMs(3_000);
+
+      expect(await t.attempt(r1)).toEqual(INVALID_GRANT);
+
+      expect(t.sessions.sessions.get(sessionId)!.revokedReason).toBe('reuse_detected');
+      expect(stateOf(t, r1).graceUsedAt).toBeNull();
+      expect(t.events).toContain('uow:rollback');
+    });
+
+    it('(f) revokes the session when the window is 0', async () => {
+      const t = setup({}, 0);
+      const { r1, sessionId } = await rotated(t);
+
+      expect(await t.attempt(r1)).toEqual(INVALID_GRANT);
+
+      expect(t.sessions.sessions.get(sessionId)!.revokedReason).toBe('reuse_detected');
+      expect(t.events).not.toContain('claimGrace');
+    });
+
+    it('(g) revokes the session when the revoked successor R2 is presented later', async () => {
+      const t = setup();
+      const { r1, r2, sessionId } = await rotated(t);
+      t.clock.advanceMs(4_000);
+      await t.ok(r1);
+
+      expect(await t.attempt(r2)).toEqual(INVALID_GRANT);
+
+      expect(t.sessions.sessions.get(sessionId)!.revokedReason).toBe('reuse_detected');
+    });
+
+    it('(h) counts IPv6 addresses of one /64 as the same IP, and another /64 as another', async () => {
+      const home = ClientIp.from('2001:db8:1:2::1', undefined);
+      const sameNet = ClientIp.from('2001:db8:1:2:aaaa:bbbb:cccc:dddd', undefined);
+      const otherNet = ClientIp.from('2001:db8:1:3::1', undefined);
+
+      const t = setup();
+      await t.ready;
+      const first = await t.login();
+      await t.ok(first.token, { ip: home });
+      t.clock.advanceMs(1_000);
+      expect((await t.attempt(first.token, { ip: sameNet })).ok).toBe(true);
+
+      const u = setup();
+      await u.ready;
+      const second = await u.login();
+      await u.ok(second.token, { ip: home });
+      u.clock.advanceMs(1_000);
+      expect(await u.attempt(second.token, { ip: otherNet })).toEqual(INVALID_GRANT);
+      expect(u.sessions.sessions.get(second.sessionId)!.revokedReason).toBe('reuse_detected');
+    });
+
+    it('(i) never takes the grace path for a token that has revoked_at, even a used one inside the window from the same IP', async () => {
+      const t = setup();
+      await t.ready;
+      const { sessionId } = await t.login();
+      const odd = GENERATOR.generate();
+      await t.sessions.addToken(
+        RefreshToken.restore({
+          tokenHash: odd.hash,
+          sessionId,
+          createdAt: T0,
+          expiresAt: new Date(T0.getTime() + DAY_SECONDS * 1000),
+          consumedAt: T0,
+          replacedByHash: GENERATOR.generate().hash,
+          consumedIpHash: hashClientIp(IP_X),
+          graceUsedAt: null,
+          revokedAt: T0,
+        }),
+      );
+      t.events.length = 0;
+
+      expect(await t.attempt(odd.token)).toEqual(INVALID_GRANT);
+
+      expect(t.sessions.sessions.get(sessionId)!.revokedReason).toBe('reuse_detected');
+      expect(t.events).not.toContain('claimGrace');
+    });
+
+    it('does not forgive a reuse once the session is revoked or over', async () => {
+      const revoked = setup();
+      const a = await rotated(revoked);
+      await revoked.sessions.revoke(a.sessionId, 'logout', T0);
+      revoked.clock.advanceMs(2_000);
+      expect(await revoked.attempt(a.r1)).toEqual(INVALID_GRANT);
+      expect(revoked.sessions.sessions.get(a.sessionId)!.revokedReason).toBe('logout');
+      expect(revoked.events).not.toContain('claimGrace');
+
+      const over = setup();
+      await over.ready;
+      const b = await over.login({ absoluteSeconds: 60 });
+      await over.ok(b.token);
+      over.clock.advanceMs(61_000);
+      over.events.length = 0;
+      expect(await over.attempt(b.token)).toEqual(INVALID_GRANT);
+      expect(over.events).not.toContain('claimGrace');
+    });
+
+    it('does not forgive a token of another app, and revokes nothing for it', async () => {
+      const t = setup();
+      await t.ready;
+      const { token, sessionId } = await t.login({ app: blog });
+      await t.sessions.consume(hashToken(token), blog.id, T0, GENERATOR.generate().hash, hashClientIp(IP_X));
+      t.clock.advanceMs(1_000);
+
+      expect(await t.attempt(token)).toEqual(INVALID_GRANT);
+
+      expect(t.sessions.sessions.get(sessionId)!.revokedAt).toBeNull();
+    });
+
+    it('leaves the claim, the revoked successor and R3 out when signing fails, and the session alive', async () => {
+      const t = setup();
+      const { r1, r2, sessionId } = await rotated(t);
+      t.clock.advanceMs(1_000);
+      t.failures.issuing = true;
+
+      await expect(t.attempt(r1)).rejects.toThrow('signer down');
+
+      expect(stateOf(t, r1).graceUsedAt).toBeNull();
+      expect(stateOf(t, r2).revokedAt).toBeNull();
+      expect(t.sessions.sessions.get(sessionId)!.revokedAt).toBeNull();
     });
   });
 

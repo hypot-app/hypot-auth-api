@@ -165,7 +165,14 @@ Login opens a session (a refresh-token family, bound to the app and the account)
 CSPRNG output, shown once and stored only as its SHA-256. `REFRESH_ABSOLUTE_TTL_SECONDS` (default 2592000, 30 days)
 is the session lifetime from login, and `REFRESH_IDLE_TTL_SECONDS` (default 604800, 7 days) is how long a token
 lives without use, capped at the session end. Both are positive integers of at most 2147483647; an invalid value
-stops the app at boot. Rotation, logout and revocation arrive in U15.
+stops the app at boot. `POST /api/v1/auth/refresh` rotates the token: the old one is marked used and a new one is
+issued in the same session, which never outlives its absolute end. Presenting a used or revoked token revokes the
+whole session (`reuse_detected`), with one exception, the reuse grace window: a rotated token presented again within
+`REFRESH_REUSE_GRACE_SECONDS` (default 10, `0` disables it; a non-negative integer of at most 2147483647) of its
+rotation, from the same client IP (IPv6 on its /64), at most once, while its successor is still unused, gets a fresh
+pair in the same session and the successor is revoked. It covers a lost response, not racing tabs, and it assumes
+`TRUST_PROXY` is set correctly: behind a proxy that hides client addresses every client looks like one IP and the
+window then forgives a thief too. Logout and revocation arrive in U15c.
 
 ### Signing keys and JWKS
 
