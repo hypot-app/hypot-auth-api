@@ -120,6 +120,9 @@ describe('POST /api/v1/auth/login (e2e)', () => {
       expect(response.status).toBe(200);
       expect(response.headers['content-type']).toMatch(/^application\/json/);
       expect(response.headers['set-cookie']).toBeUndefined();
+      // RFC 6749 5.1: a response that carries tokens must never be stored.
+      expect(response.headers['cache-control']).toBe('no-store');
+      expect(response.headers['pragma']).toBe('no-cache');
       expect(Object.keys(response.body).sort()).toEqual(['access_token', 'expires_in', 'refresh_token', 'token_type']);
       expect(response.body).toMatchObject({ token_type: 'Bearer', expires_in: 3600 });
       expect(response.body.refresh_token).toMatch(/^[A-Za-z0-9_-]{43}$/);
@@ -220,6 +223,8 @@ describe('POST /api/v1/auth/login (e2e)', () => {
       expect(reference.body).toEqual(GENERIC_401);
       expect(reference.headers['www-authenticate']).toBeUndefined();
       expect(reference.headers['retry-after']).toBeUndefined();
+      expect(reference.headers['cache-control']).toBe('no-store');
+      expect(reference.headers['pragma']).toBe('no-cache');
       expect(outcomes.map(({ name, response }) => ({ name, response }))).toEqual(
         cases.map(({ name }) => ({ name, response: reference })),
       );
@@ -304,6 +309,7 @@ describe('POST /api/v1/auth/login (e2e)', () => {
       expect(response.status).toBe(400);
       expect(response.body).toEqual({ error: 'invalid_request', message: 'client_id, email and password must be strings' });
       expect(response.headers['access-control-allow-origin']).toBe(SHOP_ORIGIN);
+      expect(response.headers['cache-control']).toBe('no-store');
     });
 
     it('grants no allow header to a 400 from an origin no app owns', async () => {
@@ -353,6 +359,7 @@ describe('POST /api/v1/auth/login (e2e)', () => {
         error: 'temporarily_unavailable',
         message: 'The service is temporarily unavailable. Try again later.',
       });
+      expect(response.headers['cache-control']).toBe('no-store');
       expect(await count('auth_sessions')).toBe(0);
     } finally {
       await db.dataSource.query('ALTER TABLE abuse_counters_off RENAME TO abuse_counters');

@@ -8,7 +8,7 @@ JSON login, refresh and logout for first-party app frontends. A refresh-token fa
 
 ### Requirement: Login
 
-The system MUST expose `POST /api/v1/auth/login` accepting JSON `{client_id, email, password}`. On success it MUST return 200 with JSON `{access_token, token_type: "Bearer", expires_in, refresh_token}`. `expires_in` MUST be 3600. No cookie MUST be set. The email MUST be normalized to lowercase. The account is looked up within the app of `client_id` only.
+The system MUST expose `POST /api/v1/auth/login` accepting JSON `{client_id, email, password}`. On success it MUST return 200 with JSON `{access_token, token_type: "Bearer", expires_in, refresh_token}`. `expires_in` MUST be 3600. No cookie MUST be set. Every answer of every `/api/v1/auth/*` route (success and error) MUST carry `Cache-Control: no-store` and `Pragma: no-cache` (RFC 6749 section 5.1 for the token responses; the errors share the rule so that all answers of a route stay alike). The email MUST be normalized to lowercase. The account is looked up within the app of `client_id` only.
 
 #### Scenario: Successful login
 - GIVEN a confirmed account in app A and the correct password
@@ -16,6 +16,7 @@ The system MUST expose `POST /api/v1/auth/login` accepting JSON `{client_id, ema
 - THEN the response is 200 with `access_token`, `token_type` `Bearer`, `expires_in` 3600 and `refresh_token`
 - AND the access token has `aud` equal to A's `client_id`
 - AND no `Set-Cookie` header is present
+- AND the response carries `Cache-Control: no-store` and `Pragma: no-cache`
 
 #### Scenario: Same email in another app
 - GIVEN the email exists only in app B

@@ -1,9 +1,10 @@
-import { Module } from '@nestjs/common';
+import { Module, type MiddlewareConsumer, type NestModule } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AbuseGuard } from '../abuse-protection/application/abuse-guard';
 import { AbuseProtectionModule } from '../abuse-protection/abuse-protection.module';
 import { ResolveClientUseCase } from '../app-registry/application/resolve-client.use-case';
 import { AppRegistryModule } from '../app-registry/app-registry.module';
+import { noStore } from '../platform/http/no-store.middleware';
 import { CLOCK, type Clock } from '../shared-kernel/clock';
 import { TOKEN_GENERATOR, type TokenGenerator } from '../shared-kernel/token-generator';
 import { UNIT_OF_WORK, type UnitOfWork } from '../shared-kernel/unit-of-work';
@@ -68,4 +69,9 @@ import { SESSION_CONFIG_PROVIDERS, SESSION_TTLS, type SessionTtls } from './infr
     },
   ],
 })
-export class SessionAuthModule {}
+export class SessionAuthModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    // Every route of the controller, answers and errors alike: session-auth routes hand out tokens.
+    consumer.apply(noStore).forRoutes(AuthController);
+  }
+}

@@ -19,6 +19,7 @@ Companion: [`integration-guide.md`](./integration-guide.md).
 | Tokens | Access: RS256 JWT, 1 hour. Refresh: opaque, rotating. Both in the JSON body. |
 | Malformed body | `400 invalid_request` on every body endpoint (missing field, non-string value, invalid JSON). |
 | `Retry-After` | Integer number of seconds, at least 1. |
+| Caching | Every answer of `/api/v1/auth/*` (token responses and errors) carries `Cache-Control: no-store` and `Pragma: no-cache`. |
 
 ### Status legend
 
@@ -186,7 +187,7 @@ Status: IMPLEMENTED.
 | Item | Value |
 |------|-------|
 | Request | `{ "client_id": string, "email": string, "password": string }` |
-| Success | `200 { "access_token": string, "token_type": "Bearer", "expires_in": 3600, "refresh_token": string }`. No `Set-Cookie`. |
+| Success | `200 { "access_token": string, "token_type": "Bearer", "expires_in": 3600, "refresh_token": string }`. No `Set-Cookie`. `Cache-Control: no-store`, `Pragma: no-cache`. |
 | Errors | `400 invalid_request` for a missing or non-string `email` or `password` (does not mention account state). `401 invalid_credentials`, one identical response (status, body, headers) for: unknown email, wrong password, unconfirmed account, locked account, blocked (account, IP) pair, IP over its limit, unknown or inactive `client_id`, origin not bound to the app. `503 temporarily_unavailable`. |
 | CORS | Origin bound to body `client_id`. A mismatch is the generic `401` with no allow header. Once the binding passes, every answer (`200`, the generic `401`, the request-validation `400`) carries the allow header; an unknown `client_id` or an origin not bound to it never does. |
 | Limits | Never `429`. See the rate-limit summary. A request rejected by a limit or block is answered before bcrypt runs. |
