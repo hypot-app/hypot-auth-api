@@ -1,5 +1,4 @@
 import { Module, type MiddlewareConsumer, type NestModule } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
 import { AbuseGuard } from '../abuse-protection/application/abuse-guard';
 import { AbuseProtectionModule } from '../abuse-protection/abuse-protection.module';
 import { ResolveClientUseCase } from '../app-registry/application/resolve-client.use-case';
@@ -15,18 +14,17 @@ import { USER_REPOSITORY, type UserRepository } from '../user-accounts/domain/us
 import { UserAccountsModule } from '../user-accounts/user-accounts.module';
 import { createDummyPasswordHash, DUMMY_PASSWORD_HASH } from './application/dummy-password-hash';
 import { LoginUseCase } from './application/login.use-case';
+import { LogoutUseCase } from './application/logout.use-case';
 import { RefreshSessionUseCase } from './application/refresh-session.use-case';
-import { SESSION_REPOSITORY } from './domain/session.repository';
+import { SESSION_REPOSITORY, type SessionRepository } from './domain/session.repository';
 import { AuthController } from './http/auth.controller';
-import { RefreshTokenSchema } from './infrastructure/persistence/refresh-token.schema';
-import { SessionSchema } from './infrastructure/persistence/session.schema';
-import { TypeOrmSessionRepository } from './infrastructure/persistence/typeorm-session.repository';
 import { SESSION_CONFIG_PROVIDERS, SESSION_TTLS, type SessionTtls } from './infrastructure/session-config';
+import { SessionRevocationModule } from './session-revocation.module';
 
 /** Use cases are plain classes (no Nest decorators); they are wired with factories here (ADR 2). */
 @Module({
   imports: [
-    TypeOrmModule.forFeature([SessionSchema, RefreshTokenSchema]),
+    SessionRevocationModule,
     AppRegistryModule,
     AbuseProtectionModule,
     UserAccountsModule,
@@ -35,8 +33,6 @@ import { SESSION_CONFIG_PROVIDERS, SESSION_TTLS, type SessionTtls } from './infr
   controllers: [AuthController],
   providers: [
     ...SESSION_CONFIG_PROVIDERS,
-    TypeOrmSessionRepository,
-    { provide: SESSION_REPOSITORY, useExisting: TypeOrmSessionRepository },
     // Hashed once at boot with the real cost, so an unknown email takes as long as a known one.
     { provide: DUMMY_PASSWORD_HASH, inject: [PASSWORD_HASHER], useFactory: createDummyPasswordHash },
     {
@@ -60,7 +56,7 @@ import { SESSION_CONFIG_PROVIDERS, SESSION_TTLS, type SessionTtls } from './infr
         users: UserRepository,
         hasher: PasswordHasher,
         dummyHash: string,
-        sessions: TypeOrmSessionRepository,
+        sessions: SessionRepository,
         tokens: TokenGenerator,
         accessTokens: AccessTokenIssuer,
         clock: Clock,
@@ -83,7 +79,7 @@ import { SESSION_CONFIG_PROVIDERS, SESSION_TTLS, type SessionTtls } from './infr
       useFactory: (
         resolveClient: ResolveClientUseCase,
         abuse: AbuseGuard,
-        sessions: TypeOrmSessionRepository,
+        sessions: SessionRepository,
         tokens: TokenGenerator,
         accessTokens: AccessTokenIssuer,
         clock: Clock,
@@ -91,7 +87,16 @@ import { SESSION_CONFIG_PROVIDERS, SESSION_TTLS, type SessionTtls } from './infr
         ttls: SessionTtls,
       ) => new RefreshSessionUseCase({ resolveClient, abuse, sessions, tokens, accessTokens, clock, uow, ttls }),
     },
+    {
+      provide: LogoutUseCase,
+      inject: [ResolveClientUseCase, SESSION_REPOSITORY, CLOCK],
+      useFactory: (resolveClient: ResolveClientUseCase, sessions: SessionRepository, clock: Clock) =>
+        new LogoutUseCase({ resolveClient, sessions, clock }),
+    },
   ],
+  // Re-exports RevokeAccountSessionsUseCase: password-management ends every session of an account in the
+  // same unit of work as the password write.
+  exports: [SessionRevocationModule],
 })
 export class SessionAuthModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

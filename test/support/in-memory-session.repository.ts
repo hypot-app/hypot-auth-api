@@ -128,6 +128,19 @@ export class InMemorySessionRepository implements SessionRepository {
     return revoked;
   }
 
+  async revokeAll(reason: SessionRevokedReason, now: Date): Promise<number> {
+    this.calls.push('revokeAll');
+    let revoked = 0;
+    for (const session of this.sessions.values()) {
+      if (session.revokedAt === null && session.expiresAt > now) {
+        session.revokedAt = now;
+        session.revokedReason = reason;
+        revoked += 1;
+      }
+    }
+    return revoked;
+  }
+
   async claimGrace(hash: Buffer, now: Date): Promise<Buffer | null> {
     this.calls.push('claimGrace');
     const token = this.tokens.get(hash.toString('hex'));

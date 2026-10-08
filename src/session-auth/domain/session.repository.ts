@@ -47,6 +47,11 @@ export interface SessionRepository {
   /** Revokes every active session of an account. Returns how many it revoked. */
   revokeAllForUser(userId: string, reason: SessionRevokedReason, now: Date): Promise<number>;
   /**
+   * Revokes every session that is still open, of every account and app (the key-compromise procedure).
+   * Sessions already revoked or already past their end are left alone. Returns how many it revoked.
+   */
+  revokeAll(reason: SessionRevokedReason, now: Date): Promise<number>;
+  /**
    * Claims the one-time grace of a rotated, unrevoked token. Returns the hash of its successor the first
    * time, and null every other time (concurrent claims yield exactly one winner).
    */

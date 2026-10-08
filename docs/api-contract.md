@@ -225,7 +225,7 @@ Lifetimes: session 30 days absolute from login, not extended by rotation. A toke
 
 ### `POST /api/v1/auth/logout`
 
-Status: PLANNED.
+Status: IMPLEMENTED.
 
 | Item | Value |
 |------|-------|
@@ -234,6 +234,9 @@ Status: PLANNED.
 | Errors | `400 invalid_request` for a malformed body. An `Origin` not bound to `client_id` still gets `204`, but nothing is revoked and no CORS allow header is sent. |
 | CORS | Origin bound to body `client_id` |
 | Limits | None |
+| Headers | Every answer, the `400` included, carries `Cache-Control: no-store` and `Pragma: no-cache`. |
+
+`400` is `{ "error": "invalid_request", "message": "client_id and refresh_token must be strings" }`. An unknown or inactive `client_id` also gets `204`, with no effect and no allow header. The allow header is sent on the `204` and on the `400` only once the origin is bound to `client_id`.
 
 Access tokens already issued stay valid until `exp` (no denylist).
 

@@ -280,6 +280,47 @@ describe('SessionRepository (integration, ADR 35)', () => {
     });
   });
 
+  describe('revokeAll', () => {
+    it('revokes every open session of every account and app, with the reason, and returns how many', async () => {
+      const first = await open();
+      const second = await open({ userId: userB });
+      const otherApp = await open({ appId: appB });
+
+      const revoked = await sessions.revokeAll('ops_revoke_all', at(10));
+
+      expect(revoked).toBe(3);
+      for (const { session } of [first, second, otherApp]) {
+        expect(await sessionRow(session.id)).toEqual({ revoked_at: at(10), revoked_reason: 'ops_revoke_all' });
+      }
+    });
+
+    it('leaves a session that was revoked before, or is already over, as it was, and does not count it', async () => {
+      const live = await open();
+      const done = await open();
+      await sessions.revoke(done.session.id, 'logout', at(5));
+      const over = await open({ sessionTtl: 60 });
+
+      const revoked = await sessions.revokeAll('ops_revoke_all', at(120));
+
+      expect(revoked).toBe(1);
+      expect(await sessionRow(live.session.id)).toEqual({ revoked_at: at(120), revoked_reason: 'ops_revoke_all' });
+      expect(await sessionRow(done.session.id)).toEqual({ revoked_at: at(5), revoked_reason: 'logout' });
+      expect(await sessionRow(over.session.id)).toEqual({ revoked_at: null, revoked_reason: null });
+    });
+
+    it('returns 0 when there is nothing to revoke', async () => {
+      expect(await sessions.revokeAll('ops_revoke_all', at(10))).toBe(0);
+    });
+
+    it('makes every token of those sessions unusable for a rotation', async () => {
+      const { token } = await open();
+
+      await sessions.revokeAll('ops_revoke_all', at(10));
+
+      expect(await sessions.consume(token.tokenHash, appA, at(20), hash(), hash())).toBeNull();
+    });
+  });
+
   describe('touch', () => {
     const lastUsedAt = async (id: string): Promise<Date> =>
       (await db.dataSource.query(`SELECT last_used_at FROM auth_sessions WHERE id = $1`, [id]))[0].last_used_at;

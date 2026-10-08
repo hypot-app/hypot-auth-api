@@ -4,12 +4,15 @@ import { ClientIp } from '../../abuse-protection/domain/client-ip';
 import { RateLimitedException } from '../../abuse-protection/http/abuse-exception.filter';
 import { CorsGrant } from '../../platform/http/cors-grant';
 import { LoginUseCase, type LoginTokens } from '../application/login.use-case';
+import { LogoutUseCase } from '../application/logout.use-case';
 import { RefreshSessionUseCase } from '../application/refresh-session.use-case';
 
 /** `client_id` is looked up in the database, so its length is bounded before it gets there. */
 const loginBody = z.object({ client_id: z.string().max(128), email: z.string(), password: z.string() });
 
 const refreshBody = z.object({ client_id: z.string().max(128), refresh_token: z.string() });
+/** Logout takes the same body as refresh. */
+const logoutBody = refreshBody;
 
 /** One body for every login failure (ADR 43). It never says which check failed. */
 const INVALID_CREDENTIALS = { error: 'invalid_credentials', message: 'Email or password is incorrect.' };
@@ -40,6 +43,7 @@ export class AuthController {
   constructor(
     private readonly loginUseCase: LoginUseCase,
     private readonly refreshUseCase: RefreshSessionUseCase,
+    private readonly logoutUseCase: LogoutUseCase,
   ) {}
 
   @Post('login')
@@ -104,5 +108,26 @@ export class AuthController {
     }
     grantCors();
     return tokenResponse(result.value);
+  }
+
+  @Post('logout')
+  @HttpCode(204)
+  async logout(
+    @Body() body: unknown,
+    @Headers('origin') origin: string | undefined,
+    @CorsGrant() grantCors: () => void,
+  ): Promise<void> {
+    const parsed = logoutBody.safeParse(body);
+    if (!parsed.success) {
+      grantCors();
+      throw new BadRequestException({ error: 'invalid_request', message: 'client_id and refresh_token must be strings' });
+    }
+    const outcome = await this.logoutUseCase.execute({
+      clientId: parsed.data.client_id,
+      origin,
+      refreshToken: parsed.data.refresh_token,
+    });
+    // Always 204 (no oracle); the browser may read it only once the origin is bound to the client (ADR 38).
+    if (outcome.clientBound) grantCors();
   }
 }

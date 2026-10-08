@@ -96,6 +96,7 @@ Sources: `decisions-round8` (API-only), `round9` (limits in Phase 1), `round10` 
 | Session = family | `auth_sessions` row; its `id` is the family id. Bound to `app_id` and `user_id`. Absolute `expires_at` = login + 30 d |
 | Token | One `refresh_tokens` row per issued token: `session_id`, `consumed_at`, `expires_at` = min(now + idle TTL 7 d, session expiry) |
 | Rotation | Every refresh consumes the token and issues a successor in the same session, in one `UnitOfWork` |
+| Session use | Every refresh, a normal rotation and a grace reuse alike, sets `auth_sessions.last_used_at = now` in the same `UnitOfWork` (`SessionRepository.touch`); a refresh that fails or rolls back leaves it as it was (decision of U15) |
 | Reuse | Presenting a consumed token revokes the whole session (`revoked_reason = 'reuse_detected'`), except inside the grace window below |
 | Grace window | Round 11. A rotated token presented again within `REFRESH_REUSE_GRACE_SECONDS` (default 10, `0` disables) of its rotation, from the same `ClientIp` as the rotation, once per rotated token, while its successor is unused: the successor is revoked and a fresh pair is issued in the same session. Details and tradeoffs below |
 | Binding | Consume requires the session's `app_id` = the app of `client_id`. A mismatch is plain invalid, with no revoke. An `Origin` not bound to that app gives the same `401 invalid_grant` before any consume (ADR 38) |

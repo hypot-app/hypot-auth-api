@@ -172,7 +172,10 @@ whole session (`reuse_detected`), with one exception, the reuse grace window: a 
 rotation, from the same client IP (IPv6 on its /64), at most once, while its successor is still unused, gets a fresh
 pair in the same session and the successor is revoked. It covers a lost response, not racing tabs, and it assumes
 `TRUST_PROXY` is set correctly: behind a proxy that hides client addresses every client looks like one IP and the
-window then forgives a thief too. Logout and revocation arrive in U15c.
+window then forgives a thief too. `POST /api/v1/auth/logout` revokes the session of the presented token (reason
+`logout`) and always answers `204`, whether the token is active, used, expired, unknown or another app's. It revokes
+only when the token belongs to the client's app and any `Origin` is bound to it. Access tokens already issued stay
+valid until `exp`. `refresh_ip` limits refresh (60 per 15 minutes per app and IP by default); logout has no limiter.
 
 ### Signing keys and JWKS
 
@@ -218,7 +221,15 @@ Rotation is a config change and needs a restart of every instance:
    10 minutes jose cache (4205 s). At the next boot after that it is dropped and a warning names its `kid`;
    remove the entry from the secret. A retired key without `retiredAt` never expires and logs a boot warning.
 
-Emergency rotation also revokes all refresh tokens.
+Emergency rotation also revokes all refresh tokens, with the operator CLI:
+
+```bash
+docker compose run --rm api dist/cli.js ops:revoke-all --yes
+```
+
+It ends every open session of every app (reason `ops_revoke_all`), prints `revoked sessions: <count>` and refuses
+to run without `--yes`. It needs no signing key. Access tokens already issued stay valid until `exp`, which is why
+the key is rotated as well. Every user logs in again.
 
 ## Run locally without Docker
 
