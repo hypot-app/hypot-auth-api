@@ -100,10 +100,12 @@ export class InMemorySessionRepository implements SessionRepository {
     };
   }
 
-  async touch(sessionId: string, now: Date): Promise<void> {
+  async touch(sessionId: string, now: Date): Promise<boolean> {
     this.calls.push('touch');
     const session = this.sessions.get(sessionId);
-    if (session) session.lastUsedAt = now;
+    if (!session || session.revokedAt !== null || session.expiresAt <= now) return false;
+    session.lastUsedAt = now;
+    return true;
   }
 
   async revoke(sessionId: string, reason: SessionRevokedReason, now: Date): Promise<void> {
@@ -155,6 +157,11 @@ export class InMemorySessionRepository implements SessionRepository {
     if (!token || token.consumedAt !== null || token.revokedAt !== null) return false;
     token.revokedAt = now;
     return true;
+  }
+
+  /** Test helper: how many tokens are stored. */
+  tokenCount(): number {
+    return this.tokens.size;
   }
 
   /** Test helper: the stored token, to assert on its state. */

@@ -70,12 +70,18 @@ export class RefreshSessionUseCase {
     const now = clock.now();
 
     const successor = this.deps.tokens.generate();
-    const rotated = await this.deps.uow.run(async () => {
-      const consumed = await sessions.consume(hash, app.id, now, successor.hash, hashClientIp(input.ip));
-      if (consumed === null) return null;
-      return this.issuePair(app.clientId, consumed.userId, consumed.sessionId, consumed.sessionExpiresAt, successor, now);
-    });
-    if (rotated !== null) return ok(rotated);
+    try {
+      const rotated = await this.deps.uow.run(async () => {
+        const consumed = await sessions.consume(hash, app.id, now, successor.hash, hashClientIp(input.ip));
+        if (consumed === null) return null;
+        return this.issuePair(app.clientId, consumed.userId, consumed.sessionId, consumed.sessionExpiresAt, successor, now);
+      });
+      if (rotated !== null) return ok(rotated);
+    } catch (error) {
+      // The session closed mid-request: rolled back, nothing to revoke or forgive.
+      if (error instanceof SessionClosed) return invalid;
+      throw error;
+    }
 
     const reused = await this.handleReuse(hash, app.id, app.clientId, input.ip, now);
     return reused === null ? invalid : ok(reused);
@@ -99,7 +105,8 @@ export class RefreshSessionUseCase {
         idleTtlSeconds: this.deps.ttls.idleSeconds,
       }),
     );
-    await sessions.touch(sessionId, now);
+    // The session may have closed since it was read; the zero-row touch aborts and rolls the whole unit back.
+    if (!(await sessions.touch(sessionId, now))) throw new SessionClosed();
     const access = await this.deps.accessTokens.issue({ accountId: userId, clientId });
     return { accessToken: access.token, expiresIn: ACCESS_TOKEN_TTL_SECONDS, refreshToken: successor.token };
   }
@@ -120,6 +127,7 @@ export class RefreshSessionUseCase {
       try {
         return await this.deps.uow.run(() => this.forgive(hash, clientId, state, now));
       } catch (error) {
+        if (error instanceof SessionClosed) return null;
         if (!(error instanceof GraceRefused)) throw error;
       }
     }
@@ -139,6 +147,9 @@ export class RefreshSessionUseCase {
     return this.issuePair(clientId, state.userId, state.sessionId, state.sessionExpiresAt, this.deps.tokens.generate(), now);
   }
 }
+
+/** Thrown inside a unit of work when the session was revoked or ended after it was read; rolls the unit back. */
+class SessionClosed extends Error {}
 
 /** Thrown inside the grace unit of work to roll it back; the session is then revoked as for any reuse. */
 class GraceRefused extends Error {}

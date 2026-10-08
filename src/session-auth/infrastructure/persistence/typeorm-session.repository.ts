@@ -41,7 +41,11 @@ const REVOKE_TOKEN_SQL = `
   WHERE "token_hash" = $2 AND "consumed_at" IS NULL AND "revoked_at" IS NULL
   RETURNING 1`;
 
-const TOUCH_SESSION_SQL = `UPDATE "auth_sessions" SET "last_used_at" = $1 WHERE "id" = $2`;
+/** Conditional on purpose: a logout or revoke-all that committed after the caller's read must be seen here. */
+const TOUCH_SESSION_SQL = `
+  UPDATE "auth_sessions" SET "last_used_at" = $1
+  WHERE "id" = $2 AND "revoked_at" IS NULL AND "expires_at" > $1
+  RETURNING 1`;
 
 /** `revoked_at IS NULL` keeps the first reason and time. */
 const REVOKE_SESSION_SQL = `
@@ -116,8 +120,9 @@ export class TypeOrmSessionRepository implements SessionRepository {
     };
   }
 
-  async touch(sessionId: string, now: Date): Promise<void> {
-    await currentManager(this.dataSource).query(TOUCH_SESSION_SQL, [now, sessionId]);
+  async touch(sessionId: string, now: Date): Promise<boolean> {
+    const [rows]: [unknown[], number] = await currentManager(this.dataSource).query(TOUCH_SESSION_SQL, [now, sessionId]);
+    return rows.length > 0;
   }
 
   async revoke(sessionId: string, reason: SessionRevokedReason, now: Date): Promise<void> {

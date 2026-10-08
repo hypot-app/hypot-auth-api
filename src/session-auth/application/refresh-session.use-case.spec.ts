@@ -222,6 +222,26 @@ describe('RefreshSessionUseCase', () => {
     });
   });
 
+  describe('session closing mid-request', () => {
+    it('refuses a rotation when the session is revoked after the token was consumed, and rolls it back', async () => {
+      const t = setup();
+      await t.ready;
+      const { token, sessionId } = await t.login();
+      const add = t.sessions.addToken.bind(t.sessions);
+      t.sessions.addToken = async (next) => {
+        await add(next);
+        await t.sessions.revoke(sessionId, 'logout', t.clock.now());
+      };
+
+      expect(await t.attempt(token)).toEqual(INVALID_GRANT);
+
+      expect(t.events).toContain('uow:rollback');
+      expect(t.issued).toHaveLength(0);
+      expect(t.sessions.token(hashToken(token))).toMatchObject({ consumedAt: null, replacedByHash: null });
+      expect(t.sessions.tokenCount()).toBe(1);
+    });
+  });
+
   describe('invalid_grant', () => {
     it('is the same answer for an unknown token, a malformed one, a token of another app and an expired one', async () => {
       const t = setup();
@@ -575,6 +595,30 @@ describe('RefreshSessionUseCase', () => {
       expect(await t.attempt(token)).toEqual(INVALID_GRANT);
 
       expect(t.sessions.sessions.get(sessionId)!.revokedAt).toBeNull();
+    });
+
+    it('refuses the grace when the session is revoked after the eligibility read, and leaves nothing behind', async () => {
+      const t = setup();
+      const { r1, r2, sessionId } = await rotated(t);
+      t.clock.advanceMs(5_000);
+      // A logout commits between the read of the token state and the unit of work.
+      const read = t.sessions.findTokenState.bind(t.sessions);
+      t.sessions.findTokenState = async (hash) => {
+        const state = await read(hash);
+        await t.sessions.revoke(sessionId, 'logout', t.clock.now());
+        return state;
+      };
+      const issuedBefore = t.issued.length;
+
+      expect(await t.attempt(r1)).toEqual(INVALID_GRANT);
+
+      expect(t.issued).toHaveLength(issuedBefore);
+      expect(t.events).toContain('uow:rollback');
+      expect(stateOf(t, r1).graceUsedAt).toBeNull();
+      expect(stateOf(t, r2).revokedAt).toBeNull();
+      expect(t.sessions.sessions.get(sessionId)).toMatchObject({ lastUsedAt: T0 });
+      expect([...t.sessions.sessions.values()].length).toBe(1);
+      expect(t.sessions.tokenCount()).toBe(2);
     });
 
     it('leaves the claim, the revoked successor and R3 out when signing fails, and the session alive', async () => {
