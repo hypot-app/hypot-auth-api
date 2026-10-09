@@ -8,8 +8,10 @@ no hosted UI, no cookie and no redirect.
 - Endpoint contract (paths, bodies, status and error codes): [`docs/api-contract.md`](docs/api-contract.md)
 - Design and specs: `openspec/changes/auth-service/`
 
-Only part of the API is implemented so far (see the status badges in the contract). Sections below that describe
-planned behaviour say so.
+Every endpoint of the contract is implemented. The OpenAPI 3.1 description is `openapi.json`, regenerated with
+`npm run openapi:generate`. Operating the service: [Operations runbook](#operations-runbook). Browser check:
+[`docs/smoke-test.md`](docs/smoke-test.md). Variables to add to `.env.example`:
+[`docs/env-example-additions.md`](docs/env-example-additions.md).
 
 ## Run locally with Docker
 
@@ -99,8 +101,7 @@ with `Access-Control-Allow-Methods: GET, POST, OPTIONS`, `Access-Control-Allow-H
 matches `--origin` of the app it identifies (body `client_id`, the token's owner for confirm and reset, the
 access token's `aud` for `/api/v1/me` and password change). Auth never sends credentials headers or cookies.
 Answers are cached for 30 seconds, so deactivating an app or changing its origins can take that long to apply.
-The binding and the fixed preflight header set are live on login, refresh, logout, signup, confirm, resend and
-`/me`; forgot, reset and change get their binding with the password-management unit.
+The binding and the fixed preflight header set are live on all ten API routes.
 
 The origin of an app's `email_confirmation_url` and `password_reset_url` must be one of its allowed origins,
 otherwise its confirm and reset screens could not call Auth. The CLI enforces this on create and update.
@@ -153,7 +154,7 @@ hosted UI.
 ### Abuse protection
 
 Rate limits and the login lockout count in Postgres (`abuse_counters`, an UNLOGGED table, no Redis); a sweeper
-started by `main.ts` deletes expired rows every 5 minutes. Each scope has `ABUSE_<SCOPE>_LIMIT` and
+started by `main.ts` deletes expired rows every 5 minutes (retention of the other tables: see the runbook). Each scope has `ABUSE_<SCOPE>_LIMIT` and
 `ABUSE_<SCOPE>_WINDOW_SECONDS` (plus `_BLOCK_SECONDS` for `LOGIN_ACCOUNT_IP` and `LOGIN_ACCOUNT`). Defaults:
 `LOGIN_IP` 100 per 15 min, `LOGIN_ACCOUNT_IP` 5 per 15 min, `LOGIN_ACCOUNT` 50 per 1 h (both lockouts last 15 min),
 `EMAIL_IP`, `RESET_IP` and `CONFIRM_IP` 20 per 1 h, `REFRESH_IP` 60 per 15 min, `EMAIL_ACCOUNT` 3 per 1 h.
@@ -161,7 +162,7 @@ The client IP is the TCP peer unless `TRUST_PROXY` (default `false`: a hop count
 `loopback`, `uniquelocal` or CIDRs; `true` is rejected; a hop count is 1 to 10 and a CIDR no wider than /8 for IPv4 or
 /16 for IPv6) names the proxies in front of Auth. Behind a load balancer set it, or every user shares the proxy's
 address. Set it exactly: too FEW hops only over-limits, but too MANY lets a client-supplied `X-Forwarded-For` value win. IPv6 clients are keyed on their /64. If the counter store fails,
-credential endpoints answer `503 temporarily_unavailable` (logged once a minute at most, with the scope and driver message only), and the `429` and `503` answers are readable from an active app's origin. The login lockout counts the attempt before bcrypt (`beginLoginAttempt`), so parallel guesses cannot outrun it. The account limit is 50 attempts per window; reaching it locks the account for 15 min, and when the lock ends the count restarts. A distributed attacker therefore gets at most about 200 attempts per hour per account, and needs at least 10 distinct IPs for it, because each account and IP pair is capped at about 20 attempts per hour (5 per lock cycle of 15 min). Password change (U18) shares these counters. Both counters count attempts, so a service account or automation that logs in more than 50 times an hour locks itself out; it must reuse its refresh token instead of logging in again. Login calls the guard; U17 and U18 call it from the other endpoints.
+credential endpoints answer `503 temporarily_unavailable` (logged once a minute at most, with the scope and driver message only), and the `429` and `503` answers are readable from an active app's origin. The login lockout counts the attempt before bcrypt (`beginLoginAttempt`), so parallel guesses cannot outrun it. The account limit is 50 attempts per window; reaching it locks the account for 15 min, and when the lock ends the count restarts. A distributed attacker therefore gets at most about 200 attempts per hour per account, and needs at least 10 distinct IPs for it, because each account and IP pair is capped at about 20 attempts per hour (5 per lock cycle of 15 min). Password change (U18) shares these counters. Both counters count attempts, so a service account or automation that logs in more than 50 times an hour locks itself out; it must reuse its refresh token instead of logging in again. Every credential endpoint calls the guard.
 
 ### Sessions and refresh tokens
 
@@ -254,6 +255,76 @@ npm run start:dev                  # recompiles and restarts on changes
 
 The service validates its environment at startup and exits with a clear error when a
 required variable is missing or invalid (see `.env.example`).
+
+## Operations runbook
+
+Answers first: deploy by running the migrations, then the app; scale by adding replicas; the only state to protect is Postgres and the signing key secret.
+
+| Task | How |
+|------|-----|
+| Apply migrations | `docker compose run --rm migrate` (or `npm run migration:run` without Docker), before starting the new version. The app never migrates on startup. |
+| Roll a migration back | `migration:revert` undoes one migration per run through its `down()`. A test applies the whole chain, reverts it to an empty schema and applies it again. |
+| Revoke every session | `ops:revoke-all --yes` (see Signing keys and JWKS). |
+| Rotate signing keys | The rotation steps in Signing keys and JWKS. |
+| Regenerate the API description | `npm run openapi:generate` writes `openapi.json`. It is a build artifact: no route serves it, and a test fails when it is stale. |
+| Check the browser flow | `docs/smoke-test.md`. |
+| Check login latency | `scripts/login-load.mjs`, see Capacity and load test. |
+
+### Background jobs and retention
+
+`main.ts` starts three timers, and nothing else does: the CLI, the migration job and the tests never run them. Each replica runs its own copy, which is safe: the outbox claims rows with `FOR UPDATE SKIP LOCKED`, and the sweepers only delete, so two replicas at most contend briefly on the same batch. On SIGTERM each job stops scheduling and finishes the batch in flight before the pool closes, so give the container the stop grace period of the compose file (70 s, bounded by the 60 s email send deadline).
+
+| Job | Runs | Does |
+|-----|------|------|
+| Outbox poller | every 2 s | Sends queued email through SMTP, with backoff, 8 attempts, then `failed` |
+| Counter sweeper | at start, then every 5 min | Deletes `abuse_counters` rows whose window and lockout have ended |
+| Retention sweeper | at start, then every hour | Deletes the rows below, in batches of 1,000 until a batch comes back short |
+
+Retention windows (ADR 35). Each delete is a single statement on its own pool connection, never inside a transaction.
+
+| Data | Deleted when | Why this long |
+|------|--------------|---------------|
+| Sessions and their refresh tokens | 1 day after the session's `expires_at` | Consumed tokens of a live session are kept on purpose: presenting one is reuse detection. A session revoked early is kept until its expiry plus a day |
+| `one_time_tokens` (confirmation and reset) | 1 day after `expires_at`, consumed or not | Short-lived by nature (24 h and 1 h) |
+| `email_outbox`, status `sent` or `failed` | 7 days after `created_at` | Time to investigate a delivery problem |
+| `email_outbox`, status `pending` | never | It is the live queue |
+| `abuse_counters` | when expired (counter sweeper) | A finished window has no value |
+| `users`, `apps` | never | Not in scope for Phase 1 |
+
+A failing sweep logs `retention sweep of <sessions|one-time tokens|outbox> failed: <driver message>` (message only) and the next hour tries again; the other categories still run.
+
+### Deploying behind a load balancer
+
+| Setting | Rule |
+|---------|------|
+| `AUTH_PUBLIC_BASE_URL` | In production an `https` URL with no trailing slash, no query and no fragment, for example `https://auth.example`. It is copied verbatim into every token's `iss`, and the JWKS URL is built from it. The service refuses to start with anything else. |
+| `TRUST_PROXY` | Set it to the hop count or the proxy CIDRs in front of Auth (default `false`). Left unset behind a load balancer, every client shares the proxy's address, so one user can exhaust an IP limit for everyone. Set too high, a client-supplied `X-Forwarded-For` wins. The reuse grace window also relies on it. |
+| Counters | `abuse_counters` is an `UNLOGGED` table: fast, but not crash-safe and not replicated. After a crash or a failover to a standby it is empty and every window and lockout starts over. That only forgives, it never blocks. |
+
+### Capacity and load test
+
+Login is CPU-bound by bcrypt cost 12. Signup, reset and change hash too, and a login for an unknown email hashes a dummy so timing does not leak. Requests that a limit or lockout rejects skip the hash.
+
+| Fact | Number |
+|------|--------|
+| One bcrypt cost-12 hash | about 250 ms of one CPU core |
+| libuv threadpool (`UV_THREADPOOL_SIZE`, default 4) | 4 hashes at once, so about **16 logins per second per process** |
+| More threads than cores | No gain. Set `UV_THREADPOOL_SIZE` to the container's core count (ADR 12) |
+| Scaling | Horizontal: add replicas. About 16 logins per second each, so 1,000 per second needs about 63 processes of 4 cores |
+| Database connections | Each process keeps at most 10 (`DB_POOL_MAX`, a code constant). **Replicas times 10 must fit in Postgres `max_connections`**, minus a reserve for migrations and operators. The default of 100 allows about 9 replicas |
+| Many replicas | Put PgBouncer in front. Auth keeps no session-level state (no advisory locks, `LISTEN` or session `SET`), but it has not been load-tested through PgBouncer: verify it in staging |
+| Pool exhausted | A caller waits 5000 ms for a connection (`DB_CONNECTION_TIMEOUT_MS`). On the counter path (every credential endpoint) the answer is `503 temporarily_unavailable`; elsewhere it is a `500`. The pool recovers when the load drops |
+
+The gate (ADR 12): login P95 under 500 ms at pilot load. Run it by hand against a running instance. Use a dedicated or staging instance, a confirmed account, and raise the login limits for the run, because one account from one address is blocked after 5 attempts by design and a blocked login is fast, which would fake a pass. The script fails when any answer is not `200` for that reason.
+
+```bash
+# Instance started with ABUSE_LOGIN_IP_LIMIT, ABUSE_LOGIN_ACCOUNT_IP_LIMIT and ABUSE_LOGIN_ACCOUNT_LIMIT raised (for example to 100000).
+LOAD_PASSWORD='the account password' node scripts/login-load.mjs \
+  --client-id app_0123456789abcdef0123456789abcdef --email load@example.com \
+  --url http://localhost:3000 --requests 200 --concurrency 4
+```
+
+It prints throughput, the status counts and min, median, P95, P99 and max latency, then `GATE PASSED` (exit 0) or `GATE FAILED` (exit 1; exit 2 for bad arguments). Set `--concurrency` to the number of logins your pilot expects at the same moment and `--threshold-ms` only to tighten the gate. The pilot load figure is a product decision that this repository does not fix.
 
 ## Endpoints
 

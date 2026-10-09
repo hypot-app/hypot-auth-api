@@ -1,0 +1,99 @@
+<!doctype html>
+<!-- Smoke-test SPA for docs/smoke-test.md. One static file: no build, no dependency, not for production. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>hypot smoke test</title>
+  <style>
+    body { font: 14px/1.4 system-ui, sans-serif; max-width: 52rem; margin: 1rem auto; padding: 0 1rem; }
+    fieldset { margin: .5rem 0; } label { display: inline-block; min-width: 7rem; }
+    input { width: 22rem; } button { margin: .15rem; }
+    pre { background: #f4f4f4; padding: .5rem; max-height: 22rem; overflow: auto; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>hypot smoke test</h1>
+  <p id="page"></p>
+  <fieldset>
+    <legend>Setup</legend>
+    <div><label>Auth URL</label><input id="auth" value="http://localhost:3000"></div>
+    <div><label>client_id</label><input id="client" placeholder="app_..."></div>
+    <div><label>Email</label><input id="email" value="smoke@example.com"></div>
+    <div><label>Password</label><input id="password" value="correct horse battery"></div>
+    <div><label>New password</label><input id="newpw" value="staple battery horse"></div>
+  </fieldset>
+  <fieldset>
+    <legend>Actions</legend>
+    <button data-do="signup">Signup</button>
+    <button data-do="resend">Resend confirmation</button>
+    <button data-do="confirm">Confirm (token from link)</button>
+    <button data-do="login">Login</button>
+    <button data-do="me">GET /me</button>
+    <button data-do="refresh">Refresh</button>
+    <button data-do="refresh5">Refresh x5 (parallel)</button>
+    <button data-do="logout">Logout</button>
+    <button data-do="forgot">Forgot password</button>
+    <button data-do="reset">Reset (token from link)</button>
+  </fieldset>
+  <pre id="log"></pre>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const log = (...parts) => { $('log').textContent += parts.map((p) => typeof p === 'string' ? p : JSON.stringify(p)).join(' ') + '\n'; };
+  const REFRESH_KEY = 'hypot-smoke-refresh';
+  let access = null;
+
+  // The email link is <page>#token=...: read the token, then remove it from the address bar before anything else.
+  const params = new URLSearchParams(location.search);
+  const fragment = new URLSearchParams(location.hash.slice(1));
+  const linkToken = fragment.get('token');
+  history.replaceState(null, '', location.pathname + location.search);
+  $('page').textContent = `page=${params.get('page') ?? 'home'}; link token ${linkToken ? 'captured and removed from the URL' : 'none'}`;
+
+  async function call(path, { method = 'POST', body, bearer } = {}) {
+    const headers = {};
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    if (bearer) headers.Authorization = `Bearer ${bearer}`;
+    try {
+      const res = await fetch(`${$('auth').value}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+      const text = await res.text();
+      let json = null;
+      try { json = text ? JSON.parse(text) : null; } catch { /* not JSON */ }
+      log(`${method} ${path} -> ${res.status}`, json ?? text);
+      return { res, json };
+    } catch (error) {
+      log(`${method} ${path} -> NETWORK/CORS ERROR`, String(error));
+      return { res: null, json: null };
+    }
+  }
+
+  async function refreshOnce() {
+    // One refresh at a time across tabs: the lock, then re-read the stored token (another tab may have rotated it).
+    return navigator.locks.request('hypot-refresh', async () => {
+      const refresh_token = localStorage.getItem(REFRESH_KEY);
+      const { res, json } = await call('/api/v1/auth/refresh', { body: { client_id: $('client').value, refresh_token } });
+      if (res?.status === 200) { access = json.access_token; localStorage.setItem(REFRESH_KEY, json.refresh_token); }
+    });
+  }
+
+  const actions = {
+    signup: () => call('/api/v1/accounts/signup', { body: { client_id: $('client').value, email: $('email').value, password: $('password').value } }),
+    resend: () => call('/api/v1/accounts/resend-confirmation', { body: { client_id: $('client').value, email: $('email').value } }),
+    confirm: () => call('/api/v1/accounts/confirm', { body: { token: linkToken ?? '' } }),
+    login: async () => {
+      const { res, json } = await call('/api/v1/auth/login', { body: { client_id: $('client').value, email: $('email').value, password: $('password').value } });
+      if (res?.status === 200) { access = json.access_token; localStorage.setItem(REFRESH_KEY, json.refresh_token); }
+    },
+    me: () => call('/api/v1/me', { method: 'GET', bearer: access }),
+    refresh: refreshOnce,
+    refresh5: () => Promise.all([1, 2, 3, 4, 5].map(refreshOnce)),
+    logout: async () => {
+      await call('/api/v1/auth/logout', { body: { client_id: $('client').value, refresh_token: localStorage.getItem(REFRESH_KEY) } });
+      access = null; localStorage.removeItem(REFRESH_KEY);
+    },
+    forgot: () => call('/api/v1/password/forgot', { body: { client_id: $('client').value, email: $('email').value } }),
+    reset: () => call('/api/v1/password/reset', { body: { token: linkToken ?? '', new_password: $('newpw').value } }),
+  };
+  document.querySelectorAll('button[data-do]').forEach((b) => b.addEventListener('click', () => actions[b.dataset.do]()));
+</script>
+</body>
+</html>
