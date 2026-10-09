@@ -62,7 +62,7 @@ Fill in one row per browser and keep the file in the PR.
 
 | Browser and version | Date | Steps 1-11 | Failures and notes |
 |---------------------|------|------------|--------------------|
-| Chromium | | | |
+| Chrome 154.0.8037.98 (64-bit), Windows 11 | 2026-10-09 | 1-11 passed | Step 6 showed the expected CORS block (401 with no allow header). Step 7 overlapped the two tabs with a delayed click from the console. |
 | Firefox | | | |
 | Safari | | | |
 
