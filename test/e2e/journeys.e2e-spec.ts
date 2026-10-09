@@ -129,6 +129,9 @@ describe('end-to-end journeys (e2e, 19.6)', () => {
     expect(logged.status).toBe(200);
     expect(logged.headers['set-cookie']).toBeUndefined();
     const first = pairOf(logged);
+    // expires_in is the real access token lifetime, not a second constant (api-contract: 3600).
+    const claims = decodeJwt(first.access);
+    expect(claims.exp! - claims.iat!).toBe(logged.body.expires_in);
 
     const profile = await me(first.access, SHOP_ORIGIN);
     expect(profile.status).toBe(200);
