@@ -1,6 +1,9 @@
 import { CommandFactory } from 'nest-commander';
+import { AbuseCounterSweeper } from '../../src/abuse-protection/application/abuse-counter-sweeper';
 import { CliModule } from '../../src/cli.module';
 import { APP_CONFIG, type AppConfig } from '../../src/platform/config/app-config';
+import { RetentionSweeper } from '../../src/platform/retention/retention-sweeper';
+import { OutboxPoller } from '../../src/transactional-email/infrastructure/outbox-poller';
 import { startTestDatabase, type TestDatabase } from '../support/postgres';
 
 describe('operator CLI boot (W2: least privilege)', () => {
@@ -29,6 +32,10 @@ describe('operator CLI boot (W2: least privilege)', () => {
     const context = await CommandFactory.createWithoutRunning(CliModule, { logger: false, abortOnError: false });
     try {
       expect(context.get<AppConfig>(APP_CONFIG).databaseUrl).toBe(db.url);
+      // Nothing in the CLI runs on a timer: the jobs are not even registered (19.5).
+      for (const job of [OutboxPoller, AbuseCounterSweeper, RetentionSweeper]) {
+        expect(() => context.get(job, { strict: false })).toThrow();
+      }
     } finally {
       await context.close();
     }

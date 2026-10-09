@@ -3,6 +3,7 @@ import { AbuseProtectionModule } from './abuse-protection/abuse-protection.modul
 import { AppRegistryModule } from './app-registry/app-registry.module';
 import { PasswordManagementModule } from './password-management/password-management.module';
 import { PlatformModule } from './platform/platform.module';
+import { RetentionModule } from './platform/retention/retention.module';
 import { SessionAuthModule } from './session-auth/session-auth.module';
 import { SharedKernelModule } from './shared-kernel/shared-kernel.module';
 import { TokenLifecycleModule } from './token-lifecycle/token-lifecycle.module';
@@ -13,6 +14,7 @@ import { UserAccountsModule } from './user-accounts/user-accounts.module';
   imports: [
     SharedKernelModule,
     PlatformModule,
+    RetentionModule,
     AppRegistryModule,
     AbuseProtectionModule,
     TransactionalEmailModule,
