@@ -16,6 +16,7 @@ const version = (JSON.parse(readFileSync(join(__dirname, '..', '..', 'package.js
 const document = buildOpenApiDocument({ version });
 const ORIGIN = 'https://shop.example';
 const PASSWORD = 'correct horse';
+const NEW_PASSWORD = 'staple battery horse';
 /** Every POST route of the API with the smallest body that passes the content-type check. */
 const POST_PATHS = Object.entries(document.paths)
   .filter(([, methods]) => 'post' in methods)
@@ -141,5 +142,38 @@ describe('OpenAPI document against the running app (e2e, 19.2)', () => {
 
     expect(limited.status).toBe(429);
     expectDocumented(document, limited, 'post', '/api/v1/accounts/signup');
+  });
+
+  it('answers the documented 503 on every endpoint that consults the limiter, and none on logout', async () => {
+    await addTestUser(app, { appId: shop.id, email: 'ana@example.com', passwordHash: await new LowCostPasswordHasher().hash(PASSWORD) });
+    const session = await request(server()).post('/api/v1/auth/login').send({ client_id: shop.clientId, email: 'ana@example.com', password: PASSWORD }).expect(200);
+    const bearer = session.body.access_token as string;
+    const client = shop.clientId;
+    const cases: [string, Record<string, unknown>][] = [
+      ['/api/v1/accounts/signup', { client_id: client, email: 'new@example.com', password: PASSWORD }],
+      ['/api/v1/accounts/resend-confirmation', { client_id: client, email: 'ana@example.com' }],
+      ['/api/v1/accounts/confirm', { token: 'x' }],
+      ['/api/v1/auth/login', { client_id: client, email: 'ana@example.com', password: PASSWORD }],
+      ['/api/v1/auth/refresh', { client_id: client, refresh_token: session.body.refresh_token }],
+      ['/api/v1/password/forgot', { client_id: client, email: 'ana@example.com' }],
+      ['/api/v1/password/reset', { token: 'x', new_password: NEW_PASSWORD }],
+      ['/api/v1/password/change', { current_password: PASSWORD, new_password: NEW_PASSWORD }],
+    ];
+
+    await db.dataSource.query('ALTER TABLE abuse_counters RENAME TO abuse_counters_off');
+    try {
+      for (const [path, body] of cases) {
+        const req = request(server()).post(path);
+        if (path.endsWith('/change')) req.set('Authorization', `Bearer ${bearer}`);
+        const response = await req.send(body);
+        expect([path, response.status]).toEqual([path, 503]);
+        expectDocumented(document, response, 'post', path);
+      }
+      const logout = await request(server()).post('/api/v1/auth/logout').send({ client_id: client, refresh_token: 'x' });
+      expect(logout.status).toBe(204);
+      expect(Object.keys(document.paths['/api/v1/auth/logout']!.post!.responses as object)).not.toContain('503');
+    } finally {
+      await db.dataSource.query('ALTER TABLE abuse_counters_off RENAME TO abuse_counters');
+    }
   });
 });
