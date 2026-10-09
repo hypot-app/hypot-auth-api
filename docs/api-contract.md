@@ -1,6 +1,6 @@
 # hypot Auth API contract
 
-> **Derived from the specs and design in `openspec/changes/auth-service/` (round 11 contract).** The authoritative OpenAPI document will be generated from code in U19. Any divergence between this document and that one is a bug in one of them: report it.
+> **Derived from the specs and design in `openspec/changes/auth-service/` (round 11 contract).** The machine-readable form is [`openapi.json`](../openapi.json) (OpenAPI 3.1, regenerated with `npm run openapi:generate`, never served by the API). Tests keep its paths equal to the registered routes and its error table equal to the one below. Any divergence between this document and that one is a bug in one of them: report it.
 >
 > Paths, bodies, status codes and error codes below are decided. Items marked **(implemented)** match the code merged today. Items marked **(planned)** are decided and not built yet.
 
