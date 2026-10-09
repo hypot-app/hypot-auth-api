@@ -8,6 +8,7 @@ import { configureApp } from '../../src/platform/configure-app';
 import { CLOCK, type Clock } from '../../src/shared-kernel/clock';
 import { generateKeySet } from '../../src/token-lifecycle/infrastructure/signing-key-generator';
 import { SIGNING_KEYS_SOURCE } from '../../src/token-lifecycle/infrastructure/signing-keys-source';
+import { EMAIL_SENDER, type EmailSender } from '../../src/transactional-email/domain/email-sender';
 import { PASSWORD_HASHER, type PasswordHasher } from '../../src/user-accounts/domain/password-hasher';
 
 export interface TestAppOptions {
@@ -24,6 +25,8 @@ export interface TestAppOptions {
   passwordHasher?: PasswordHasher;
   /** Replaces the system clock, for suites that move time (token windows, expiries). Omit it to use real time. */
   clock?: Clock;
+  /** Replaces the SMTP sender, so a test can read the mail the outbox worker delivers. Omit it to keep SMTP. */
+  emailSender?: EmailSender;
 }
 
 export function buildTestConfig(options: Pick<TestAppOptions, 'databaseUrl' | 'config'>): AppConfig {
@@ -56,6 +59,7 @@ export async function createTestApp(options: TestAppOptions): Promise<INestAppli
     .overrideProvider(SIGNING_KEYS_SOURCE)
     .useValue(() => options.signingKeysJson ?? JSON.stringify(generateKeySet({ next: false })));
   if (options.passwordHasher !== undefined) builder.overrideProvider(PASSWORD_HASHER).useValue(options.passwordHasher);
+  if (options.emailSender !== undefined) builder.overrideProvider(EMAIL_SENDER).useValue(options.emailSender);
   if (options.clock !== undefined) builder.overrideProvider(CLOCK).useValue(options.clock);
   const moduleRef = await builder.compile();
 
