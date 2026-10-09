@@ -1,3 +1,8 @@
+import { decodeJwt } from 'jose';
+import { FixedClock } from '../../shared-kernel/clock';
+import { JoseAccessTokenIssuer } from '../../token-lifecycle/infrastructure/jose-access-token-issuer';
+import { JwkSetKeyStore } from '../../token-lifecycle/infrastructure/jwk-set-key-store';
+import { generateKeySet } from '../../token-lifecycle/infrastructure/signing-key-generator';
 import { ConfigError, loadConfig } from './app-config';
 
 const validEnv = {
@@ -83,6 +88,31 @@ describe('loadConfig', () => {
     it('accepts an https URL', () => {
       const config = loadConfig({ ...validEnv, NODE_ENV: 'production' });
       expect(config.authPublicBaseUrl).toBe('https://auth.example.com');
+    });
+
+    it('rejects a trailing slash with an error that names the variable', () => {
+      const env = { ...validEnv, NODE_ENV: 'production', AUTH_PUBLIC_BASE_URL: 'https://auth.example/' };
+      expect(() => loadConfig(env)).toThrow('AUTH_PUBLIC_BASE_URL: must not end with a trailing slash');
+    });
+
+    it.each([
+      ['a query', 'https://auth.example.com?x=1'],
+      ['an empty query', 'https://auth.example.com?'],
+      ['a fragment', 'https://auth.example.com#frag'],
+      ['an empty fragment', 'https://auth.example.com#'],
+    ])('rejects %s because the value is copied verbatim into iss', (_label, value) => {
+      const env = { ...validEnv, NODE_ENV: 'production', AUTH_PUBLIC_BASE_URL: value };
+      expect(() => loadConfig(env)).toThrow('AUTH_PUBLIC_BASE_URL: must not contain a query or a fragment');
+    });
+
+    it('issues a token whose iss is exactly the configured variable', async () => {
+      const { authPublicBaseUrl } = loadConfig({ ...validEnv, NODE_ENV: 'production' });
+      const keyStore = JwkSetKeyStore.fromJson(JSON.stringify(generateKeySet()));
+      const issuer = new JoseAccessTokenIssuer({ keyStore, clock: new FixedClock(new Date()), issuer: authPublicBaseUrl });
+
+      const { token } = await issuer.issue({ accountId: 'account-1', clientId: 'app_a' });
+
+      expect(decodeJwt(token).iss).toBe(validEnv.AUTH_PUBLIC_BASE_URL);
     });
 
     it.each(['development', 'test'])('accepts an http URL when NODE_ENV is %s', (nodeEnv) => {
