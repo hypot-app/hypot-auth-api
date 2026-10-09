@@ -103,7 +103,7 @@ Sources: `decisions-round8` (API-only), `round9` (limits in Phase 1), `round10` 
 | Transport | JSON body in and out. Never a cookie, never `Access-Control-Allow-Credentials` (round 10) |
 | Logout | `POST /auth/logout {client_id, refresh_token}` revokes that token's session (consumed or not). Always `204`: idempotent, no oracle |
 | Password reset or change | Revokes every active session of the account in the same transaction as the password write |
-| Retention | Consumed rows live until session expiry, so late reuse is still detected. A retention job (final unit, started by `main.ts` only) deletes sessions (and their refresh tokens first) once `expires_at < now - 1 day`, `one_time_tokens` once `expires_at < now - 1 day` (consumed or not), and `email_outbox` rows with status `sent` or `failed` older than 7 days. It runs hourly in batches of 1,000. `abuse_counters` rows are swept by their own `AbuseCounterSweeper` (ADR 36). |
+| Retention | Consumed rows live until session expiry, so late reuse is still detected. A retention job (final unit, started by `main.ts` only) deletes sessions (and their refresh tokens first) once `expires_at < now - 1 day`, `one_time_tokens` once `expires_at < now - 1 day` (consumed or not), and `email_outbox` rows with status `sent` or `failed` older than 7 days. It runs hourly in batches of 1,000. `abuse_counters` rows are swept by their own `AbuseCounterSweeper` (ADR 36). Implemented in U19 as `RetentionSweeper` (`platform/retention`), one self-contained delete statement per batch, so no transaction and no second pool connection. |
 
 Atomic consume, one statement, no `SELECT … FOR UPDATE`:
 
