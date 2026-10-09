@@ -8,7 +8,9 @@ const booleanString = z.enum(['true', 'false']).transform((value) => value === '
 const baseUrl = z
   .string()
   .refine((value) => URL.canParse(value) && /^https?:\/\//.test(value), 'must be an absolute http(s) URL')
-  .refine((value) => !value.endsWith('/'), 'must not end with a trailing slash');
+  .refine((value) => !value.endsWith('/'), 'must not end with a trailing slash')
+  // The value is copied verbatim into `iss` and the JWKS URL is built by appending a path (ADR 43).
+  .refine((value) => !/[?#]/.test(value), 'must not contain a query or a fragment');
 
 const EXPRESS_PROXY_NAMES = ['loopback', 'linklocal', 'uniquelocal'];
 /** No real proxy chain is longer, and an overstated count lets a client-supplied address win (ADR 37). */

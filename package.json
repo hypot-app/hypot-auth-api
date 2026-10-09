@@ -13,6 +13,7 @@
     "start": "node --env-file-if-exists=.env dist/main.js",
     "start:dev": "node scripts/dev.js",
     "cli": "node --env-file-if-exists=.env dist/cli.js",
+    "openapi:generate": "npm run build && node scripts/generate-openapi.js",
     "keys:generate": "npm run build && node dist/token-lifecycle/infrastructure/generate-signing-keys.js",
     "test": "jest",
     "test:unit": "jest --testPathPatterns \"\\.spec\\.ts$\"",

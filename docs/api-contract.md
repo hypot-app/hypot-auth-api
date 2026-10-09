@@ -1,8 +1,8 @@
 # hypot Auth API contract
 
-> **Derived from the specs and design in `openspec/changes/auth-service/` (round 11 contract).** The authoritative OpenAPI document will be generated from code in U19. Any divergence between this document and that one is a bug in one of them: report it.
+> **Derived from the specs and design in `openspec/changes/auth-service/` (round 11 contract).** The machine-readable form is [`openapi.json`](../openapi.json) (OpenAPI 3.1, regenerated with `npm run openapi:generate`, never served by the API). Tests keep its paths equal to the registered routes and its error table equal to the one below. Any divergence between this document and that one is a bug in one of them: report it.
 >
-> Paths, bodies, status codes and error codes below are decided. Items marked **(implemented)** match the code merged today. Items marked **(planned)** are decided and not built yet.
+> Every endpoint below is implemented. Paths, bodies, status codes and error codes are checked against the running application by the end-to-end suite (`test/e2e/openapi-contract.e2e-spec.ts` and `test/e2e/journeys.e2e-spec.ts`).
 
 Companion: [`integration-guide.md`](./integration-guide.md).
 
@@ -25,9 +25,7 @@ Companion: [`integration-guide.md`](./integration-guide.md).
 
 | Badge | Meaning |
 |-------|---------|
-| IMPLEMENTED | Merged and running today (U1-U6) |
-| IMPLEMENTED (REPLACED) | Running today, will be replaced. Do not build against it. |
-| PLANNED | Decided, not implemented yet |
+| IMPLEMENTED | Merged, running and covered by the end-to-end suite. Every endpoint has this status. |
 
 ### Error codes
 
@@ -35,7 +33,7 @@ Companion: [`integration-guide.md`](./integration-guide.md).
 |--------|---------|-------|
 | 415 | `unsupported_media_type` | Every `POST` under `/api/v1`: `Content-Type` is not `application/json` (form, multipart, `text/plain`) or missing. Body `{ "error": "unsupported_media_type", "message": "Request body must be JSON." }`. Checked before any limit, lookup or CORS handling, so it never carries an allow header and never counts against a limit. |
 | 400 | `invalid_request` | Any body endpoint: malformed body |
-| 400 | `invalid_email`, `invalid_password` | Signup (both), reset and change (`invalid_password`) |
+| 400 | `invalid_email`, `invalid_password` | `invalid_email`: signup, resend, forgot. `invalid_password`: signup, reset, change |
 | 400 | `invalid_client` | Signup, resend, forgot, refresh: unknown or inactive `client_id`, or (signup, resend, forgot) origin not bound to it |
 | 400 | `unconfigured_client` | Signup, resend, forgot: the app has no email URLs |
 | 400 | `invalid_or_expired_link` | Confirm, reset: bad token, or a known token from the wrong origin |
@@ -44,7 +42,7 @@ Companion: [`integration-guide.md`](./integration-guide.md).
 | 401 | `invalid_grant` | Refresh: the session or token is gone, or the origin is not bound |
 | 401 | `invalid_token` | `/me`, change: missing, expired or bad access token (header `WWW-Authenticate: Bearer`) |
 | 429 | `rate_limited` | Signup, resend, forgot, reset, confirm, refresh (never login). Has `Retry-After`. |
-| 503 | `temporarily_unavailable` | Credential endpoints when the limiter store is down |
+| 503 | `temporarily_unavailable` | Every endpoint that consults the limiter (all except `/me` and logout) when its store is down |
 
 Texts: the fixed `message` strings are listed per endpoint where they are fixed. Other `message` values are human text and not contractual.
 
@@ -68,7 +66,7 @@ Texts: the fixed `message` strings are listed per endpoint where they are fixed.
 
 - No `Origin` header (native clients, servers): not CORS-gated.
 - Allowed-origin lookups may be cached up to 30 seconds.
-- Today the CORS middleware covers all 10 routes and the preflight answer above is live. The origin binding of the actual request is live for signup, resend-confirmation (`400 invalid_client`, no allow header) and confirm (generic `invalid_or_expired_link`, no allow header); the other endpoints get it in their own units.
+- The CORS middleware covers all 10 routes, the preflight answer above is live, and the origin binding of the actual request is live on every one of them, each with its own generic outcome (see each endpoint).
 
 ### Rate-limit behaviour (summary)
 
@@ -146,7 +144,7 @@ Status: IMPLEMENTED. It replaces the former `GET /api/v1/accounts/confirm?token=
 |------|-------|
 | Request | `{ "token": string }`, the value of `#token` from the email link. No `client_id`: the token identifies the app. |
 | Success | `200 { "message": "Your email address has been confirmed." }`. The token is marked used and a welcome email is sent. No tokens are issued. |
-| Errors | `400 invalid_or_expired_link` for malformed, unknown, used or expired tokens, and for a known token sent from the wrong origin (identical, so it is not an oracle). `400 invalid_request` for a missing or non-string `token`. `429 rate_limited`. |
+| Errors | `400 invalid_or_expired_link` for malformed, unknown, used or expired tokens, and for a known token sent from the wrong origin (identical, so it is not an oracle). `400 invalid_request` for a missing or non-string `token`. `429 rate_limited`, `503 temporarily_unavailable`. |
 | CORS | Origin bound to the app that owns the token. The allow header is sent on `200`, and on the `400 invalid_or_expired_link` of a token that belongs to the origin's own app (used or expired). A malformed or unknown token, a token of another app, or a known token from an unbound origin gets no allow header. The body is identical in every case (`invalid_or_expired_link`); only the allow header differs, and only for the owning app's origin. A browser page that is not the owner sees an opaque network/CORS error, not a readable `400`: integrators must treat a network error on confirm like `invalid_or_expired_link`. |
 | Limits | Per IP: `429` + `Retry-After`, checked before the token is looked up |
 
@@ -159,7 +157,7 @@ Status: IMPLEMENTED.
 | Request | `{ "client_id": string, "email": string }` |
 | Success | `202 { "message": "If an unconfirmed account exists for this address, a new confirmation email is on its way." }`. Fixed text, identical for unknown, unconfirmed and confirmed accounts. |
 | Side effects | For an unconfirmed account: new token, previous unused tokens invalidated. |
-| Errors | `400 invalid_request`, `400 invalid_client`, `400 unconfigured_client`, `429 rate_limited`, `503 temporarily_unavailable` |
+| Errors | `400 invalid_request`, `400 invalid_email`, `400 invalid_client`, `400 unconfigured_client`, `429 rate_limited`, `503 temporarily_unavailable` |
 | CORS | Origin bound to body `client_id` |
 | Limits | Per IP (and app): `429` + `Retry-After`, checked before the account is looked up. Per account: the usual `202` and no email once the cap is reached; requests for unknown addresses count too. |
 
@@ -203,7 +201,7 @@ Status: IMPLEMENTED.
 |------|-------|
 | Request | `{ "client_id": string, "refresh_token": string }` |
 | Success | `200`, same body shape as login. New access token and new refresh token in the same session. The presented token is marked used. |
-| Errors | `401 invalid_grant`, identical for unknown, expired, other-app, revoked and reused tokens (outside the grace rule below), and for an `Origin` not bound to `client_id`. `400 invalid_request`. `400 invalid_client` (unknown or inactive `client_id`). `429 rate_limited`. |
+| Errors | `401 invalid_grant`, identical for unknown, expired, other-app, revoked and reused tokens (outside the grace rule below), and for an `Origin` not bound to `client_id`. `400 invalid_request`. `400 invalid_client` (unknown or inactive `client_id`). `429 rate_limited`. `503 temporarily_unavailable`. |
 | CORS | Origin bound to body `client_id`. An `Origin` not bound to it gets the `401 invalid_grant` with no allow header, and the token is not consumed. Once the binding passes, the `200`, the `401`, the request-validation `400` and the `429` carry the allow header; `invalid_client` and a `500` never do. |
 | Limits | Per (app, IP): `429` + `Retry-After`, checked before the token is looked up. A `429` is not `invalid_grant`: do not log the user out. |
 | Headers | Every answer, errors included, carries `Cache-Control: no-store` and `Pragma: no-cache`. |
@@ -278,7 +276,7 @@ Status: IMPLEMENTED.
 |------|-------|
 | Request | Header `Authorization: Bearer <access_token>`, body `{ "current_password": string, "new_password": string }` |
 | Success | `204`, no body. Password replaced, **all sessions revoked including the caller's**, a password-changed notice email is sent. The current access token stays valid until `exp`. |
-| Errors | `401 invalid_token` for a missing or invalid access token. `400 invalid_request`. `400 invalid_password` for a weak new password (no counter touched). `400 invalid_current_password` for a wrong current password, **never `401`**, so it cannot be mistaken for an expired token. |
+| Errors | `401 invalid_token` for a missing or invalid access token. `400 invalid_request`. `400 invalid_password` for a weak new password (no counter touched). `400 invalid_current_password` for a wrong current password, **never `401`**, so it cannot be mistaken for an expired token. `503 temporarily_unavailable` when the limiter store is down. |
 | CORS | Origin bound to the app named by the token `aud`. The allow header is sent on `204` and on every `400`; the `401` never carries one. A valid token sent from another app's origin is the same `401`. |
 | Limits | There is no IP limit. A wrong current password counts as a failed login for both lockout counters. While the (account, IP) pair is blocked or the account is locked, even the correct current password gets the same `400 invalid_current_password`, without bcrypt. |
 
@@ -293,6 +291,8 @@ Order of checks: bearer, body shape, new-password rules, lockout state, current-
 | `GET /api/v1/accounts/confirm`, `GET /api/v1/password/forgot`, `GET /api/v1/password/reset` | `404` |
 | `/api/v1/oauth/*` (token, revoke, authorize) | `404` |
 | Any app create, update or delete route | `404` |
+
+The route table is exactly 13 routes (3 at the root, 10 under `/api/v1`); `test/e2e/route-table.e2e-spec.ts` fails if one is added or removed.
 
 ---
 

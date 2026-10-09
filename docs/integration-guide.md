@@ -2,9 +2,8 @@
 
 hypot Auth is an API-only authentication service. Your app builds its own login, signup, confirm and reset screens, and its frontend calls Auth directly with its `client_id`. This guide is for the frontend and backend developers of consuming apps. It covers what to build, which calls to make, how to handle tokens and how to validate them in your backend.
 
-> **Status: draft contract, built in parallel with the implementation.**
-> Only part of the API exists today. Check the status of every endpoint before you build against it.
-> The exact paths, bodies and error codes live in [`api-contract.md`](./api-contract.md), which has no open questions. The authoritative OpenAPI will be generated from code in U19.
+> **Status: every endpoint below is implemented** and checked against the running service by the end-to-end suite.
+> The exact paths, bodies and error codes live in [`api-contract.md`](./api-contract.md), which has no open questions. The machine-readable form is [`openapi.json`](../openapi.json) (OpenAPI 3.1).
 
 ## Endpoint status
 
@@ -229,7 +228,7 @@ Every refresh returns a **new** refresh token and marks the old one used. Replac
 | Unknown or inactive `client_id` | `400 invalid_client`. A setup bug. |
 | IP rate limit | `429 rate_limited` with `Retry-After`. **Not** `invalid_grant`: keep the user logged in and retry after the delay. |
 
-On `invalid_grant`, clear your tokens and send the user to login. Lifetimes: a session lasts 30 days from login and rotation does not extend it. A refresh token also expires after 7 days without use. Both values are assumptions that may be configurable, so read `expires_in` and treat any `invalid_grant` as "log in again".
+On `invalid_grant`, clear your tokens and send the user to login. Lifetimes: a session lasts 30 days from login and rotation does not extend it. A refresh token also expires after 7 days without use. Both are operator settings (`REFRESH_ABSOLUTE_TTL_SECONDS` and `REFRESH_IDLE_TTL_SECONDS`) and these are the defaults, so do not hard-code them: read `expires_in` and treat any `invalid_grant` as "log in again".
 
 #### Reuse grace window
 
@@ -346,7 +345,7 @@ A wrong current password is deliberately a `400`, not a `401`: a `401` would loo
 | Token | Lifetime | Where to keep it |
 |-------|----------|------------------|
 | Access token | 1 hour | In memory only (a module variable or app state). Never in `localStorage`. |
-| Refresh token | 7 days idle, 30 days absolute | See the options below. |
+| Refresh token | 7 days idle, 30 days absolute (defaults) | See the options below. |
 
 Refresh shortly before `expires_in` runs out, rather than waiting for a `401` on every call.
 
@@ -464,7 +463,7 @@ Error bodies have the shape `{ "error": "<code>", "message": "<text>" }`. Branch
 |--------|------|-------|---------|
 | 400 | `invalid_request` | Every body endpoint | Missing or non-string fields. A bug in your code. |
 | 415 | `unsupported_media_type` | Every `POST` | The `Content-Type` is not `application/json` (or is missing). A bug in your code: always send `Content-Type: application/json`. A `; charset=utf-8` suffix is fine. No CORS header is sent on this answer, so a browser shows it as a network error. |
-| 400 | `invalid_email`, `invalid_password` | Signup (both), reset and change (`invalid_password`) | Validation failure. Safe to show to the user. |
+| 400 | `invalid_email`, `invalid_password` | `invalid_email`: signup, resend, forgot. `invalid_password`: signup, reset, change | Validation failure. Safe to show to the user. |
 | 400 | `invalid_client` | Signup, resend, forgot, refresh | Unknown or inactive `client_id`, or (not refresh) origin not bound to it. This is a setup bug. |
 | 400 | `unconfigured_client` | Signup, resend, forgot | The app has no email URLs. |
 | 400 | `invalid_or_expired_link` | Confirm, reset | Unknown, used, expired or superseded token, or a wrong origin |
@@ -473,9 +472,9 @@ Error bodies have the shape `{ "error": "<code>", "message": "<text>" }`. Branch
 | 401 | `invalid_grant` | Refresh | The session is gone, or the origin is not bound. Log in again. |
 | 401 | `invalid_token` | `/me`, change | Missing, expired or bad access token. Has `WWW-Authenticate: Bearer`. |
 | 429 | `rate_limited` | Signup, resend, forgot, reset, confirm, refresh | IP limit. Has `Retry-After` (integer seconds). Never on login. |
-| 503 | `temporarily_unavailable` | Credential endpoints | The limiter store is down. Retry later. |
+| 503 | `temporarily_unavailable` | Every endpoint that consults the limiter (all except `/me` and logout) | The limiter store is down. Retry later. |
 
-These codes are final for the contract. The authoritative list will be generated in the OpenAPI document (U19).
+These codes are final for the contract. They are the error table of [`openapi.json`](../openapi.json); a test keeps the two lists equal.
 
 ### The generic login error
 

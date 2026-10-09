@@ -14,7 +14,14 @@ export function currentManager(dataSource: DataSource): EntityManager {
   return transactionStorage.getStore() ?? dataSource.manager;
 }
 
-/** True while the current async call chain runs inside a unit of work (a transaction holds a pool connection). */
+/**
+ * True while the current async call chain runs inside a unit of work (a transaction holds a pool connection).
+ *
+ * The flag follows the async call chain (AsyncLocalStorage), not the transaction: work started inside the unit of
+ * work and left running after it (a fire-and-forget promise, a timer, an event handler) still sees the flag, so a
+ * guard that uses it, like the abuse counter store's, throws for that work too. Start such work after `run`
+ * returns, or outside the chain (for example from a job that main.ts starts).
+ */
 export function isInUnitOfWork(): boolean {
   return transactionStorage.getStore() !== undefined;
 }

@@ -52,6 +52,9 @@ export interface ChangePasswordDeps {
 
 const fail = (failure: ChangeFailure) => err<ChangeFailure>(failure);
 
+/** The stored hash is no longer the one that was verified; thrown inside the unit of work to roll it back. */
+class PasswordChangedMidRequest extends Error {}
+
 /**
  * Changes the password of the account behind a bearer access token. Order of checks (spec): the bearer, the
  * body shape, the new-password rules (no counter touched), the lockout state, then the current password.
@@ -60,12 +63,10 @@ const fail = (failure: ChangeFailure) => err<ChangeFailure>(failure);
  * before bcrypt runs, and a blocked or locked caller gets the same `invalid_current_password` even with the
  * correct password, without bcrypt. A success refunds the pair counter only. Change has no per-IP limit of its
  * own. A password that changed under the request (a reset or change committed while bcrypt ran) is refused as
- * `invalid_current_password` with nothing written, and is not counted as a wrong guess. On success the hash, every session of the account (the caller's too; their access token lives until
- * `exp`) and the password-changed notice commit together.
+ * `invalid_current_password` with nothing written, and is not counted as a wrong guess. On success the hash,
+ * every session of the account (the caller's too; their access token lives until `exp`) and the
+ * password-changed notice commit together.
  */
-/** The stored hash is no longer the one that was verified; thrown inside the unit of work to roll it back. */
-class PasswordChangedMidRequest extends Error {}
-
 export class ChangePasswordUseCase {
   constructor(private readonly deps: ChangePasswordDeps) {}
 
