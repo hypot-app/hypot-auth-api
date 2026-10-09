@@ -95,8 +95,8 @@ import { UserSchema } from './infrastructure/persistence/user.schema';
         new GetProfileUseCase({ authenticate, users }),
     },
   ],
-  // The ports session-auth needs (ADR 42): modules never reach into each other's infrastructure.
-  exports: [USER_REPOSITORY, PASSWORD_HASHER],
+  // The ports session-auth and password-management need (ADR 42): modules never reach into each other's infrastructure.
+  exports: [USER_REPOSITORY, PASSWORD_HASHER, ONE_TIME_TOKEN_REPOSITORY, ConfirmationIssuer],
 })
 export class UserAccountsModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

@@ -10,6 +10,7 @@ import type { EmailOutbox } from '../../transactional-email/domain/email-outbox'
 import { OutboxEmail } from '../../transactional-email/domain/outbox-email';
 import type { OneTimeTokenRepository } from '../domain/one-time-token.repository';
 import type { UserRepository } from '../domain/user.repository';
+import { originBoundToTokenApp } from './token-origin-binding';
 
 export interface ConfirmEmailInput {
   /** Raw JSON body value, so it is checked before it is hashed. */
@@ -55,7 +56,9 @@ export class ConfirmEmailUseCase {
     const { token } = input;
     if (!isWellFormedToken(token)) return invalidLink(false);
     const hash = hashToken(token);
-    if (input.origin !== undefined && !(await this.originBoundToTokenApp(hash, input.origin))) return invalidLink(false);
+    if (input.origin !== undefined && !(await originBoundToTokenApp(this.deps, hash, 'email_verification', input.origin))) {
+      return invalidLink(false);
+    }
     const clientBound = input.origin !== undefined;
 
     return this.deps.uow.run(async () => {
@@ -78,13 +81,5 @@ export class ConfirmEmailUseCase {
       );
       return ok(undefined);
     });
-  }
-
-  /** Read-only: an unknown token and a wrong origin are the same `false`, so the check is not a token oracle. */
-  private async originBoundToTokenApp(hash: Buffer, origin: string): Promise<boolean> {
-    const owner = await this.deps.oneTimeTokens.findAppByTokenHash(hash, 'email_verification');
-    if (owner === null) return false;
-    const client = await this.deps.resolveClient.execute({ clientId: owner.clientId, origin });
-    return client.ok;
   }
 }

@@ -1,14 +1,12 @@
 import { BadRequestException, Body, Controller, Headers, HttpCode, Post, Req } from '@nestjs/common';
 import { z } from 'zod';
-import { RateLimitedError } from '../../abuse-protection/domain/rate-limited-error';
-import type { DomainError } from '../../shared-kernel/domain-error';
-import type { Result } from '../../shared-kernel/result';
 import { ClientIp } from '../../abuse-protection/domain/client-ip';
 import { RateLimitedException } from '../../abuse-protection/http/abuse-exception.filter';
 import { CorsGrant } from '../../platform/http/cors-grant';
 import { ConfirmEmailUseCase } from '../application/confirm-email.use-case';
 import { ResendConfirmationUseCase } from '../application/resend-confirmation.use-case';
 import { SignupUseCase } from '../application/signup.use-case';
+import { grantUnlessClientRejected, parseBody, unwrap, type RequestSource } from '../../platform/http/request-helpers';
 
 /** `client_id` is looked up in the database, so its length is bounded before it gets there. */
 const clientId = z.string().max(128);
@@ -24,35 +22,6 @@ const INVALID_LINK = { error: 'invalid_or_expired_link', message: 'The confirmat
 const RESEND_ACCEPTED = {
   message: 'If an unconfirmed account exists for this address, a new confirmation email is on its way.',
 };
-
-type RequestSource = { ip?: string; socket: { remoteAddress?: string } };
-
-/** A malformed body carries no app data, so the browser may read the 400 from an active app's origin. */
-function parseBody<T>(schema: z.ZodType<T>, body: unknown, message: string, grantCors: () => void): T {
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) {
-    grantCors();
-    throw new BadRequestException({ error: 'invalid_request', message });
-  }
-  return parsed.data;
-}
-
-/**
- * An IP limit is a 429 with `Retry-After` (the exception filter writes it and grants CORS). Every other
- * use case failure here is the caller's input: a 400 with the stable code and message.
- */
-function unwrap(result: Result<void, DomainError>): void {
-  if (!result.ok && result.error instanceof RateLimitedError) throw new RateLimitedException(result.error.retryAfterSeconds);
-  if (!result.ok) throw new BadRequestException({ error: result.error.code, message: result.error.message });
-}
-
-/**
- * The origin binding passed unless the client was rejected (unknown, inactive or origin not bound to
- * the app). Later failures (invalid email, weak password) depend only on the caller's own input.
- */
-function grantUnlessClientRejected(result: Result<void, DomainError>, grantCors: () => void): void {
-  if (result.ok || result.error.code !== 'invalid_client') grantCors();
-}
 
 @Controller('accounts')
 export class AccountsController {

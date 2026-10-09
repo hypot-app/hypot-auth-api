@@ -14,6 +14,18 @@ export interface UserRepository {
    * when the account is already confirmed or unknown: the first confirmation time is kept.
    */
   markEmailVerified(userId: string, at: Date): Promise<void>;
+  /**
+   * Replaces the password hash and `password_changed_at`, touching only those columns (and `updated_at`).
+   * Returns false, changing nothing, when the account does not exist.
+   */
+  updatePassword(userId: string, passwordHash: string, at: Date): Promise<boolean>;
+  /**
+   * Compare-and-swap form of `updatePassword`: replaces the hash only while it is still `currentHash`, the one the
+   * caller verified. Returns false, changing nothing, when the hash differs (another reset or change committed in
+   * between) or the account does not exist. A password change uses it; a reset keeps the unconditional form
+   * because its one-time token is the authority.
+   */
+  replacePassword(userId: string, currentHash: string, newHash: string, at: Date): Promise<boolean>;
   /** `email` must be normalized. */
   findByAppAndEmail(appId: string, email: string): Promise<User | null>;
   findById(id: string): Promise<User | null>;

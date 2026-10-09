@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { App } from '../../app-registry/domain/app';
+import { TOKEN_TTL_HOURS } from '../../user-accounts/domain/one-time-token';
 import { buildEmailVariables } from '../application/email-variables';
 import { EMAIL_TEMPLATES, type EmailTemplate } from '../domain/email-template';
 import { HandlebarsTemplateRenderer } from './handlebars-template-renderer';
@@ -39,6 +40,9 @@ async function renderDefault(template: EmailTemplate, appName = 'Shop') {
   return renderer.render({ template, clientId: CLIENT_ID, variables: variables.value });
 }
 
+/** "1 hour", "24 hours": the wording the templates must use for a token that works this many hours. */
+const hours = (count: number): string => `${count} ${count === 1 ? 'hour' : 'hours'}`;
+
 const urlsIn = (text: string): string[] => text.match(/https?:\/\/\S+/g) ?? [];
 
 describe('default email templates', () => {
@@ -60,7 +64,7 @@ describe('default email templates', () => {
 
     expect(subject).toBe('Confirm your email for Shop');
     expect(urlsIn(text)).toEqual([`${CONFIRM_URL}#token=${TOKEN}`]);
-    expect(text).toContain('24 hours');
+    expect(text).toContain(`valid for ${hours(TOKEN_TTL_HOURS.email_verification)}:`);
   });
 
   it('password-reset: one link: the app reset URL with the token in the fragment', async () => {
@@ -68,7 +72,7 @@ describe('default email templates', () => {
 
     expect(subject).toBe('Reset your Shop password');
     expect(urlsIn(text)).toEqual([`${RESET_URL}#token=${TOKEN}`]);
-    expect(text).toContain('1 hour');
+    expect(text).toContain(`valid for ${hours(TOKEN_TTL_HOURS.password_reset)}:`);
   });
 
   it('account-exists: links to the app reset URL with no fragment and carries no token', async () => {

@@ -110,26 +110,44 @@ describe('ResendConfirmationUseCase', () => {
       const secondToken = h.latestConfirmationToken();
       expect(h.queued().filter((email) => email.template === 'confirmation')).toHaveLength(2);
 
-      const lookup = jest.spyOn(h.users, 'findByAppAndEmail');
       const capped = await h.resend.execute(resendInput());
 
       expect(capped).toEqual(OK);
-      expect(lookup).not.toHaveBeenCalled();
       expect(h.queued().filter((email) => email.template === 'confirmation')).toHaveLength(2);
       expect(firstToken).not.toBe(secondToken);
       expect((await h.confirm.execute({ token: secondToken, ip: h.ip })).ok).toBe(true);
     });
 
-    it('counts a request for an unknown address too, so the cap reveals nothing about existence', async () => {
+    it('does not count a request for an unknown address: nothing is queued for it, so it uses no budget', async () => {
       const { h } = await signedUp({ email_account: { limit: 1 } });
       const before = h.queued().length;
+      const hitsBefore = h.abuseStore.hitCounts.email_account ?? 0;
 
-      // No account yet: the request still uses up the one allowed email for this address.
-      await h.resend.execute(resendInput({ email: 'ghost@example.com' }));
+      for (let i = 0; i < 5; i += 1) await h.resend.execute(resendInput({ email: 'ghost@example.com' }));
       await h.signup.execute({ clientId: SHOP_CLIENT_ID, email: 'ghost@example.com', password: 'correct horse', ip: IP });
 
-      expect(await h.users.findByAppAndEmail(h.shop.id, 'ghost@example.com')).not.toBeNull();
-      expect(h.queued()).toHaveLength(before);
+      // Only the signup counted; its confirmation was still queued despite the earlier resends.
+      expect(h.abuseStore.hitCounts.email_account).toBe(hitsBefore + 1);
+      expect(h.queued().map((email) => email.template).slice(before)).toEqual(['confirmation']);
+    });
+
+    it('does not count a no-op resend for a confirmed account', async () => {
+      const { h, firstToken } = await signedUp({ email_account: { limit: 2 } });
+      await h.confirm.execute({ token: firstToken, ip: h.ip });
+      const hitsBefore = h.abuseStore.hitCounts.email_account ?? 0;
+
+      for (let i = 0; i < 5; i += 1) expect(await h.resend.execute(resendInput())).toEqual(OK);
+
+      expect(h.abuseStore.hitCounts.email_account ?? 0).toBe(hitsBefore);
+    });
+
+    it('counts the resend that queues an email, once', async () => {
+      const { h } = await signedUp({ email_account: { limit: 5 } });
+      const hitsBefore = h.abuseStore.hitCounts.email_account ?? 0;
+
+      await h.resend.execute(resendInput());
+
+      expect(h.abuseStore.hitCounts.email_account).toBe(hitsBefore + 1);
     });
   });
 

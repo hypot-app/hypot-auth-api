@@ -120,27 +120,27 @@ describe('account limits, caps and unconfigured clients (e2e)', () => {
       expect(hasher.hashCalls).toBe(4);
     });
 
-    it('answers a signup that creates an account past the cap exactly like any other, and sends nothing', async () => {
-      const unknownResends = [await resend({ email: 'ghost@example.com' }), await resend({ email: 'ghost@example.com' })];
-      await resend({ email: 'ghost@example.com' });
+    it('does not let resends for an address with no account use up the cap, so a later signup is still confirmed', async () => {
+      const ghostResends = [];
+      for (let i = 0; i < 4; i += 1) ghostResends.push(await resend({ email: 'ghost@example.com' }));
       const reference = await signup({ email: 'other@example.com' });
 
-      const capped = await signup({ email: 'ghost@example.com' });
+      const later = await signup({ email: 'ghost@example.com' });
 
-      expect(unknownResends.map((response) => response.text)).toEqual([RESEND_TEXT, RESEND_TEXT]);
-      expect(fingerprint(capped)).toEqual(fingerprint(reference));
-      expect(await userEmails()).toEqual(['other@example.com', 'ghost@example.com']);
-      expect(await templatesFor('ghost@example.com')).toEqual([]);
+      expect(ghostResends.map((response) => response.text)).toEqual(Array(4).fill(RESEND_TEXT));
+      expect(fingerprint(later)).toEqual(fingerprint(reference));
+      expect(await templatesFor('ghost@example.com')).toEqual(['confirmation']);
       expect(await templatesFor('other@example.com')).toEqual(['confirmation']);
     });
 
     it('answers resend byte for byte alike for an unconfirmed, a confirmed, an unknown and a capped address', async () => {
       await signup();
       const unconfirmed = await resend();
+      await resend();
+      const capped = await resend();
       const unknown = await resend({ email: 'nobody@example.com' });
       expect((await confirm(await latestToken('ana@example.com'))).status).toBe(200);
       const confirmed = await resend();
-      const capped = await resend();
 
       for (const response of [unconfirmed, unknown, confirmed, capped]) {
         expect(response.status).toBe(202);
@@ -149,8 +149,8 @@ describe('account limits, caps and unconfigured clients (e2e)', () => {
       expect(fingerprint(unknown)).toEqual(fingerprint(unconfirmed));
       expect(fingerprint(confirmed)).toEqual(fingerprint(unconfirmed));
       expect(fingerprint(capped)).toEqual(fingerprint(unconfirmed));
-      // Signup's email and the unconfirmed resend used 2 of the 3; the confirmed resend sent nothing by design.
-      expect(await templatesFor('ana@example.com')).toEqual(['confirmation', 'confirmation', 'welcome']);
+      // Signup and two resends used the 3 allowed emails; the capped, unknown and confirmed requests queued nothing.
+      expect(await templatesFor('ana@example.com')).toEqual(['confirmation', 'confirmation', 'confirmation', 'welcome']);
     });
 
     it('gives every error body a string error and a string message', async () => {

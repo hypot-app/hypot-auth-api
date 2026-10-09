@@ -19,9 +19,9 @@ hypot Auth is an API-only authentication service. Your app builds its own login,
 | `POST /api/v1/auth/refresh` | IMPLEMENTED |
 | `POST /api/v1/auth/logout` | IMPLEMENTED |
 | `GET /api/v1/me` | IMPLEMENTED |
-| `POST /api/v1/password/forgot` | PLANNED |
-| `POST /api/v1/password/reset` | PLANNED |
-| `POST /api/v1/password/change` | PLANNED |
+| `POST /api/v1/password/forgot` | IMPLEMENTED |
+| `POST /api/v1/password/reset` | IMPLEMENTED |
+| `POST /api/v1/password/change` | IMPLEMENTED |
 | `GET /`, `GET /health` | IMPLEMENTED (operational, not part of your integration) |
 
 ## Quick path
@@ -275,7 +275,7 @@ Your own backend does not need `/me` to authenticate users: validate the JWT loc
 
 ### Forgot and reset password
 
-Status: PLANNED.
+Status: IMPLEMENTED.
 
 ```mermaid
 sequenceDiagram
@@ -323,7 +323,7 @@ POST /api/v1/password/reset
 
 ### Change password
 
-Status: PLANNED.
+Status: IMPLEMENTED.
 
 ```http
 POST /api/v1/password/change
@@ -501,7 +501,7 @@ Both counters count attempts, not only failures, and a success does not give the
 
 ### The silent per-account email cap
 
-Signup, resend and forgot send at most 3 emails per account per hour (default), counted together: a confirmation email sent because an unconfirmed user used "forgot password" counts like any other. Above that, Auth still answers the normal `202` and sends **nothing**. There is no error to detect. Your UI should say "If you do not receive an email, check your spam folder and try again later".
+Signup, resend and forgot send at most 3 emails per account per hour (default), counted together: a confirmation email sent because an unconfirmed user used "forgot password" counts like any other. Only an email that is actually queued counts: a resend for a confirmed or unknown address, or a forgot for an unknown address, uses no budget. Above that, Auth still answers the normal `202` and sends **nothing**. There is no error to detect. Your UI should say "If you do not receive an email, check your spam folder and try again later".
 
 ### `503`
 

@@ -14,6 +14,11 @@ export function currentManager(dataSource: DataSource): EntityManager {
   return transactionStorage.getStore() ?? dataSource.manager;
 }
 
+/** True while the current async call chain runs inside a unit of work (a transaction holds a pool connection). */
+export function isInUnitOfWork(): boolean {
+  return transactionStorage.getStore() !== undefined;
+}
+
 @Injectable()
 export class TypeOrmUnitOfWork implements UnitOfWork {
   constructor(private readonly dataSource: DataSource) {}

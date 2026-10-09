@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import type { AbuseCounterStore, ExpiredCounterPurge, HitResult } from '../../domain/abuse-counter.store';
 import type { Policy } from '../../domain/policy';
 import type { Scope } from '../../domain/scope';
+import { isInUnitOfWork } from '../../../platform/persistence/typeorm-unit-of-work';
 
 // $1 scope, $2 key, $3 now, $4 window seconds, $5 limit, $6 end of a new block (null without a block length),
 // $7 end of a fresh window. Everything is derived inside the one statement, so concurrent hits serialize on the row.
@@ -51,16 +52,25 @@ const DELETE_EXPIRED_SQL = `
   )
   SELECT count(*)::int AS "deleted" FROM removed`;
 
+function assertOutsideUnitOfWork(operation: string): void {
+  if (isInUnitOfWork()) throw new Error(`abuse counter ${operation} called inside a unit of work`);
+}
+
 /**
  * Fixed-window counters in Postgres (ADR 36). Every statement goes through the root
  * DataSource manager, never the transactional one from the unit of work: a business
  * rollback must not undo a count, and no row lock may outlive this statement.
+ *
+ * That means a separate pool connection, so calling the store inside a unit of work would hold one connection
+ * while waiting for a second, and enough concurrent requests deadlock the pool. Callers must count before or
+ * after the transaction; the store refuses to run inside one rather than risk the hang.
  */
 @Injectable()
 export class PostgresAbuseCounterStore implements AbuseCounterStore, ExpiredCounterPurge {
   constructor(private readonly dataSource: DataSource) {}
 
   async hit(scope: Scope, key: Buffer, policy: Policy, now: Date): Promise<HitResult> {
+    assertOutsideUnitOfWork('hit');
     const { limit, windowSeconds, blockSeconds } = policy;
     const blockEnd = blockSeconds === null ? null : new Date(now.getTime() + blockSeconds * 1000);
     const windowEnd = new Date(now.getTime() + windowSeconds * 1000);
@@ -75,11 +85,13 @@ export class PostgresAbuseCounterStore implements AbuseCounterStore, ExpiredCoun
   }
 
   async deleteExpired(now: Date, limit: number): Promise<number> {
+    assertOutsideUnitOfWork('deleteExpired');
     const rows: { deleted: number }[] = await this.dataSource.manager.query(DELETE_EXPIRED_SQL, [now, limit]);
     return rows[0]?.deleted ?? 0;
   }
 
   async reset(scope: Scope, key: Buffer): Promise<void> {
+    assertOutsideUnitOfWork('reset');
     await this.dataSource.manager.query(`DELETE FROM "abuse_counters" WHERE "scope" = $1 AND "key" = $2`, [scope, key]);
   }
 }

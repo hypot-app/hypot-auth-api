@@ -181,6 +181,17 @@ describe('SignupUseCase', () => {
       expect(h.queued()).toHaveLength(4);
     });
 
+    it('counts the cap once per request, for a new account and a duplicate, outside the unit of work', async () => {
+      // The harness store throws if it is called inside a unit of work (the real store would need a second pool
+      // connection while the transaction holds the first, and deadlock under concurrency), so a green run proves it.
+      const h = await accountsHarness();
+
+      await h.signup.execute(signupInput());
+      expect(h.abuseStore.hitCounts.email_account).toBe(1);
+      await h.signup.execute(signupInput());
+      expect(h.abuseStore.hitCounts.email_account).toBe(2);
+    });
+
     it('does not count a request that fails validation', async () => {
       const h = await accountsHarness({ policies: resolvePolicies({ email_account: { limit: 1 } }) });
       await h.signup.execute(signupInput({ password: 'short' }));

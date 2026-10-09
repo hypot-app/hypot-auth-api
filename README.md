@@ -42,6 +42,11 @@ Stale `dist/`: `npm run build` and `npm run start:dev` now remove `dist/` first.
 stale `dist/` that applied `CreateAuthorizationCodes` (a discarded branch), recreate the local database with
 `docker compose down -v`.
 
+Database pool: the service keeps at most 10 connections (`DB_POOL_MAX` in `src/platform/persistence/typeorm.options.ts`,
+a code constant, not an environment variable) and waits at most 5000 ms for a free one (`DB_CONNECTION_TIMEOUT_MS`).
+When the pool is exhausted a request fails with a connection timeout error instead of hanging the API forever. The
+abuse counters use their own connection outside any transaction, so they are never counted inside a unit of work.
+
 ### Migrations in containers
 
 The runtime image is distroless (no npm, no shell), so `npm run migration:*` is not available
@@ -115,9 +120,10 @@ Default templates live in `src/transactional-email/templates/default/`;
 put files with the same names in `templates/<client_id>/` to override them for one app. The build copies the
 templates into `dist/`.
 
-TODO(U18): pass the token TTL to the templates as a variable. The confirmation template hard-codes
-"24 hours", which matches the confirmation token TTL in `user-accounts/domain/one-time-token.ts`, and the
-password-reset template hard-codes "1 hour" until U18 adds that flow.
+The default confirmation template says the link is valid for 24 hours and the password-reset template says 1 hour.
+These numbers are the token lifetimes in `TOKEN_TTL_HOURS` (`user-accounts/domain/one-time-token.ts`); a test pins
+the wording to that table, so changing a lifetime fails until the templates are updated. A per-app override
+template carries its own wording and must follow the same lifetimes.
 
 ### Accounts
 
@@ -155,7 +161,7 @@ The client IP is the TCP peer unless `TRUST_PROXY` (default `false`: a hop count
 `loopback`, `uniquelocal` or CIDRs; `true` is rejected; a hop count is 1 to 10 and a CIDR no wider than /8 for IPv4 or
 /16 for IPv6) names the proxies in front of Auth. Behind a load balancer set it, or every user shares the proxy's
 address. Set it exactly: too FEW hops only over-limits, but too MANY lets a client-supplied `X-Forwarded-For` value win. IPv6 clients are keyed on their /64. If the counter store fails,
-credential endpoints answer `503 temporarily_unavailable` (logged once a minute at most, with the scope and driver message only), and the `429` and `503` answers are readable from an active app's origin. The login lockout counts the attempt before bcrypt (`beginLoginAttempt`), so parallel guesses cannot outrun it. The account limit is 50 attempts per window; reaching it locks the account for 15 min, and when the lock ends the count restarts. A distributed attacker therefore gets at most about 200 attempts per hour per account, and needs at least 10 distinct IPs for it, because each account and IP pair is capped at about 20 attempts per hour (5 per lock cycle of 15 min). Password change (U19) shares these counters. Both counters count attempts, so a service account or automation that logs in more than 50 times an hour locks itself out; it must reuse its refresh token instead of logging in again. Login calls the guard; U17 and U18 call it from the other endpoints.
+credential endpoints answer `503 temporarily_unavailable` (logged once a minute at most, with the scope and driver message only), and the `429` and `503` answers are readable from an active app's origin. The login lockout counts the attempt before bcrypt (`beginLoginAttempt`), so parallel guesses cannot outrun it. The account limit is 50 attempts per window; reaching it locks the account for 15 min, and when the lock ends the count restarts. A distributed attacker therefore gets at most about 200 attempts per hour per account, and needs at least 10 distinct IPs for it, because each account and IP pair is capped at about 20 attempts per hour (5 per lock cycle of 15 min). Password change (U18) shares these counters. Both counters count attempts, so a service account or automation that logs in more than 50 times an hour locks itself out; it must reuse its refresh token instead of logging in again. Login calls the guard; U17 and U18 call it from the other endpoints.
 
 ### Sessions and refresh tokens
 
@@ -258,6 +264,6 @@ required variable is missing or invalid (see `.env.example`).
   `POST /api/v1/accounts/resend-confirmation`, `POST /api/v1/auth/login`,
   `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`
   (login takes JSON `{client_id, email, password}`, one generic `401`, never `429`)
-- Planned: `POST /api/v1/password/forgot`, `POST /api/v1/password/reset`, `POST /api/v1/password/change`. Full list and
+- Implemented: `POST /api/v1/password/forgot` (always a generic `202`), `POST /api/v1/password/reset` (`{token, new_password}`, `204`, revokes every session), `POST /api/v1/password/change` (bearer plus `{current_password, new_password}`, `204`, a wrong current password is `400 invalid_current_password`). Full list and
   contract: [`docs/api-contract.md`](docs/api-contract.md).
 - Business routes are served under `/api/v1`; `/`, `/health` and `/.well-known/jwks.json` stay at the root.

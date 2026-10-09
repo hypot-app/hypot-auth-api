@@ -111,7 +111,7 @@ Status: IMPLEMENTED.
 
 **Issuer and JWKS URL.** `iss` is exactly the operator-configured `AUTH_PUBLIC_BASE_URL`, and the JWKS URL is `${iss}/.well-known/jwks.json`. In production the value is an `https` URL with no trailing slash, for example `https://auth.example` and `https://auth.example/.well-known/jwks.json`. Copy the strings your operator gives you; they are compared exactly.
 
-**Access token format** (IMPLEMENTED, issued after login in the planned units):
+**Access token format** (IMPLEMENTED, issued after login):
 
 | Part | Value |
 |------|-------|
@@ -247,40 +247,40 @@ Access tokens already issued stay valid until `exp` (no denylist).
 
 ### `POST /api/v1/password/forgot`
 
-Status: PLANNED.
+Status: IMPLEMENTED.
 
 | Item | Value |
 |------|-------|
 | Request | `{ "client_id": string, "email": string }` |
 | Success | Always `202 { "message": "If an account exists for this address, an email is on its way." }`. Fixed text, identical whether the account exists, is unconfirmed or exists only in another app. |
-| Side effects | Confirmed account in that app: a reset email, link `<password_reset_url>#token=<token>`, valid 1 hour, earlier unused reset tokens invalidated. Unconfirmed account: a **confirmation** email instead (link `<email_confirmation_url>#token=<token>`, 24 h, earlier unused confirmation tokens invalidated), no reset. Unknown or other-app-only: nothing. Every email sent counts toward the per-account cap. |
-| Errors | `400 invalid_request`, `400 invalid_client` (unknown or inactive `client_id`, origin not bound, no email sent), `400 unconfigured_client`, `429 rate_limited`, `503 temporarily_unavailable` |
+| Side effects | Confirmed account in that app: a reset email, link `<password_reset_url>#token=<token>`, valid 1 hour, earlier unused reset tokens invalidated. Unconfirmed account: a **confirmation** email instead (link `<email_confirmation_url>#token=<token>`, 24 h, earlier unused confirmation tokens invalidated), no reset. Unknown or other-app-only: nothing. Every email actually queued counts toward the per-account cap; a request that queues nothing (unknown or other-app-only address) does not. |
+| Errors | `400 invalid_request`, `400 invalid_email` (not a valid address; depends only on your input), `400 invalid_client` (unknown or inactive `client_id`, origin not bound, no email sent), `400 unconfigured_client`, `429 rate_limited`, `503 temporarily_unavailable` |
 | CORS | Origin bound to body `client_id` |
 | Limits | Per IP: `429` + `Retry-After`. Per account: silent, no email |
 
 ### `POST /api/v1/password/reset`
 
-Status: PLANNED.
+Status: IMPLEMENTED.
 
 | Item | Value |
 |------|-------|
 | Request | `{ "token": string, "new_password": string }`. The token identifies the account and app. |
 | Success | `204`, no body, no redirect. Password replaced, token used, **all refresh sessions of the account revoked**. |
 | Errors | `400 invalid_or_expired_link` for invalid, expired, used or superseded tokens (and a known token from the wrong origin). `400 invalid_password` for a weak password: the token stays usable. `400 invalid_request`. `429 rate_limited`, `503 temporarily_unavailable`. |
-| CORS | Origin bound to the app that owns the token |
-| Limits | Per IP: `429` + `Retry-After` |
+| CORS | Origin bound to the app that owns the token. The allow header is sent on `204`, on `400 invalid_password` and `400 invalid_request`, and on the `400 invalid_or_expired_link` of a token that belongs to the origin's own app (used, expired or superseded). A malformed or unknown token, a token of another app, or a known token from an unbound origin gets the same body and no allow header (the same rule as confirm). |
+| Limits | Per IP: `429` + `Retry-After`. The password is checked first, so a weak password does not use the limit. |
 
 ### `POST /api/v1/password/change`
 
-Status: PLANNED.
+Status: IMPLEMENTED.
 
 | Item | Value |
 |------|-------|
 | Request | Header `Authorization: Bearer <access_token>`, body `{ "current_password": string, "new_password": string }` |
 | Success | `204`, no body. Password replaced, **all sessions revoked including the caller's**, a password-changed notice email is sent. The current access token stays valid until `exp`. |
 | Errors | `401 invalid_token` for a missing or invalid access token. `400 invalid_request`. `400 invalid_password` for a weak new password (no counter touched). `400 invalid_current_password` for a wrong current password, **never `401`**, so it cannot be mistaken for an expired token. |
-| CORS | Origin bound to the app named by the token `aud` |
-| Limits | A wrong current password counts as a failed login for both lockout counters. While the (account, IP) pair is blocked or the account is locked, even the correct current password gets the same `400 invalid_current_password`, without bcrypt. |
+| CORS | Origin bound to the app named by the token `aud`. The allow header is sent on `204` and on every `400`; the `401` never carries one. A valid token sent from another app's origin is the same `401`. |
+| Limits | There is no IP limit. A wrong current password counts as a failed login for both lockout counters. While the (account, IP) pair is blocked or the account is locked, even the correct current password gets the same `400 invalid_current_password`, without bcrypt. |
 
 Order of checks: bearer, body shape, new-password rules, lockout state, current-password comparison.
 

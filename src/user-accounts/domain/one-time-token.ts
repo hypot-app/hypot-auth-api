@@ -2,10 +2,13 @@ export type OneTimeTokenPurpose = 'email_verification' | 'password_reset';
 
 const HOUR_MS = 3_600_000;
 
-/** How long a token works (spec: confirmation 24 h; reset 1 h). */
-const TTL_MS: Record<OneTimeTokenPurpose, number> = {
-  email_verification: 24 * HOUR_MS,
-  password_reset: HOUR_MS,
+/**
+ * How many hours a token works (spec: confirmation 24 h; reset 1 h). The default email templates say the same
+ * numbers in words; a test pins them to this table, so changing a TTL fails until the wording is updated.
+ */
+export const TOKEN_TTL_HOURS: Record<OneTimeTokenPurpose, number> = {
+  email_verification: 24,
+  password_reset: 1,
 };
 
 export interface OneTimeTokenProps {
@@ -43,7 +46,7 @@ export class OneTimeToken implements OneTimeTokenProps {
       userId: input.userId,
       purpose: input.purpose,
       tokenHash: input.tokenHash,
-      expiresAt: new Date(input.now.getTime() + TTL_MS[input.purpose]),
+      expiresAt: new Date(input.now.getTime() + TOKEN_TTL_HOURS[input.purpose] * HOUR_MS),
       consumedAt: null,
     });
   }
