@@ -6,7 +6,8 @@ no hosted UI, no cookie and no redirect.
 
 - Integrating an app: [`docs/integration-guide.md`](docs/integration-guide.md)
 - Endpoint contract (paths, bodies, status and error codes): [`docs/api-contract.md`](docs/api-contract.md)
-- Design and specs: `openspec/changes/auth-service/`
+- Specs (current behavior): `openspec/specs/`
+- Design and delivery history (archived change): `openspec/changes/archive/2026-10-09-auth-service/`
 
 Every endpoint of the contract is implemented. The OpenAPI 3.1 description is `openapi.json`, regenerated with
 `npm run openapi:generate`. Operating the service: [Operations runbook](#operations-runbook). Browser check:
