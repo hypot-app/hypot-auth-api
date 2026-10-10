@@ -1,6 +1,6 @@
 # hypot Auth API contract
 
-> **Derived from the specs and design in `openspec/changes/auth-service/` (round 11 contract).** The machine-readable form is [`openapi.json`](../openapi.json) (OpenAPI 3.1, regenerated with `npm run openapi:generate`, never served by the API). Tests keep its paths equal to the registered routes and its error table equal to the one below. Any divergence between this document and that one is a bug in one of them: report it.
+> **Derived from the specs in `openspec/specs/` and the design in `openspec/changes/archive/2026-10-09-auth-service/` (round 11 contract).** The machine-readable form is [`openapi.json`](../openapi.json) (OpenAPI 3.1, regenerated with `npm run openapi:generate`, never served by the API). Tests keep its paths equal to the registered routes and its error table equal to the one below. Any divergence between this document and that one is a bug in one of them: report it.
 >
 > Every endpoint below is implemented. Paths, bodies, status codes and error codes are checked against the running application by the end-to-end suite (`test/e2e/openapi-contract.e2e-spec.ts` and `test/e2e/journeys.e2e-spec.ts`).
 
