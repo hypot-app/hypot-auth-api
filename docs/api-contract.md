@@ -159,7 +159,7 @@ Status: IMPLEMENTED.
 | Side effects | For an unconfirmed account: new token, previous unused tokens invalidated. |
 | Errors | `400 invalid_request`, `400 invalid_email`, `400 invalid_client`, `400 unconfigured_client`, `429 rate_limited`, `503 temporarily_unavailable` |
 | CORS | Origin bound to body `client_id` |
-| Limits | Per IP (and app): `429` + `Retry-After`, checked before the account is looked up. Per account: the usual `202` and no email once the cap is reached; requests for unknown addresses count too. |
+| Limits | Per IP (and app): `429` + `Retry-After`, checked before the account is looked up. Per account: the usual `202` and no email once the cap is reached; only a request that would queue an email counts, so unknown and confirmed addresses use no budget. |
 
 ### `GET /api/v1/me`
 

@@ -303,7 +303,7 @@ Always `202 { "message": "If an account exists for this address, an email is on 
 | Unconfirmed | A **confirmation** email (link to your `email_confirmation_url`) instead of a reset, because a reset could not log the user in. Your confirm screen handles it as usual. |
 | Unknown, or only in another app | Nothing |
 
-Every email sent counts toward the per-account cap (see below). Tell the user "If the address is registered, you will receive an email". Your confirm screen must therefore also work when the user came from "forgot password".
+Every email actually queued counts toward the per-account cap (see below). Tell the user "If the address is registered, you will receive an email". Your confirm screen must therefore also work when the user came from "forgot password".
 
 The reset link is `<password_reset_url>#token=<token>`, valid 1 hour, single use. A newer forgot request invalidates earlier links. Read and clear the token exactly as on the confirm screen, then:
 
@@ -453,7 +453,7 @@ export async function verifyAccessToken(token) {
 
 Map any verification failure to `401` in your API. Do not leak the reason to the client.
 
-Logout and password change do not invalidate access tokens that are already issued: they stay valid until `exp`. If you need immediate cut-off for a sensitive action, call `GET /me` or keep a short allow window of your own.
+Logout and password change do not invalidate access tokens that are already issued: they stay valid until `exp` (1 hour). `GET /me` does not help here: it validates the JWT and the account but never checks whether the session was revoked, so it keeps answering `200` after logout. A revoked session is detected on the next refresh, which answers `401 invalid_grant`. If you need immediate cut-off for a sensitive action, keep a short allow window or a denylist of your own.
 
 ## Errors and limits
 
