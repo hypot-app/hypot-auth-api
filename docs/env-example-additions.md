@@ -18,7 +18,8 @@ AUTH_PUBLIC_BASE_URL=http://localhost:3000
 
 # --- Email (SMTP) ----------------------------------------------------------
 SMTP_HOST=localhost
-SMTP_PORT=1025
+# Optional, default 587. The local Mailpit in compose.yaml listens on 1025, so set SMTP_PORT=1025 for local dev.
+# SMTP_PORT=587
 # SMTP_SECURE=false
 # SMTP_USER and SMTP_PASS: set both or neither.
 # SMTP_USER=

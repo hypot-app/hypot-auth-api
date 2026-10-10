@@ -37,7 +37,7 @@ With `NODE_ENV=production` the service refuses to start unless `AUTH_PUBLIC_BASE
 (case-sensitive scheme). The image sets `NODE_ENV=production`, so the compose `api` service overrides it with
 `NODE_ENV=development` to keep serving on `http://localhost:3000`.
 
-`compose.yaml` is dev-only (http base URL, `NODE_ENV=development`, non-Secure cookies, dev secrets, dev keygen)
+`compose.yaml` is dev-only (http base URL, `NODE_ENV=development`, dev secrets, dev keygen)
 and must not be used to deploy. Also note that `docker compose run api dist/cli.js` inherits development, so it
 accepts `http://localhost` app URLs.
 
@@ -69,8 +69,13 @@ runs with the image's own node (it needs the same environment variables as the a
 
 ```bash
 docker compose run --rm api dist/cli.js app create --name "My SPA" \
-  --redirect-uri https://spa.example/cb --origin https://spa.example
-docker compose run --rm api dist/cli.js app create --name "Backend" --type confidential
+  --redirect-uri https://spa.example/cb --origin https://spa.example \
+  --email-confirmation-url https://spa.example/confirm \
+  --password-reset-url https://spa.example/reset
+docker compose run --rm api dist/cli.js app create --name "Backend" --type confidential \
+  --origin https://backend.example \
+  --email-confirmation-url https://backend.example/confirm \
+  --password-reset-url https://backend.example/reset
 docker compose run --rm api dist/cli.js app update <client_id> --name "New name"
 docker compose run --rm api dist/cli.js app deactivate <client_id>
 ```
@@ -160,7 +165,7 @@ started by `main.ts` deletes expired rows every 5 minutes (retention of the othe
 `LOGIN_IP` 100 per 15 min, `LOGIN_ACCOUNT_IP` 5 per 15 min, `LOGIN_ACCOUNT` 50 per 1 h (both lockouts last 15 min),
 `EMAIL_IP`, `RESET_IP` and `CONFIRM_IP` 20 per 1 h, `REFRESH_IP` 60 per 15 min, `EMAIL_ACCOUNT` 3 per 1 h.
 The client IP is the TCP peer unless `TRUST_PROXY` (default `false`: a hop count, or a comma-separated list of
-`loopback`, `uniquelocal` or CIDRs; `true` is rejected; a hop count is 1 to 10 and a CIDR no wider than /8 for IPv4 or
+`loopback`, `linklocal`, `uniquelocal`, IPs or CIDRs; `true` is rejected; a hop count is 1 to 10 and a CIDR no wider than /8 for IPv4 or
 /16 for IPv6) names the proxies in front of Auth. Behind a load balancer set it, or every user shares the proxy's
 address. Set it exactly: too FEW hops only over-limits, but too MANY lets a client-supplied `X-Forwarded-For` value win. IPv6 clients are keyed on their /64. If the counter store fails,
 credential endpoints answer `503 temporarily_unavailable` (logged once a minute at most, with the scope and driver message only), and the `429` and `503` answers are readable from an active app's origin. The login lockout counts the attempt before bcrypt (`beginLoginAttempt`), so parallel guesses cannot outrun it. The account limit is 50 attempts per window; reaching it locks the account for 15 min, and when the lock ends the count restarts. A distributed attacker therefore gets at most about 200 attempts per hour per account, and needs at least 10 distinct IPs for it, because each account and IP pair is capped at about 20 attempts per hour (5 per lock cycle of 15 min). Password change (U18) shares these counters. Both counters count attempts, so a service account or automation that logs in more than 50 times an hour locks itself out; it must reuse its refresh token instead of logging in again. Every credential endpoint calls the guard.
